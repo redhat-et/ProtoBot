@@ -1,0 +1,16 @@
+{
+  // JSON5 spec: https://json5.org/
+  // Renovate docs: https://docs.renovatebot.com/configuration-options/
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests",
+    ":enablePreCommit",
+    ":gitSignOff",
+  ],
+  "dependencyDashboard": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+  },
+}

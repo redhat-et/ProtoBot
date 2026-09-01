@@ -98,3 +98,8 @@ repos:
     rev: 451b56af716f9f0d0c2b816503a3fd0cf8b036fa  # pragma: allowlist secret; v1.29.0
     hooks:
       - id: zizmor
+
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 66aa87b54ea1eb8d84f613942b4233db5f6ac749  # pragma: allowlist secret; 44.52.1
+    hooks:
+      - id: renovate-config-validator
