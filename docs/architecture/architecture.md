@@ -509,6 +509,8 @@ files directly — all reads and writes go through
 | `ears-manager compare` | Specification store | Compare change set with Schematic |
 | `ears-manager impact` | Specification store | Generate applicable-requirement candidates |
 | `ears-manager list/show` | Specification store | Query requirements, interfaces, artifacts |
+| `ears-manager update` | Specification store | Modify an existing requirement or interface through a change set |
+| `ears-manager retire` | Specification store | Retire a requirement through a change set |
 | `ears-manager check` | Specification store | Validate spec well-formedness |
 | WMS query | WMS Adapter | Read work-item state, query blocked items |
 | WMS resolve | WMS Adapter | Submit reviewed resolutions for blocked items |
