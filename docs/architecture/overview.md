@@ -301,6 +301,8 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
 
 ## Detailed Design Documents
 
+- [Vision](../vision.md) — Purpose, intended users, desired
+  outcomes, prototype scope, and non-goals.
 - [User Interaction Flow](user-interaction-flow.md) — Phase
   details, sequence diagrams, testing strategy, and incremental
   development.

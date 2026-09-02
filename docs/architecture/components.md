@@ -1834,6 +1834,8 @@ confirmation.
 [q9]: open-questions.md#q9-isolated-vs-implementation-aware-tests
 [q19]: open-questions.md#q19-applicability-metadata-and-semantic-impact-coverage
 
+- [Vision](../vision.md) — Purpose, intended users, desired
+  outcomes, prototype scope, and non-goals
 - [Overview](overview.md) — What ProtoBot is, guiding principles,
   and workflow summary
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
