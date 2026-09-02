@@ -614,7 +614,7 @@ incompatible decisions.
 ## Interface Specification Approach
 
 The table below maps each interface type to a specification
-approach, following the interface-type taxonomy defined in the
+approach, extending the interface-type taxonomy defined in the
 [Specification
 Hierarchy](user-interaction-flow.md#specification-hierarchy).
 Interfaces that share a type (e.g., Job Site ↔ WMS Adapter and
@@ -642,12 +642,12 @@ that contract.
 
 ## Related Documents
 
-- [Overview](overview.md) — Vision, guiding principles, and
-  workflow summary
-- [System Components](components.md) — Detailed component
-  design, interfaces, and cross-cutting concerns
-- [User Interaction Flow](user-interaction-flow.md) — Phase
-  details, sequence diagrams, and testing strategy
+- [Overview](overview.md) — What ProtoBot is, guiding principles,
+  and workflow summary
+- [System Components](components.md) — Component architecture,
+  interfaces, and cross-cutting concerns
+- [User Interaction Flow](user-interaction-flow.md) — Phase details
+  and sequence diagrams
 - [Open Design Questions](open-questions.md) — Unresolved
   design questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,

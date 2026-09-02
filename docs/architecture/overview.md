@@ -303,7 +303,7 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
 
 - [Architecture](architecture.md) — External interface inventory,
   pluggable boundaries, persistent state, and environmental
-  constraints
+  constraints.
 - [User Interaction Flow](user-interaction-flow.md) — Phase
   details, sequence diagrams, testing strategy, and incremental
   development.
