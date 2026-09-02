@@ -237,39 +237,41 @@ definitions.
 ProtoBot has seven primary logical components:
 
 ```text
- ┌───────────────────────────────────────────────────┐
- │                    ProtoBot                       │
- │                                                   │
- │  ┌──────────────┐  ┌─────────────────────────┐   │
- │  │   Drafting    │  │  Specification Toolkit  │   │
- │  │    Table      │◄─┤  (skills/tools/prompts) │   │
- │  │  (Web / TUI)  │  └─────────────────────────┘   │
- │  └──────┬───────┘                                 │
- │         │            ┌──────┐                     │
- │         │            │ Kits │ (versioned imports)  │
- │         │            └──────┘                     │
- │  ┌──────▼───────┐  ┌──────────────────┐           │
- │  │ ears-manager  │  │ Validation Rules │           │
- │  │  (spec CLI)   │  │ (shared logic)   │           │
- │  └──────┬───────┘  └────────┬─────────┘           │
- │         │                   │                     │
- │  ┌──────▼───────────────────▼─────┐               │
- │  │         WMS Adapter            │               │
- │  │  (pluggable backend layer)     │               │
- │  └──────┬─────────────────────────┘               │
- │         │                                         │
- │  ┌──────▼───────┐                                 │
- │  │   Job Site   │  (autonomous execution engine)  │
- │  │  [handoff    │                                 │
- │  │   boundary]  │                                 │
- │  └──────────────┘                                 │
- └───────────────────────────────────────────────────┘
-           │                    │
-    ┌──────▼──────┐    ┌───────▼───────┐
-    │  Project    │    │  WMS Backend  │
-    │  Git Repo   │    │  (Issues/     │
-    │             │    │   Jira/Beads) │
-    └─────────────┘    └───────────────┘
+ ┌────────────────────────────────────────────────────────┐
+ │                        ProtoBot                        │
+ │                                                        │
+ │  ┌─────────────────────────┐                           │
+ │  │  Specification Toolkit  ├──┐                        │
+ │  │  (skills/tools/prompts) │  │ loads into             │
+ │  └─────────────────────────┘  │                        │
+ │                               │                        │
+ │  ┌──────┐  imported     ┌─────▼────────┐               │
+ │  │ Kits ├──────────────►│   Drafting    │               │
+ │  └──────┘  through      │    Table      │               │
+ │                         │  (Web / TUI)  │               │
+ │                         └──┬─────────┬──┘               │
+ │                            │         │                  │
+ │                  ┌─────────▼──┐  ┌───▼──────────────┐   │
+ │                  │ears-manager │  │   WMS Adapter    │   │
+ │                  │ (spec CLI)  │  │ (pluggable       │   │
+ │                  │             │  │  backend layer)  │   │
+ │                  └─────────▲──┘  └───▲──────────────┘   │
+ │                            │         │                  │
+ │                         ┌──┴─────────┴──┐               │
+ │  ┌──────────────────┐   │   Job Site    │               │
+ │  │ Validation Rules │   │  (autonomous  │               │
+ │  │  (shared logic)  │   │   execution   │               │
+ │  └──────────────────┘   │   engine)     │               │
+ │                         │  [handoff     │               │
+ │                         │   boundary]   │               │
+ │                         └───────────────┘               │
+ └────────────────────────────────────────────────────────┘
+           │                        │
+    ┌──────▼──────┐         ┌───────▼───────┐
+    │  Project    │         │  WMS Backend  │
+    │  Git Repo   │         │  (Issues/     │
+    │             │         │   Jira/Beads) │
+    └─────────────┘         └───────────────┘
 ```
 
 1. **Drafting Table** — The environment where the human and an
