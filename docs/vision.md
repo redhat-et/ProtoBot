@@ -311,13 +311,13 @@ These are recorded in the full
 
 ## Related Documents
 
-- [Architecture overview](architecture/overview.md) -- guiding
+- [Architecture overview](architecture/overview.md) — guiding
   principles, EARS format, workflow, and platform
-- [System components](architecture/components.md) -- component
+- [System components](architecture/components.md) — component
   architecture, interfaces, and cross-cutting concerns
-- [User interaction flow](architecture/user-interaction-flow.md) --
+- [User interaction flow](architecture/user-interaction-flow.md) —
   phase details, sequence diagrams, and testing strategy
-- [Open design questions](architecture/open-questions.md) --
+- [Open design questions](architecture/open-questions.md) —
   unresolved decisions across all areas
-- [Related work](architecture/related-work.md) -- internal and
+- [Related work](architecture/related-work.md) — internal and
   external projects informing the design
