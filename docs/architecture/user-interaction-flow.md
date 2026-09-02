@@ -1120,8 +1120,6 @@ whether this is achievable given Red Hat's AIA requirements.
 
 ## Related Documents
 
-[q19]: open-questions.md#q19-applicability-metadata-and-semantic-impact-coverage
-
 - [Vision](../vision.md) — Purpose, intended users, desired
   outcomes, prototype scope, and non-goals
 - [Overview](overview.md) — What ProtoBot is, guiding principles,
@@ -1132,3 +1130,5 @@ whether this is achievable given Red Hat's AIA requirements.
   questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned
+
+[q19]: open-questions.md#q19-applicability-metadata-and-semantic-impact-coverage

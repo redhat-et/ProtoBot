@@ -190,16 +190,16 @@ construction.
 The initial self-hosting effort builds the components ProtoBot needs
 to function:
 
-1. **Specification Toolkit** -- the portable skills, tools, and
+1. **Specification Toolkit** — the portable skills, tools, and
    prompts that encode how to do Sketching and Dimensioning, loadable
    into any compatible agent harness.
-2. **`ears-manager`** -- the CLI tool for managing the structured
+2. **`ears-manager`** — the CLI tool for managing the structured
    specification store (EARS requirements, interfaces, change sets).
-3. **WMS Adapter** -- a thin integration layer over the chosen work
+3. **WMS Adapter** — a thin integration layer over the chosen work
    management backend, starting with GitHub Issues.
-4. **Job Site** -- the autonomous execution engine, starting with a
+4. **Job Site** — the autonomous execution engine, starting with a
    Fullsend integration; a direct OpenShell adapter as the fallback.
-5. **Validation Rules** -- shared domain logic for work item
+5. **Validation Rules** — shared domain logic for work item
    lifecycle transitions.
 
 The interactive work starts locally in OpenCode with draft
