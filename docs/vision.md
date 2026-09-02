@@ -309,7 +309,7 @@ These are recorded in the full
 
 ---
 
-## Related documents
+## Related Documents
 
 - [Architecture overview](architecture/overview.md) -- guiding
   principles, EARS format, workflow, and platform
