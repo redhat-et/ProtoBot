@@ -11,7 +11,8 @@
 - [What is a successful prototype](#what-is-a-successful-prototype)
 - [Prototype vs. production boundary](#prototype-vs-production-boundary)
 - [Self-hosting: the first project](#self-hosting-the-first-project)
-- [Non-goals](#non-goals)
+  - [Scope of the first project](#scope-of-the-first-project)
+  - [Non-goals](#non-goals)
 - [Assumptions](#assumptions)
 - [Unresolved design decisions](#unresolved-design-decisions)
 
