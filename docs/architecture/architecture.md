@@ -64,10 +64,12 @@ dictate implementation choices).
 | 9 | Job Site ↔ Project Repo | Persistent state | Job Site |
 | 10 | Kit source | Package source | Kits |
 
-Each interface is described in detail below. The
+Each interface except Kit source is described in a dedicated
+section below; Kit source details (versioned import manifest,
+resolution, and digest verification) are captured in the
 [Interface Specification Approach](#interface-specification-approach)
-section maps each type to the IDL or specification method that
-will be used to define its contract.
+table, which maps each type to the IDL or specification method
+that will be used to define its contract.
 
 ---
 

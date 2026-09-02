@@ -104,6 +104,8 @@ ongoing interactive work happens.
 | Linkable library | WIT (Wasm Interface Types) | Shared SDK module |
 | Web GUI (html/css) | _(open gap — not yet solved)_ | Dashboard UI |
 | Native GUI | _(open gap — not yet solved)_ | Desktop app |
+| Persistent state | Schema + CLI contract | Git repository, config |
+| Package source | Versioned import manifest | Kit source |
 
 ### Change sets and applicability
 

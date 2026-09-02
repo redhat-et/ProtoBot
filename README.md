@@ -59,7 +59,7 @@ commit-scoped conformance evidence are recorded separately.
 ## Documentation
 
 - [Architecture overview](docs/architecture/overview.md)
-- [Architecture constraints and interfaces](docs/architecture/architecture.md)
+- [Architecture interfaces and constraints](docs/architecture/architecture.md)
 - [System components](docs/architecture/components.md)
 - [User interaction flow](docs/architecture/user-interaction-flow.md)
 - [Related work](docs/architecture/related-work.md)
