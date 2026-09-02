@@ -1,5 +1,7 @@
 # ProtoBot: Architecture
 
+> Design document — draft, July 2026
+>
 > Part of ProtoBot's initial Sketch — defines the system's external
 > interfaces, pluggable boundaries, persistent state, and
 > environmental constraints.
@@ -611,10 +613,13 @@ incompatible decisions.
 
 ## Interface Specification Approach
 
-Each external interface will be specified using an approach
-appropriate to its type, following the interface-type taxonomy
-defined in the [Specification
+The table below maps each interface type to a specification
+approach, following the interface-type taxonomy defined in the
+[Specification
 Hierarchy](user-interaction-flow.md#specification-hierarchy).
+Interfaces that share a type (e.g., Job Site ↔ WMS Adapter and
+WMS Adapter API are both network services) share the same
+specification approach.
 
 | Interface | Type | Specification approach |
 | --- | --- | --- |
