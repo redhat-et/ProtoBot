@@ -567,6 +567,9 @@ implementations) succeed at much higher rates than those without.
 
 - [Overview](overview.md) — What ProtoBot is, guiding principles,
   and workflow summary
+- [Architecture](architecture.md) — External interface inventory,
+  pluggable boundaries, persistent state, and environmental
+  constraints
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
   and sequence diagrams
 - [System Components](components.md) — Component architecture,

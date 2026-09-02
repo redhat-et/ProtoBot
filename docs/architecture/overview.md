@@ -301,6 +301,9 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
 
 ## Detailed Design Documents
 
+- [Architecture](architecture.md) — External interface
+  inventory, pluggable boundaries, persistent state,
+  environmental constraints, and Drafting Table boundary.
 - [User Interaction Flow](user-interaction-flow.md) — Phase
   details, sequence diagrams, testing strategy, and incremental
   development.

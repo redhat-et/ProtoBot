@@ -1124,6 +1124,9 @@ whether this is achievable given Red Hat's AIA requirements.
 
 - [Overview](overview.md) — What ProtoBot is, guiding principles,
   and workflow summary
+- [Architecture](architecture.md) — External interface inventory,
+  pluggable boundaries, persistent state, and environmental
+  constraints
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
 - [Open Design Questions](open-questions.md) — Unresolved design
