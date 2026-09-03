@@ -85,7 +85,7 @@ flowchart TB
     V["<b>1. Vision</b><br/><i>Once per project</i><br/>WHAT are we building?<br/>WHO is the audience?<br/>WHY are we building it?"]
     Ar["<b>2. Architecture</b><br/><i>Once-ish</i><br/>What are the external interfaces?<br/>What interface types? (API, CLI, GUI, etc.)<br/>Persistent state = interface"]
     If["<b>3. Interface</b><br/><i>Infrequent</i><br/>Stable external contract boundary<br/>Type determines spec approach<br/>(see interface-type taxonomy)"]
-    Rq["<b>4. Requirement</b><br/><i>Often</i><br/>Individual EARS requirements<br/>Requirement text + metadata<br/>(storage format TBD)"]
+    Rq["<b>4. Requirement</b><br/><i>Often</i><br/>Individual EARS requirements<br/>Requirement text + metadata<br/>(one-file-per-record YAML)"]
 
     V --> Ar --> If --> Rq
 ```
@@ -290,21 +290,21 @@ problem observed in IdeaBot).
 ([one-file-per-record YAML](../decisions/0001-requirements-storage-format.md),
 not in `.feature` files):
 
-```json
-{
-  "id": "REQ-AUTH-001",
-  "applies_to": {
-    "interfaces": ["api-gateway"],
-    "scopes": ["authentication"]
-  },
-  "verification": {
-    "mode": "isolated-interface"
-  },
-  "type": "event-driven",
-  "text": "When a user submits valid credentials, the system shall return a JWT token within 500ms.",
-  "provenance": "user-authored",
-  "created": "2026-08-01T14:30:00Z"
-}
+```yaml
+id: REQ-AUTH-001
+applies_to:
+  interfaces:
+    - api-gateway
+  scopes:
+    - authentication
+verification:
+  mode: isolated-interface
+type: event-driven
+text: >-
+  When a user submits valid credentials, the system shall
+  return a JWT token within 500ms.
+provenance: user-authored
+created: "2026-08-01T14:30:00Z"
 ```
 
 Requirements have no mutable workflow state. A stable requirement ID is

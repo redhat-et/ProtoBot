@@ -333,7 +333,8 @@ without a separate policy review.
 
 `ears-manager` is a CLI tool that serves as the programmatic
 interface to the specification store. It abstracts the underlying
-file format (JSONL, directory-of-files, or whatever is chosen),
+file format (currently one-file-per-record YAML per
+[ADR-0001](../decisions/0001-requirements-storage-format.md)),
 manages change sets, and enforces EARS methodology rules
 deterministically. Semantic impact analysis still requires agent and
 human judgment, but its inputs and approved result are structured.
@@ -410,8 +411,8 @@ It is used by three callers:
   digest, owner, and validator. Opaque prose and external IDLs still pass
   through `ears-manager` for change-set membership and path/transaction
   control; format-specific tools perform their content validation.
-- **File format consistency.** Whatever storage format is chosen
-  (JSONL, directory-of-files, etc.), `ears-manager` ensures files
+- **File format consistency.** `ears-manager` ensures one-file-per-record
+  YAML files ([ADR-0001](../decisions/0001-requirements-storage-format.md))
   are syntactically valid and follow the expected schema.
 
 ### Change-set impact analysis

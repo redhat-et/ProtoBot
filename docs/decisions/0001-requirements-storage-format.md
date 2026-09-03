@@ -380,7 +380,7 @@ how those files are serialized and organized on disk.
 - #34 — Git and project-repository integration (the PR
   reviewability plan here should stay consistent)
 
-[q7]: ../architecture/open-questions.md#q7-requirements-storage-format
+[q7]: ../architecture/open-questions.md#q7-requirements-storage-format--resolved
 [phase2]: ../architecture/user-interaction-flow.md#phase-2-dimensioning
 [em]: ../architecture/components.md#ears-manager
 [csm]: ../architecture/components.md#content-storage-model
