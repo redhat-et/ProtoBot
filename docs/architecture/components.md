@@ -482,8 +482,10 @@ idempotency input.
   without depending on what's installed in the local environment.
 - **Format-agnostic interface.** Callers interact via subcommands,
   not by reading/writing files directly. This means the underlying
-  storage format can change (JSONL → directory-of-YAML → SQLite)
-  without breaking agents, CI, or human workflows.
+  storage format can change without breaking agents, CI, or
+  human workflows. The initial format is one-file-per-record
+  YAML
+  ([ADR-0001](../decisions/0001-requirements-storage-format.md)).
 - **Single write gate for specification artifacts.** All registered spec
   reads/writes go through `ears-manager`. It directly understands the
   requirement/interface registry and delegates validation for opaque
@@ -493,10 +495,8 @@ idempotency input.
 
 ### Open design questions
 
-- **Storage format.** JSONL is tentatively chosen for
-  git-friendliness, but `ears-manager` abstracts this. The choice
-  can be deferred and changed later without affecting callers. See
-  [open question Q7](open-questions.md#q7-requirements-storage-format).
+- **Storage format — Resolved.** One-file-per-record YAML. See
+  [ADR-0001](../decisions/0001-requirements-storage-format.md).
 - **Spec directory layout.** One file per interface? One file per
   requirement? A hierarchy mirroring the specification levels
   (Vision → Architecture → Interface → Requirement)? The layout
@@ -904,11 +904,9 @@ and a new Inspection Run. A path-disjoint result never waives these gates.
 
 ### Open design questions
 
-- **Requirements storage format.** EARS requirements need to be
-  structured files at known paths. JSONL (one requirement per line)
-  is tentatively chosen for git-friendliness, but cross-references
-  and hierarchy may require a different format. See
-  [open question Q7](open-questions.md#q7-requirements-storage-format).
+- **Requirements storage format — Resolved.** One-file-per-record
+  YAML. See
+  [ADR-0001](../decisions/0001-requirements-storage-format.md).
 - **Spec directory layout.** What does the spec directory look like?
   One file per interface? One file per requirement? A hierarchy
   mirroring the specification levels (Vision → Architecture →

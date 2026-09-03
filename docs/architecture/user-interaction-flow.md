@@ -286,7 +286,9 @@ will silently fill unspecified behaviors with its own assumptions — and
 those assumptions become invisible de facto contracts (the Hyrum's Law
 problem observed in IdeaBot).
 
-**EARS requirement format** (tentatively JSONL, not in `.feature` files):
+**EARS requirement format**
+([one-file-per-record YAML](../decisions/0001-requirements-storage-format.md),
+not in `.feature` files):
 
 ```json
 {
@@ -326,19 +328,14 @@ Every requirement also declares `verification.mode`. The default is
 requirement/change-set metadata and activates the compensating gates
 defined below.
 
-> **Needs follow-up: JSONL as storage format.** JSONL was chosen because
-> it's git-friendly — each requirement is one line, so merge conflicts
-> are easy to resolve. However, this only works well if requirements are
-> truly self-contained, independent records. As soon as there are
-> cross-references between requirements (e.g., "REQ-AUTH-001 depends on
-> REQ-SESSION-003") or change-set history, JSONL may no longer be ideal
-> because merges and reorganization become harder. Referential integrity
-> remains `ears-manager`'s responsibility regardless of storage format;
-> callers never resolve links or parse JSONL directly.
-> Alternatives to evaluate: a directory of individual JSON/YAML files
-> (one per requirement, hierarchy encoded in directory structure), a
-> lightweight relational format, or a single structured document with
-> tooling to handle merge conflicts.
+> **Resolved: storage format.**
+> [ADR-0001](../decisions/0001-requirements-storage-format.md)
+> chose one-file-per-record YAML over JSONL. JSONL's merge
+> conflicts on concurrent edits and poor PR reviewability made
+> it unsuitable for records with cross-references and frequent
+> revision. One file per record eliminates merge conflicts for
+> independent edits. `ears-manager` enforces canonical
+> serialization; callers never touch files directly.
 
 **EARS pattern → test approach** (how each requirement type will be
 verified in the autonomous phase):
