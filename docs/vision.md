@@ -14,7 +14,6 @@
   - [Scope of the first project](#scope-of-the-first-project)
   - [Non-goals](#non-goals)
 - [Assumptions](#assumptions)
-- [Unresolved design decisions](#unresolved-design-decisions)
 
 ---
 
@@ -35,9 +34,7 @@ or fixed against that requirement. If we need to start over, we
 discard everything except the specification and regenerate.
 
 The specification is the durable asset. The code is a disposable,
-regenerable artifact. Conformance evidence links a specific
-implementation to a specific specification commit rather than marking
-requirements permanently "done."
+regenerable artifact.
 
 ---
 
@@ -53,9 +50,6 @@ The primary users are:
   and feedback.
 - **Engineers** who define observable system behavior through
   structured specifications rather than by writing code directly.
-- **Product teams** who receive TransferBot's output: the
-  specifications and test expectations that describe what the
-  prototype proved, not the prototype code itself.
 
 ProtoBot must work for a single developer running locally
 (single-player mode) as well as for teams collaborating through a
@@ -87,10 +81,10 @@ A successful ProtoBot deployment achieves the following:
    can be fed a known input, measured against a known output, and
    independently improved. This is an architectural constraint, not
    a nice-to-have.
-6. **Clean handoff.** TransferBot can receive the specifications and
-   test expectations from a completed prototype and transfer them to
-   a product team for real implementation. The product team gets
-   precisely defined requirements, not throwaway code.
+6. **Clean handoff.** The specification is the deliverable.
+   TransferBot transfers requirements and test expectations to a
+   product team. The prototype is a demonstration artifact, not a
+   product.
 
 ---
 
@@ -273,39 +267,6 @@ the affected design areas will need revisiting:
    The multi-player workflow uses PR merge as the human approval
    boundary, relying on branch protection rules, CODEOWNERS, and
    required reviews.
-
----
-
-## Unresolved design decisions
-
-The following decisions are deferred and tracked as open questions.
-Each affects the Vision's scope or the first project's
-implementation:
-
-1. **Triage mechanism** ([Q15][q15]). How test failures are
-   attributed to tests, code, or both during Building.
-2. **IdeaBot handoff format** ([Q4][q4]). How much of the
-   Vision/Architecture can be pre-populated from IdeaBot's output.
-3. **HU-02 compliance** ([Q13][q13]). Whether PR merge as the human
-   checkpoint satisfies Red Hat's AIA requirements for autonomous
-   code generation.
-4. **Requirements storage format** ([Q7][q7]). Whether JSONL or
-   another format is best for structured, git-friendly requirement
-   storage.
-5. **Kit package format** ([Q5][q5]). How reusable imports are
-   packaged, signed, and distributed.
-6. **Spec gap surfacing UX** ([Q1][q1]). How the agent presents
-   unspecified behaviors during Dimensioning.
-
-These are recorded in the full
-[open design questions](architecture/open-questions.md) document.
-
-[q1]: architecture/open-questions.md#q1-spec-gap-surfacing-ux
-[q4]: architecture/open-questions.md#q4-ideabot-handoff-format
-[q5]: architecture/open-questions.md#q5-kit-package-and-future-capabilities
-[q7]: architecture/open-questions.md#q7-requirements-storage-format
-[q13]: architecture/open-questions.md#q13-hu-02-compliance
-[q15]: architecture/open-questions.md#q15-phase-3-triage-mechanism
 
 ---
 
