@@ -18,7 +18,7 @@
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0  # pragma: allowlist secret; v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       - id: check-added-large-files  # Prevents giant files from being committed
       - id: check-docstring-first    # Prevent code before docstring
@@ -34,13 +34,13 @@ repos:
         args: [--markdown-linebreak-ext=md]
 
   - repo: https://github.com/pre-commit/pygrep-hooks
-    rev: 3a6eb0fadf60b3cccfd80bad9dbb6fae7e47b316  # pragma: allowlist secret; v1.10.0
+    rev: 3a6eb0fadf60b3cccfd80bad9dbb6fae7e47b316  # frozen: v1.10.0
     hooks:
       # Forbid UTF-8 replacement character
       - id: text-unicode-replacement-char
 
   - repo: https://github.com/adrienverge/yamllint
-    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530  # pragma: allowlist secret; v1.38.0
+    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530  # frozen: v1.38.0
     hooks:
       # Lint yaml files
       - id: yamllint
@@ -49,7 +49,7 @@ repos:
           (?x)^\.fullsend/config\.yaml$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: aab412d509121cb5f7533134b7e67f9fab59c682  # pragma: allowlist secret; v0.16.4
+    rev: aab412d509121cb5f7533134b7e67f9fab59c682  # frozen: v0.16.4
     hooks:
       # Note: lint/fix before format
       - id: ruff-check
@@ -57,12 +57,12 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: b84c4a0a90bd58c7d82ae8f0d4d5e77b1ddd3ce6  # pragma: allowlist secret; 0.12.5
+    rev: b84c4a0a90bd58c7d82ae8f0d4d5e77b1ddd3ce6  # frozen: 0.12.5
     hooks:
       - id: uv-lock
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: b82a6c8896e491b9cb377a99ff3412131920681b  # pragma: allowlist secret; v0.23.2
+    rev: b82a6c8896e491b9cb377a99ff3412131920681b  # frozen: v0.23.2
     hooks:
       - id: markdownlint-cli2
         args: ["--config", ".github/markdownlint-cli2.yaml"]
@@ -73,37 +73,41 @@ repos:
             )$
 
   - repo: https://github.com/hadolint/hadolint
-    rev: v2.15.1  # pragma: allowlist secret; v2.15.1
+    rev: 2eece55955ced00200be9729e9728cb7dacca505  # frozen: v2.15.1
     hooks:
       # Lint Dockerfiles
       - id: hadolint
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: 4de1378e4cd853bfc2b111b05fff35e2dbf809a3  # pragma: allowlist secret; v0.9.0.6
+    rev: 4de1378e4cd853bfc2b111b05fff35e2dbf809a3  # frozen: v0.9.0.6
     hooks:
       - id: shellcheck
 
   - repo: https://github.com/Yelp/detect-secrets
-    rev: 01886c8a910c64595c47f186ca1ffc0b77fa5458  # pragma: allowlist secret; v1.5.0
+    rev: 01886c8a910c64595c47f186ca1ffc0b77fa5458  # frozen: v1.5.0
     hooks:
       # Prevent secrets from being committed
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
-        exclude: ^\.fullsend/config\.yaml$
+        exclude: |
+          (?x)^(
+                .fullsend/config\.yaml |
+                \.pre-commit-config\.yaml
+            )$
 
   - repo: https://gitlab.com/bmares/check-json5
-    rev: 82381b1133603e4ff6eb3d866ec4501d121b669b  # pragma: allowlist secret; v1.0.1
+    rev: 82381b1133603e4ff6eb3d866ec4501d121b669b  # frozen: v1.0.1
     hooks:
       # Check that JSON files are valid JSON5
       - id: check-json5
 
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: 451b56af716f9f0d0c2b816503a3fd0cf8b036fa  # pragma: allowlist secret; v1.29.0
+    rev: 451b56af716f9f0d0c2b816503a3fd0cf8b036fa  # frozen: v1.29.0
     hooks:
       - id: zizmor
         args: ["--config", ".zizmor.yml"]
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 66aa87b54ea1eb8d84f613942b4233db5f6ac749  # pragma: allowlist secret; 44.52.1
+    rev: 66aa87b54ea1eb8d84f613942b4233db5f6ac749  # frozen: 44.52.1
     hooks:
       - id: renovate-config-validator
