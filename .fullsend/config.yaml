@@ -24,6 +24,7 @@ create_issues:
         repos:
             - redhat-et/ProtoBot
             - fullsend-ai/fullsend
+            - fullsend-ai/agents
 inference:
     project: it-gcp-octo-fullsend
     wif_provider: projects/554959098399/locations/global/workloadIdentityPools/fullsend-inference/providers/gh-redhat-et-protobot
