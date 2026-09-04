@@ -12,7 +12,7 @@
 - [Workflow and terminology](#workflow-and-terminology)
 - [Platform](#platform)
 - [Bootstrapping strategy](#bootstrapping-strategy)
-- [Detailed design documents](#detailed-design-documents)
+- [Related documents](#related-documents)
 
 ## What is ProtoBot?
 
@@ -299,8 +299,10 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
 
 ---
 
-## Detailed Design Documents
+## Related Documents
 
+- [Vision](../vision.md) — Purpose, intended users, desired
+  outcomes, prototype scope, and non-goals.
 - [User Interaction Flow](user-interaction-flow.md) — Phase
   details, sequence diagrams, testing strategy, and incremental
   development.

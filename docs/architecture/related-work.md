@@ -565,6 +565,8 @@ implementations) succeed at much higher rates than those without.
 
 ## Related Documents
 
+- [Vision](../vision.md) — Purpose, intended users, desired
+  outcomes, prototype scope, and non-goals
 - [Overview](overview.md) — What ProtoBot is, guiding principles,
   and workflow summary
 - [User Interaction Flow](user-interaction-flow.md) — Phase details

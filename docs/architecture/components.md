@@ -1830,10 +1830,8 @@ confirmation.
 
 ## Related Documents
 
-[q2]: open-questions.md#q2-async-requirement-suggestion-delivery
-[q9]: open-questions.md#q9-isolated-vs-implementation-aware-tests
-[q19]: open-questions.md#q19-applicability-metadata-and-semantic-impact-coverage
-
+- [Vision](../vision.md) — Purpose, intended users, desired
+  outcomes, prototype scope, and non-goals
 - [Overview](overview.md) — What ProtoBot is, guiding principles,
   and workflow summary
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
@@ -1842,3 +1840,7 @@ confirmation.
   questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned
+
+[q2]: open-questions.md#q2-async-requirement-suggestion-delivery
+[q9]: open-questions.md#q9-isolated-vs-implementation-aware-tests
+[q19]: open-questions.md#q19-applicability-metadata-and-semantic-impact-coverage
