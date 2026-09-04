@@ -1,0 +1,35 @@
+---
+# yamllint disable rule:line-length
+name: Request CodeRabbit review for bot-authored PRs
+
+# CodeRabbit does not automatically review pull requests authored by GitHub
+# App bot accounts (e.g. fullsend-ai-coder[bot]) -- see issue #37. This is a
+# platform-level default, not a repo setting: there is no "allowlist" field
+# in .coderabbit.yaml, and reviews.auto_review.ignore_usernames only lets
+# you *exclude* usernames, not force-include them
+# (https://docs.coderabbit.ai/configuration/auto-review). The documented
+# workaround is to manually trigger a review by commenting
+# "@coderabbitai review" on the pull request, which works regardless of who
+# opened it. This workflow posts that comment automatically whenever the
+# fullsend coder agent opens or updates a pull request, so its PRs get the
+# same CodeRabbit review coverage as human-authored PRs.
+
+on:  # yamllint disable-line rule:truthy
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request-review:
+    name: Request CodeRabbit review
+    if: github.event.pull_request.user.login == 'fullsend-ai-coder[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment "@coderabbitai review"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --repo "$REPO" --body "@coderabbitai review"
