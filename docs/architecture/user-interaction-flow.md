@@ -104,6 +104,8 @@ ongoing interactive work happens.
 | Linkable library | WIT (Wasm Interface Types) | Shared SDK module |
 | Web GUI (html/css) | _(open gap — not yet solved)_ | Dashboard UI |
 | Native GUI | _(open gap — not yet solved)_ | Desktop app |
+| Persistent state | Schema + CLI contract | Git repository, config |
+| Package source | Versioned import manifest | Kit source |
 
 ### Change sets and applicability
 
@@ -1124,6 +1126,9 @@ whether this is achievable given Red Hat's AIA requirements.
 
 - [Overview](overview.md) — What ProtoBot is, guiding principles,
   and workflow summary
+- [Architecture](architecture.md) — External interface inventory,
+  pluggable boundaries, persistent state, and environmental
+  constraints
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
 - [Open Design Questions](open-questions.md) — Unresolved design
