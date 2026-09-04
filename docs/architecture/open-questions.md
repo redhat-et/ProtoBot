@@ -60,15 +60,19 @@ Kits are versioned imports;
 
 ## Specification storage
 
-### Q7: Requirements storage format
+### Q7: Requirements storage format — Resolved
 
-JSONL is tentatively chosen for
-   git-friendliness, but only works if requirements are independent
-   records. Need to evaluate whether cross-references and immutable
-   change-set history make a different format necessary.
-   `ears-manager` abstracts the
-   format, so this can be deferred. See the detailed note in
-   [Phase 2](user-interaction-flow.md#phase-2-dimensioning).
+**Decision:** One-file-per-record YAML. See
+[ADR-0001](../decisions/0001-requirements-storage-format.md).
+
+JSONL was rejected because concurrent edits to the same file
+produce merge conflicts even for independent requirements, and
+single-line JSON objects are difficult to review in PRs. One
+file per record eliminates merge conflicts for independent
+edits and produces minimal, focused diffs. YAML is preferred
+over JSON for human readability and multi-line EARS text
+support. `ears-manager` enforces canonical serialization to
+keep diffs stable.
 
 ## Building phase
 

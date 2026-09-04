@@ -333,7 +333,8 @@ without a separate policy review.
 
 `ears-manager` is a CLI tool that serves as the programmatic
 interface to the specification store. It abstracts the underlying
-file format (JSONL, directory-of-files, or whatever is chosen),
+file format (currently one-file-per-record YAML per
+[ADR-0001](../decisions/0001-requirements-storage-format.md)),
 manages change sets, and enforces EARS methodology rules
 deterministically. Semantic impact analysis still requires agent and
 human judgment, but its inputs and approved result are structured.
@@ -410,8 +411,8 @@ It is used by three callers:
   digest, owner, and validator. Opaque prose and external IDLs still pass
   through `ears-manager` for change-set membership and path/transaction
   control; format-specific tools perform their content validation.
-- **File format consistency.** Whatever storage format is chosen
-  (JSONL, directory-of-files, etc.), `ears-manager` ensures files
+- **File format consistency.** `ears-manager` ensures one-file-per-record
+  YAML files ([ADR-0001](../decisions/0001-requirements-storage-format.md))
   are syntactically valid and follow the expected schema.
 
 ### Change-set impact analysis
@@ -482,8 +483,10 @@ idempotency input.
   without depending on what's installed in the local environment.
 - **Format-agnostic interface.** Callers interact via subcommands,
   not by reading/writing files directly. This means the underlying
-  storage format can change (JSONL → directory-of-YAML → SQLite)
-  without breaking agents, CI, or human workflows.
+  storage format can change without breaking agents, CI, or
+  human workflows. The initial format is one-file-per-record
+  YAML
+  ([ADR-0001](../decisions/0001-requirements-storage-format.md)).
 - **Single write gate for specification artifacts.** All registered spec
   reads/writes go through `ears-manager`. It directly understands the
   requirement/interface registry and delegates validation for opaque
@@ -493,10 +496,8 @@ idempotency input.
 
 ### Open design questions
 
-- **Storage format.** JSONL is tentatively chosen for
-  git-friendliness, but `ears-manager` abstracts this. The choice
-  can be deferred and changed later without affecting callers. See
-  [open question Q7](open-questions.md#q7-requirements-storage-format).
+- **Storage format — Resolved.** One-file-per-record YAML. See
+  [ADR-0001](../decisions/0001-requirements-storage-format.md).
 - **Spec directory layout.** One file per interface? One file per
   requirement? A hierarchy mirroring the specification levels
   (Vision → Architecture → Interface → Requirement)? The layout
@@ -904,11 +905,9 @@ and a new Inspection Run. A path-disjoint result never waives these gates.
 
 ### Open design questions
 
-- **Requirements storage format.** EARS requirements need to be
-  structured files at known paths. JSONL (one requirement per line)
-  is tentatively chosen for git-friendliness, but cross-references
-  and hierarchy may require a different format. See
-  [open question Q7](open-questions.md#q7-requirements-storage-format).
+- **Requirements storage format — Resolved.** One-file-per-record
+  YAML. See
+  [ADR-0001](../decisions/0001-requirements-storage-format.md).
 - **Spec directory layout.** What does the spec directory look like?
   One file per interface? One file per requirement? A hierarchy
   mirroring the specification levels (Vision → Architecture →
