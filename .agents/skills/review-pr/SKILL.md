@@ -103,8 +103,10 @@ Skip this phase when the PR cannot loop: a human-authored PR with no
    ```
 
    Their `/fs-fix` moves the head under your comments, and yours under
-   theirs. Tell the user who else is reviewing. One reviewer applies at a
-   time; agree on the order before phase 3.
+   theirs, and the newer run cancels the older. Tell the user who else is
+   reviewing. Whoever posted `/fs-fix-stop` owns the apply: phase 3 then
+   sends **one merged batch** for every reviewer, not one batch each. See
+   "More than one reviewer" in phase 3.
 
 The review agent cannot be suppressed. It will keep posting
 `CHANGES_REQUESTED` on every push. With the label on, it cannot act on its
@@ -329,6 +331,33 @@ disagree with a finding, record the disagreement instead of forcing a change.
   with no `/fs-fix` of yours after it means another fix run took the slot:
   phase 0 was skipped or the label is gone. Fix that, then re-send.
 
+### More than one reviewer
+
+Reviews run in parallel. Applying them does not: there is one fix slot per
+PR, and every fix commit moves the head under every unapplied comment. So
+when phase 0 found other open reviews, the owner sends **one batch for all
+of them**.
+
+- Read the other reviewers' comments and sort them by the same label table.
+  If they did not use Conventional Comments, decide what is actionable and
+  name it. The owner is accountable for what the batch contains.
+- Fetch every reviewer in one `select`, and print the login in the header
+  so the agent can tell whose finding is whose — an ID like `A1` can repeat
+  across reviewers:
+
+  ```text
+  --jq '.[] | select(.user.login == "alice" or .user.login == "bob") |
+        "=== \(.user.login) · \(.path) lines \(.start_line // .line)-\(.line) ===\n\(.body)\n"'
+  ```
+
+- List the IDs per reviewer: `alice: B1, B2, B5 · bob: A1, A3`.
+- Tell the other reviewers the batch is in. Everyone then reads the same
+  commit and approves the same SHA.
+
+What this does not solve: a reviewer who posts after the batch, or who
+sends their own `/fs-fix` anyway. Nothing in fullsend queues or locks a
+fix. The label stops the bot; only the owner rule stops the humans.
+
 Then stop. Report the commit and ask the user to read it.
 
 ## Phase 4 — close out
@@ -383,7 +412,12 @@ carries their identity, not yours.
 
 ## Phase 5 — release
 
-Remove what phase 0 added, and any stale state:
+The label is shared by everyone reviewing this PR. Before you remove it,
+run the phase 0 reviewer check again. If another human still has an open
+`CHANGES_REQUESTED`, leave the label on, tell the user who, and stop here:
+their review is still in progress and the label is protecting it.
+
+Otherwise remove what phase 0 added, and any stale state:
 
 ```bash
 gh pr edit "$PR" --repo "$REPO" --remove-label fullsend-no-fix
