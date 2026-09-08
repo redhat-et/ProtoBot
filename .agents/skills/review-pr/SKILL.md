@@ -10,12 +10,13 @@ description: >
 
 # Reviewing a Pull Request
 
-In a repository that runs fullsend, two review loops share every PR: yours
+In a repository that runs fullsend, two review loops can share a PR: yours
 and the bot's. They are not coordinated. A fix commit pushes, the push wakes
 the review agent, the review agent requests changes, and that starts another
-fix. The loop is bounded — it stops at five bot fix commits — but while it
-runs it moves the head under your line numbers and cancels the fix run you
-started, because two fix runs cannot share a PR and the newer one wins.
+fix. The loop is bounded — the bot is refused once the PR carries five fix
+commits, whoever triggered them — but while it runs it moves the head under
+your line numbers and cancels the fix run you started, because two fix runs
+cannot share a PR and the newer one wins.
 
 So the first thing a review does is stop that loop. Everything else follows.
 
@@ -28,42 +29,87 @@ So the first thing a review does is stop that loop. Everything else follows.
 | 4. Close out | Resolves threads, replaces the review | Continue |
 | 5. Release | Removes the labels phase 0 added | Report |
 
-Phases 0 and 1 always run. Every later phase needs the user to agree first.
+Phases 0 and 1 run without asking. Every later phase needs the user to
+agree first.
 
 "Review a PR" means phases 0 and 1. It does not mean all six. A user who
 wants everything in one go says so.
 
+## Before you start — what this PR allows
+
+Three facts about the PR decide which phases can run. Check them first.
+
+| Fact | How to check | Decides |
+|------|--------------|---------|
+| The repository runs fullsend | `.fullsend/config.yaml` exists, with `fix` in `roles` | Phases 0, 3 and 5 exist at all |
+| The bot can fix on its own | PR author is the coder bot, or the PR carries `fullsend-fix` | Phase 0 is needed. On any other PR there is no loop |
+| The PR is same-repo | `gh pr view $PR --json isCrossRepository` is `false` | Phase 3 works. The fix job refuses fork PRs outright |
+
+Your own access matters too. `/fs-fix` and `/fs-fix-stop` need write access
+on the repository (the PR author may also stop). `/fs-review` needs triage.
+A command you are not allowed to send fails **silently** — the job exits
+with a notice, nothing is posted. That is why phase 0 checks its own result.
+
 ## Phase 0 — quiesce
 
-1. Check that nothing is in flight on this PR:
+Skip this phase when the PR cannot loop: a human-authored PR with no
+`fullsend-fix` label, or a repository without fullsend. Go to phase 1.
 
-   ```bash
-   gh run list --repo "$REPO" --limit 12 \
-     --json status,event,displayTitle
-   ```
-
-   If a review or a fix run is running, wait for it. Reviewing a moving head
-   is the root cause of every problem this process exists to prevent.
-
-2. Stop the bot fix loop. Post a comment whose **entire body** is exactly:
+1. **Stop first, then wait.** Post a comment whose **entire body** is:
 
    ```text
    /fs-fix-stop
    ```
 
    Nothing else. The workflow matches on `==`, not on a prefix, so one extra
-   word and the job does not run.
+   word and the job does not run. Post it before you wait for anything: a
+   review that finishes while you wait would start a fix, and the label has
+   to be there before that verdict lands.
 
-3. That adds the `fullsend-no-fix` label. It blocks **bot-triggered** fixes
-   only. Your own `/fs-fix` still works: the eligibility script exits before
-   it reads the label when the trigger is human.
+2. **Check the label landed.** Within a minute, `fullsend-no-fix` must show
+   on the PR:
 
-Skip this phase in a repository with no `.fullsend/config.yaml`.
+   ```bash
+   gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name]'
+   ```
+
+   If it does not, you lack write access and the job exited silently. Stop
+   and say so.
+
+   The label blocks **bot-triggered** fixes only. Your own `/fs-fix` still
+   runs: the eligibility script exits before it reads the label when the
+   trigger is human. Nothing removes the label on its own — not a fix run,
+   not a review, not a merge. Phase 5 removes it.
+
+3. **Now wait for anything in flight.** Runs are listed by PR title, not by
+   PR number:
+
+   ```bash
+   gh run list --repo "$REPO" --limit 20 --json status,event,displayTitle \
+     --jq '.[] | select(.displayTitle == "<PR title>")
+                | select(.status != "completed")'
+   ```
+
+   A fix run that is still going will commit and wake a review. The label
+   stops that review from starting another fix. When the list is empty, the
+   head is frozen.
+
+4. **Check for other reviewers.** An open `CHANGES_REQUESTED` from another
+   human is a second loop with the same problems:
+
+   ```bash
+   gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+     --jq '.[] | select(.state == "CHANGES_REQUESTED") | .user.login' | sort -u
+   ```
+
+   Their `/fs-fix` moves the head under your comments, and yours under
+   theirs. Tell the user who else is reviewing. One reviewer applies at a
+   time; agree on the order before phase 3.
 
 The review agent cannot be suppressed. It will keep posting
-`CHANGES_REQUESTED` on every push, and that will keep flipping the PR's
-review decision. With the label on, it cannot act on its own verdict, so it
-is noise and not a race.
+`CHANGES_REQUESTED` on every push. With the label on, it cannot act on its
+own verdict, so it is noise and not a race. Its verdict does not set the
+PR's review decision either — only human reviews do.
 
 ## Phase 1 — the local review
 
@@ -120,7 +166,8 @@ The Drafting Table agent creates and refines backlog requests
   one review.
 - **Location:** `path:line` or `path:start-end` at the head SHA, on its own
   line. Separate several ranges with commas. The first range is the anchor;
-  the rest are repeated in the posted body as `Also lines X-Y.`
+  the rest are repeated in the posted body as `Also lines X-Y.` The anchor
+  must be a line the PR changed — see phase 2.
 - **Subject line:** `**label (decoration):** subject`. The subject is one
   sentence that states the claim.
 - **Discussion:** evidence with `path:line` citations, two to five lines,
@@ -180,7 +227,11 @@ gh api --method POST "repos/$REPO/pulls/$PR/reviews" --input review.json
 ```
 
 - `event` is `REQUEST_CHANGES` when the review has a blocking comment,
-  `APPROVE` when it has none and you approve, `COMMENT` otherwise.
+  `APPROVE` when it has none and the user approves, `COMMENT` otherwise.
+- **Every anchor must be a line inside the PR's diff.** GitHub rejects the
+  whole review with `422` if one comment points at an unchanged line. For a
+  finding on an unchanged line, anchor to the nearest changed line and name
+  the real range as `Also lines X-Y.`, or make it a `chore` in the body.
 - Drop `start_line` for a single-line anchor. Keep `side` as `RIGHT` unless
   the comment is about a deleted line.
 - Each inline body starts with the **bold heading**, then any extra ranges
@@ -189,10 +240,16 @@ gh api --method POST "repos/$REPO/pulls/$PR/reviews" --input review.json
   to survive into GitHub.
 - The `body` ends with the head SHA the line numbers refer to, and a link
   to Conventional Comments.
+- Record the login that posted the review — `gh api user --jq .login`.
+  Phase 3 filters on it.
 
 Then stop. Report the review URL and ask whether the fix agent should run.
 
 ## Phase 3 — apply, in one batch
+
+Only on a same-repo PR. The fix job's first step fails a fork PR with
+"Fork PRs are not allowed to trigger the fix agent". On a fork PR, hand the
+review to the author instead and skip to phase 4.
 
 **Send one batch per PR.** Not one per group letter. Every batch costs an
 iteration and rewrites the files, which makes the line numbers in every
@@ -210,8 +267,8 @@ Select by **label**, never by group letter:
 A `question` needs the user's answer, not a patch. Sending one makes the
 agent guess.
 
-Check the budget before sending. The cap is 10 human-triggered runs per PR,
-shared with the bot's own:
+Check the budget before sending. A human-triggered run is refused once the
+PR carries ten fix commits, whoever triggered them:
 
 ```bash
 gh api "repos/$REPO/pulls/$PR/commits" --paginate \
@@ -258,30 +315,44 @@ disagree with a finding, record the disagreement instead of forcing a change.
 
 - `REPO_FULL_NAME` and `PR_NUMBER` are set inside the agent sandbox. Leave
   them as written; do not expand them.
-- The `select` on the reviewer login keeps other bots' inline comments out.
+- The `select` on the reviewer login keeps other reviewers' and other bots'
+  inline comments out. That is deliberate: this batch is your review only.
 - List the IDs one by one, and name what to leave alone. "Comments starting
   with B" is not enough when the labels are mixed inside a group.
+- **Never send a second `/fs-fix` while one is running.** It cancels the
+  first. Wait for the status comment that says Finished.
 - A run has a 25 minute timeout. If a batch is very large, say so to the
   user and let them decide to split rather than splitting silently.
 - If a second batch is unavoidable, tell the agent the earlier fix moved the
   files and to match on the quoted text, not on the line number.
+- If the run ends Cancelled or Failed, read the status comment. Cancelled
+  with no `/fs-fix` of yours after it means another fix run took the slot:
+  phase 0 was skipped or the label is gone. Fix that, then re-send.
 
 Then stop. Report the commit and ask the user to read it.
 
 ## Phase 4 — close out
 
-1. The user reads the commit and gives a verdict.
-2. Resolve the threads the user accepts. In bulk, not one click at a time:
+1. The user reads the commit and gives a verdict. Read the agent's summary
+   comment too: findings it **disagreed** with are not done. Those threads
+   need a human answer, not a resolve.
+
+2. Resolve the threads the user accepts. Yours only — the query below
+   filters on the login from phase 2, so other reviewers' and bots' threads
+   are untouched:
 
    ```bash
    gh api graphql -f query='
      query($owner:String!,$repo:String!,$pr:Int!){
        repository(owner:$owner,name:$repo){
          pullRequest(number:$pr){
-           reviewThreads(first:100){nodes{id isResolved}}}}}' \
+           reviewThreads(first:100){
+             nodes{id isResolved comments(first:1){nodes{author{login}}}}}}}}' \
      -F owner="$OWNER" -F repo="$REPO_NAME" -F pr="$PR" \
      --jq '.data.repository.pullRequest.reviewThreads.nodes[]
-           | select(.isResolved | not) | .id'
+           | select(.isResolved | not)
+           | select(.comments.nodes[0].author.login == "<reviewer login>")
+           | .id'
    ```
 
    Then one mutation per thread ID:
@@ -293,6 +364,8 @@ Then stop. Report the commit and ask the user to read it.
      -F id="$THREAD_ID"
    ```
 
+   `first:100` covers a normal PR. Past that, page with `after:`.
+
 3. Replace the review. A new commit never clears a `CHANGES_REQUESTED` —
    only a new review from the same reviewer does:
 
@@ -300,6 +373,10 @@ Then stop. Report the commit and ask the user to read it.
    gh api --method POST "repos/$REPO/pulls/$PR/reviews" \
      -f event=APPROVE -f body="<what changed since the review>"
    ```
+
+   An approval is tied to the head SHA at the moment it is given. Any push
+   after it — another reviewer's `/fs-fix`, the author, anyone — leaves it
+   standing on an older commit. Say which SHA the approval covers.
 
 Never submit an `APPROVE` the user has not asked for by name. The approval
 carries their identity, not yours.
@@ -313,13 +390,13 @@ gh pr edit "$PR" --repo "$REPO" --remove-label fullsend-no-fix
 ```
 
 - Remove `needs-human` if it is set and the PR no longer needs a human.
-- Check for a stale `ready-for-merge`. It means "all reviewers approved" and
-  it is wrong on any PR with an open request for changes.
+- Remove `ready-for-merge` if the PR still has an open request for changes
+  from anyone. It means "all reviewers approved" and it is wrong there.
 - Never leave `fullsend-no-fix` on a PR you walk away from. It silently
-  disables the bot's own fixes for everyone.
+  disables the bot's own fixes for everyone, and nothing else removes it.
 
-Then report: the commits, the review state, the threads resolved, and any
-comments left unsent.
+Then report: the commits, the review state and which SHA it covers, the
+threads resolved, and any comments left unsent.
 
 ## Reference — how fullsend routes
 
@@ -328,13 +405,14 @@ workflow does:
 
 | Into | From |
 |------|------|
-| `fix` | a human `/fs-fix` comment; or a `CHANGES_REQUESTED` review **by the review bot** |
+| `fix` | a human `/fs-fix` comment from a write-access user; or a `CHANGES_REQUESTED` review **by the review bot**, when the PR author is a bot or the PR carries `fullsend-fix`, the PR is same-repo, and `fullsend-no-fix` is absent |
 | `review` | PR `opened`, `synchronize`, `ready_for_review`; the `ready-for-review` label; a `/fs-review` comment |
 
 The cycle is: a fix commits, the push is a `synchronize`, the review agent
 runs, it requests changes, that starts another fix. Phase 0 cuts the last
 arrow and leaves your own entry point open.
 
-Caps, from the fix harness: five bot-triggered runs per PR, ten
-human-triggered, counted as commits authored by `fullsend-fix`. Past the bot
-cap the loop stops itself; below it, the loop will keep taking the slot.
+Caps, from the fix harness: the run counts the PR's commits authored by
+`fullsend-fix`. A bot-triggered run is refused at five, a human-triggered
+run at ten — both against the same total, whoever made the commits. Past
+five the loop stops itself; below five, it will keep taking the slot.
