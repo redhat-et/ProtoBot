@@ -9,8 +9,10 @@
 # the branch is the pull request. Deleting a branch is the user's call, in the
 # main checkout, after the merge.
 #
-# Three refusals, on purpose:
+# Four refusals, on purpose:
 #   - a path that is not under <repo>/.worktrees/ — never remove anything else
+#   - a path git does not report as a working tree — a stray directory is not
+#     this hook's to delete
 #   - a worktree git reports as locked — another session is still working in
 #     it, so removing it would pull the floor out from under that session
 #   - a worktree with uncommitted changes to tracked files — those exist only
@@ -61,9 +63,18 @@ case "$path_real" in
     ;;
 esac
 
-worktrees=$(git -C "$root" worktree list --porcelain)
-entry=$(grep -A3 -F "worktree $path" <<<"$worktrees" || true)
-if grep -q '^locked' <<<"$entry"; then
+# Ask git for this worktree's own admin directory and look for the lock file
+# there. `git worktree lock` writes <common>/worktrees/<id>/locked, and that is
+# what `git worktree list --porcelain` reports as `locked`. Reading it directly
+# avoids matching paths in that output, which is wrong twice over: a substring
+# match also hits a worktree whose name merely starts the same, and the path
+# git stored need not be spelled the way this hook receives it.
+admin=$(git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)
+if [ -z "$admin" ]; then
+  echo "worktree-remove: refusing — git does not report $path as a working tree" >&2
+  exit 1
+fi
+if [ -f "$admin/locked" ]; then
   echo "worktree-remove: $path is locked — another session is still in it. Left in place." >&2
   exit 1
 fi
