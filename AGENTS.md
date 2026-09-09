@@ -1,6 +1,9 @@
 # AGENTS
 
-- Create worktrees in `.worktrees/`
+- Create worktrees in `.worktrees/`, on a branch named after the worktree.
+  For Claude Code this is enforced by the `WorktreeCreate` and
+  `WorktreeRemove` hooks in `.claude/settings.json`; without them
+  `claude -w <name>` would use `.claude/worktrees/<name>` instead.
 - All pre-commit tests must pass before committing changes.
 - The upstream repository is `redhat-et/protobot`. Ensure that pull requests
   are made against this repository.

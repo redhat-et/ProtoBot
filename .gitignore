@@ -1,2 +1,4 @@
 /.worktrees/
 /review-*.md
+# Safety net: where Claude Code puts worktrees if .claude/hooks/ does not run.
+/.claude/worktrees/
