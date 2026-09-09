@@ -2,9 +2,7 @@
 name: "review-pr"
 description: >
   Provides a structured process and a comment format for reviewing pull
-  requests in a repository where autonomous agents also review and fix.
-  Runs in six phases, gated by the user: quiesce the bot loop, draft a local
-  review, post it, apply it in one batch, close it out, release the PR. Use
+  requests in a repository where autonomous agents also review and fix. Use
   when asked to "review a PR", "review PR #N", or "give me a review".
 ---
 
@@ -98,9 +96,25 @@ Skip this phase when the PR cannot loop: a human-authored PR with no
    human is a second loop with the same problems:
 
    ```bash
-   gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
-     --jq '.[] | select(.state == "CHANGES_REQUESTED") | .user.login' | sort -u
+   gh api "repos/$REPO/pulls/$PR/reviews" --paginate --jq '
+     [ .[]
+       | select(.user.type != "Bot")
+       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED"
+                or .state == "DISMISSED")
+     ]
+     | group_by(.user.login)[]
+     | max_by(.submitted_at)
+     | select(.state == "CHANGES_REQUESTED")
+     | .user.login' | sort -u
    ```
+
+   The endpoint returns every review ever submitted, so the three filters are
+   all load-bearing. Without the `Bot` filter the review agent is in every
+   result, because it requests changes on every push. Without the latest-per-
+   login step a reviewer who requested changes and then approved still counts
+   as blocking. Without the state filter `max_by` can land on a `COMMENTED`
+   review, which does not clear a `CHANGES_REQUESTED`, and a real blocker
+   disappears — the worse of the two errors.
 
    Their `/fs-fix` moves the head under your comments, and yours under
    theirs, and the newer run cancels the older. Tell the user who else is
@@ -125,80 +139,15 @@ PR's review decision either — only human reviews do.
   Record what you checked and what you did not.
 - Write the review to `review-<PR number>.md` in the repository root. Do not
   commit it, do not post it, do not push.
+- Follow "Review document" for the layout, "Comment format" for each comment,
+  and "Rules for the content" for what belongs in one. All three sit at the
+  end of this file, not here, because phases 2 and 3 need them too.
 
 Then stop. Name the file and ask the user to read it.
 
 The user agrees in a plain sentence: "I agree", "looks good", "go ahead".
 Anything else is a change request. Edit the document, then stop again.
 Silence is not agreement.
-
-### Review document
-
-1. Header: PR link, head and base SHAs, author, review date, files touched.
-2. Verdict: approve or request changes, then the blocking comments as a
-   list, one line each: ID and title. Then any `chore`, then praise, then
-   any `thought`. Nothing else.
-3. Comments, grouped in this order: blocking; non-blocking issues and
-   suggestions; todos, nitpicks, and questions; other files. Inside a group,
-   keep file order.
-4. What was checked, and what was not.
-
-### Comment format
-
-Each comment is a heading, a location, and a
-[Conventional Comment](https://conventionalcomments.org):
-
-```markdown
-### B5 · Request tools missing
-
-`docs/architecture/architecture.md:505-519`
-
-**issue (non-blocking):** The tool inventory has no request tools.
-
-The Drafting Table agent creates and refines backlog requests
-(`docs/architecture/user-interaction-flow.md:842-866`). The table has only
-"WMS query" and "WMS resolve".
-
-**suggestion:** Add `WMS request create/refine/link`.
-```
-
-- **Heading:** an ID and a title. The ID is a group letter plus a number.
-  The title is how a reader remembers the comment: 3 to 7 words that name
-  the problem, not the location and not the fix. Titles are unique inside
-  one review.
-- **Location:** `path:line` or `path:start-end` at the head SHA, on its own
-  line. Separate several ranges with commas. The first range is the anchor;
-  the rest are repeated in the posted body as `Also lines X-Y.` The anchor
-  must be a line the PR changed — see phase 2.
-- **Subject line:** `**label (decoration):** subject`. The subject is one
-  sentence that states the claim.
-- **Discussion:** evidence with `path:line` citations, two to five lines,
-  then the fix. An `issue` is always paired with a `**suggestion:**` line.
-- **Labels:** `issue` for a concrete defect, `suggestion` for an improvement
-  with its reason, `todo` for a small required change, `question` for a
-  concern you cannot settle, `nitpick` for a preference, `praise` for what
-  is right, `chore` for a task that must happen before merge and has no
-  line to anchor to (it blocks, like an `issue (blocking)`), `thought` and
-  `note` for non-blocking context.
-- **Decorations:** always decorate `issue` with `(blocking)` or
-  `(non-blocking)`. `(blocking)` means the PR must not merge until the
-  comment is resolved. A `suggestion` without a decoration is non-blocking.
-
-### Rules for the content
-
-- Post only what the author can act on. A check that found nothing (the
-  branch is behind `main`, the merge is clean, no stale wording is left)
-  goes in the "What was checked" section of the local document, never in
-  the posted review or its comments.
-- Problem first, then evidence, then fix. Say what is wrong before why.
-- Every fix must make the design or the code simpler or more complete. Drop
-  a proposal that adds more than it removes.
-- Cite sources, not memory. A claim about another file carries its
-  `path:line`.
-- Short sentences, one idea each. If a comment needs more than about ten
-  lines, split it or cut it.
-- Mark uncertainty. "As far as I know" is allowed. A guess presented as a
-  fact is not.
 
 ## Phase 2 — post to GitHub
 
@@ -258,7 +207,8 @@ iteration and rewrites the files, which makes the line numbers in every
 comment you have not sent yet wrong. One batch is the difference between a
 review that lands and a review that rots.
 
-Select by **label**, never by group letter:
+Select by **label**, never by group letter. The labels are defined in
+"Comment format" at the end of this file:
 
 | Label | Send it? |
 |-------|----------|
@@ -450,3 +400,71 @@ Caps, from the fix harness: the run counts the PR's commits authored by
 `fullsend-fix`. A bot-triggered run is refused at five, a human-triggered
 run at ten — both against the same total, whoever made the commits. Past
 five the loop stops itself; below five, it will keep taking the slot.
+
+## Review document
+
+1. Header: PR link, head and base SHAs, author, review date, files touched.
+2. Verdict: approve or request changes, then the blocking comments as a
+   list, one line each: ID and title. Then any `chore`, then praise, then
+   any `thought`. Nothing else.
+3. Comments, grouped in this order: blocking; non-blocking issues and
+   suggestions; todos, nitpicks, and questions; other files. Inside a group,
+   keep file order.
+4. What was checked, and what was not.
+
+## Comment format
+
+Each comment is a heading, a location, and a
+[Conventional Comment](https://conventionalcomments.org):
+
+```markdown
+### B5 · Request tools missing
+
+`docs/architecture/architecture.md:505-519`
+
+**issue (non-blocking):** The tool inventory has no request tools.
+
+The Drafting Table agent creates and refines backlog requests
+(`docs/architecture/user-interaction-flow.md:842-866`). The table has only
+"WMS query" and "WMS resolve".
+
+**suggestion:** Add `WMS request create/refine/link`.
+```
+
+- **Heading:** an ID and a title. The ID is a group letter plus a number.
+  The title is how a reader remembers the comment: 3 to 7 words that name
+  the problem, not the location and not the fix. Titles are unique inside
+  one review.
+- **Location:** `path:line` or `path:start-end` at the head SHA, on its own
+  line. Separate several ranges with commas. The first range is the anchor;
+  the rest are repeated in the posted body as `Also lines X-Y.` The anchor
+  must be a line the PR changed — see phase 2.
+- **Subject line:** `**label (decoration):** subject`. The subject is one
+  sentence that states the claim.
+- **Discussion:** evidence with `path:line` citations, two to five lines,
+  then the fix. An `issue` is always paired with a `**suggestion:**` line.
+- **Labels:** `issue` for a concrete defect, `suggestion` for an improvement
+  with its reason, `todo` for a small required change, `question` for a
+  concern you cannot settle, `nitpick` for a preference, `praise` for what
+  is right, `chore` for a task that must happen before merge and has no
+  line to anchor to (it blocks, like an `issue (blocking)`), `thought` and
+  `note` for non-blocking context.
+- **Decorations:** always decorate `issue` with `(blocking)` or
+  `(non-blocking)`. `(blocking)` means the PR must not merge until the
+  comment is resolved. A `suggestion` without a decoration is non-blocking.
+
+## Rules for the content
+
+- Post only what the author can act on. A check that found nothing (the
+  branch is behind `main`, the merge is clean, no stale wording is left)
+  goes in the "What was checked" section of the local document, never in
+  the posted review or its comments.
+- Problem first, then evidence, then fix. Say what is wrong before why.
+- Every fix must make the design or the code simpler or more complete. Drop
+  a proposal that adds more than it removes.
+- Cite sources, not memory. A claim about another file carries its
+  `path:line`.
+- Short sentences, one idea each. If a comment needs more than about ten
+  lines, split it or cut it.
+- Mark uncertainty. "As far as I know" is allowed. A guess presented as a
+  fact is not.
