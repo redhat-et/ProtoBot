@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # WorktreeCreate hook — put Claude Code worktrees where AGENTS.md says.
 #
-# AGENTS.md: "Create worktrees in `.worktrees/`". Claude Code's built-in logic
-# does not do that. Left alone it creates <repo>/.claude/worktrees/<name> on a
-# branch named worktree-<name>, and `claude -w` takes a name only — there is no
+# AGENTS.md: "Create worktrees in `.worktrees/`". Claude Code does not do that
+# on its own. Left alone it creates <repo>/.claude/worktrees/<name> on a branch
+# named worktree-<name>, and `claude -w` takes a name only — there is no
 # setting for the location (checked 2026-09-09, Claude Code 2.1.263).
 #
 # A WorktreeCreate hook replaces that built-in logic entirely, which is the
@@ -25,21 +25,42 @@
 #
 # Kept compatible with bash 3.2, which is what macOS ships.
 
-set -eu
+set -euo pipefail
 
 input=$(cat)
-name=$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
+name=$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])') || {
+  echo "worktree-create: cannot read the worktree name from the hook input" >&2
+  exit 1
+}
 [ -n "$name" ] || { echo "worktree-create: empty worktree name" >&2; exit 1; }
+
+# The name becomes a path below .worktrees/, so it must stay below it.
+case "$name" in
+  /* | *..*)
+    echo "worktree-create: refusing the worktree name '$name' — a name must not" \
+         "start with '/' or contain '..'" >&2
+    exit 1
+    ;;
+esac
 
 # The main checkout. Even when launched from inside a linked worktree, the
 # common git dir is always <main>/.git.
 root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
 dir="$root/.worktrees/$name"
 
+# Adopt only a directory git already knows as a worktree. A stray directory of
+# the same name is not one, and starting a session in it would put the agent
+# inside the main checkout's tree without a branch of its own.
 if [ -d "$dir" ]; then
-  echo "worktree-create: adopting $dir" >&2
-  printf '%s\n' "$dir"
-  exit 0
+  worktrees=$(git -C "$root" worktree list --porcelain)
+  if grep -qxF "worktree $dir" <<<"$worktrees"; then
+    echo "worktree-create: adopting $dir" >&2
+    printf '%s\n' "$dir"
+    exit 0
+  fi
+  echo "worktree-create: $dir exists but is not a registered git worktree." \
+       "Remove it, or register it with: git -C $root worktree add $dir" >&2
+  exit 1
 fi
 
 # Base: the remote default branch, fetched first so "fresh" means fresh.
