@@ -1129,6 +1129,9 @@ whether this is achievable given Red Hat's AIA requirements.
   constraints
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [Git and Project-Repository Integration](git-integration.md) —
+  Project identification, branches, commits, PR preparation, and
+  approved specification state
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,

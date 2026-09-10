@@ -2,13 +2,8 @@
 
 > Design document — draft, September 2026
 >
-> Defines how the Drafting Table turns governed specification
-> changes into reviewable Git history: project identification,
-> artifact-path selection, branch and commit behavior, pull-request
-> preparation, approved specification state, and the permitted Git
-> operations. The contract is written for single-player mode first.
-> Multi-player mode uses the same rules and differs only in review
-> ceremony.
+> Defines how the Drafting Table turns governed specification changes
+> into reviewable Git history, in single-player and multi-player modes.
 
 **Contents:**
 
@@ -142,7 +137,7 @@ This document adds a `repository` block for the Git-facing fields:
 | `repository.canonical_remote` | URL of the canonical repository. The Drafting Table pushes to this remote only. |
 | `repository.default_branch` | The branch that holds approved specification state. `main` by default. |
 | `repository.review_mode` | `single-player` or `multi-player`. Declares the review ceremony. |
-| `repository.branch_prefix` | Prefix for change-set branches. `cs/` by default. |
+| `repository.branch_prefix` | Prefix for change-set branches. `cs/` by default. It may not be `wi/` or any other Job Site namespace; `ears-manager check` rejects one that is. |
 | `schema_versions` | One version per store, as decided by [ADR-0002][adr2-versioning]. |
 | `artifacts` | The artifact registry: `id`, `kind`, `path`, `digest`, `owner`, and optional `validator` per entry ([ADR-0002][adr2-registry]). |
 
@@ -202,7 +197,9 @@ one before it:
    its registry.
 3. Run `change-set create`, which writes the manifest and records
    the default-branch head as `base_commit`.
-4. Commit both files, open the pull request, merge.
+4. Commit three files — `project.yaml`, the manifest, and
+   `projection.yaml` with the `shared` class of each registered
+   path — then open the pull request and merge.
 
 The default branch must already have at least one commit, because
 a branch needs a base and a manifest needs a `base_commit`. A Git
@@ -347,7 +344,9 @@ cs/<nnn>-<slug>
   ([ADR-0002 — Change-Set Manifests][adr2-changeset]).
 - `<slug>` is derived from the manifest `intent`: lowercased,
   non-alphanumeric runs replaced by a single hyphen, trimmed to 40
-  characters at a hyphen boundary.
+  characters at a hyphen boundary. When nothing alphanumeric
+  survives, the slug is `change-set`, so `CS-005` becomes
+  `cs/005-change-set`.
 - `cs/` is the default and comes from `repository.branch_prefix`.
 
 The prefix is the machine-readable part. A tool that must decide
@@ -366,6 +365,12 @@ not on the first write. The commit it is cut from is recorded as
 the manifest's `base_commit`, as a full 40-character hexadecimal
 hash; a branch name or tag is never accepted there
 ([ADR-0002][adr2-changeset]).
+
+[Initialization](#project-initialization) is the one exception to
+that order. There the branch exists first, because `project.yaml`
+must be written before a change set can be created at all. Either
+way, `change-set create` records the default-branch head as
+`base_commit`, whether or not it also cuts the branch.
 
 The initial Sketch is a change set like any other. Its Vision and
 Architecture artifacts are written through
@@ -839,7 +844,7 @@ protection rule.
 
 | # | Action | Expected result |
 | --- | --- | --- |
-| 1 | Initialize the project: cut `cs/001-project-init`, write `project.yaml`, create `CS-001`, commit | The branch exists and is checked out. `.protobot/project.yaml` carries identity, `canonical_remote`, `default_branch`, `review_mode`, schema versions, and the four default registry entries. One commit, subject `spec(CS-001): <intent>`, trailer `Change-Set: CS-001`. The default branch is unchanged. `ears-manager check` exits zero. |
+| 1 | Initialize the project: cut `cs/001-project-init`, write `project.yaml`, create `CS-001`, commit | The branch exists and is checked out. `.protobot/project.yaml` carries identity, `canonical_remote`, `default_branch`, `review_mode`, schema versions, and the four default registry entries. `.protobot/projection.yaml` carries a `shared` class for each of those four paths. One commit of three files, subject `spec(CS-001): <intent>`, trailer `Change-Set: CS-001`. The default branch is unchanged. `ears-manager check` exits zero. |
 | 2 | Merge `CS-001`, register, then create change set `CS-002` for the initial Sketch | The default branch head is a merge commit. Branch `cs/002-<slug>` exists and is checked out. Its tip equals the new default-branch head, and the manifest records that head's full 40-character hash as `base_commit`. No other branch was created. |
 | 3 | Write Vision and Architecture through `ears-manager artifact put` | Both registered paths exist. Their registry digests match their content. `ears-manager` has added a `shared` class for each new path. `git status` lists only the two artifacts, the manifest, `project.yaml`, and `projection.yaml`. |
 | 4 | Edit a registered artifact directly with a text editor, then request a commit | Nothing is staged and no commit is created. The diagnostic names the path and both digests. `ears-manager check` exits non-zero for the same path. |
