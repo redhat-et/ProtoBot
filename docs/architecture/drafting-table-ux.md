@@ -226,6 +226,10 @@ stateDiagram-v2
     ApprovalHandoff --> [*]
 ```
 
+A session models exactly one change set lifecycle from initialization through
+approval handoff or exit. Processing another change set requires starting or
+resuming a subsequent session.
+
 ### Protocol invariants
 
 The protocol enforces six non-negotiable invariants:
@@ -657,8 +661,7 @@ transitions.
 
 The following transcript illustrates a Dimensioning session for an
 `ears-manager` CLI interface, demonstrating resume, requirement review,
-hybrid gap surfacing, out-of-scope declaration, impact review, revision,
-and approval.
+hybrid gap surfacing, impact review, revision, and approval.
 
 ```text
 Agent: Welcome back. Project "protobot" detected from .protobot/project.yaml.
@@ -880,19 +883,20 @@ OAuth tokens, hosted session manager, or live cloud services.
 
 ## Related Documents
 
-- [Vision](../vision.md) — Project vision, target users, and prototype
-  boundary
-- [Architecture](../architecture.md) — External interfaces, state ownership,
-  and system constraints
-- [Overview](overview.md) — Guiding principles, EARS requirements, and
-  workflow
-- [System Components](components.md) — System boundaries, WMS Adapter, and
-  Job Site
-- [User Interaction Flow](user-interaction-flow.md) — Interaction phases and
-  sequence diagrams
-- [Open Design Questions](open-questions.md) — Unresolved design questions
-  across all areas
-- [Related Work](related-work.md) — Lessons learned from prior internal and
-  external systems
+- [Vision](../vision.md) — Purpose, intended users, desired
+  outcomes, prototype scope, and non-goals
+- [Overview](overview.md) — What ProtoBot is, guiding principles,
+  and workflow summary
+- [Architecture](../architecture.md) — External interface inventory,
+  pluggable boundaries, persistent state, and environmental
+  constraints
+- [System Components](components.md) — Component architecture,
+  interfaces, and cross-cutting concerns
+- [User Interaction Flow](user-interaction-flow.md) — Phase details
+  and sequence diagrams
+- [Open Design Questions](open-questions.md) — Unresolved design
+  questions across all areas
+- [Related Work](related-work.md) — Red Hat internal projects,
+  external factory projects, and lessons learned
 - [ADR-0001](../decisions/0001-requirements-storage-format.md) — Requirements
   storage format

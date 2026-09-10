@@ -22,12 +22,12 @@ pointers to their decisions. Updated as decisions are made.
 ### Q2: Async requirement suggestion delivery
 
 When the autonomous
-phase discovers unspecified behavior, it blocks the work item and
-escalates to the user (decided). The TUI MVP pulls blocked work on
-session start and lets the user resolve an item or continue unrelated
-work ([Drafting Table UX][dt-blocked]).
-The remaining question is which push or external notification channels
-(web, email, Slack, or webhook) later hosted deployments require.
+   phase discovers unspecified behavior, it blocks the work item and
+   escalates to the user (decided). The TUI MVP pulls blocked work on
+   session start and lets the user resolve an item or continue unrelated
+   work ([Drafting Table UX][dt-blocked]). The remaining question is
+   which push or external notification channels (web, email, Slack, or
+   webhook) later hosted deployments require.
 
 ### Q4: IdeaBot handoff format
 
