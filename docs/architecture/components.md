@@ -736,7 +736,7 @@ language/source/test layout:
 | `.protobot/projection.yaml` | Deny-by-default path classification for Worker and attestation projections. `ears-manager` writes the class for a registered specification path ([git-integration.md](git-integration.md#path-rules)); every other entry is reviewed project policy. |
 | `.protobot/policy.yaml` | Required Inspectors, WIP/scheduling policy, sandbox profile, and other reviewed project policy. |
 | `.protobot/kits.lock` | Optional Kit source/version/digest/provenance locks. |
-| `.protobot/change-sets/` | Immutable approved change-set manifests. |
+| `.protobot/change-sets/` | Immutable approved change-set manifests, one flat file per change set, named `cs-<nnn>.yaml` ([git-integration.md](git-integration.md#one-change-set-one-file)). |
 | `.protobot/test-catalog.jsonl` | Stable test IDs, requirement links, verification modes, control surfaces, and validity metadata. |
 | `.protobot/attestations/` | Finding snapshots/reports, conformance metadata, and canonical demo manifests; always `attestation-only`. |
 

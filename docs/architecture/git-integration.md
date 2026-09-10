@@ -14,6 +14,8 @@
 
 - [Purpose and scope](#purpose-and-scope)
 - [Project identification](#project-identification)
+  - [Every change arrives by pull
+    request](#every-change-arrives-by-pull-request)
 - [Registered artifact paths](#registered-artifact-paths)
   - [One change set, one file](#one-change-set-one-file)
 - [Change-set branches](#change-set-branches)
@@ -511,12 +513,14 @@ contains:
    `false`.
 6. The list of files the pull request changes.
 
-[ADR-0001][adr1-pr] plans this rendered summary and leaves open
-whether it is posted by CI or on demand. This document decides:
+[ADR-0001][adr1-pr] plans this rendered summary and left open
+whether it is posted by CI or on demand. This document decides it:
 **the Drafting Table renders it into the pull-request body when
 the pull request is created or updated.** CI is not required to
 post it. A reviewer therefore sees the summary and the file diffs
 in one place, and the summary exists even when CI is unavailable.
+The same pull request records the answer in ADR-0001, so a reader
+who starts from the decision record finds it.
 
 The raw file diffs remain the normative record. The rendered
 summary is a view of them, in the same way that the inspection
