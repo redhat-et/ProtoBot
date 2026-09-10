@@ -408,7 +408,10 @@ Job Site (integration branches, merges), `ears-manager`
 
 See [System Components — Content Storage
 Model](architecture/components.md#content-storage-model) for the full
-content model and merge strategy.
+content model and merge strategy, and [Git and Project-Repository
+Integration](architecture/git-integration.md) for the Drafting
+Table's project identification, branch, commit, PR, and
+registration behavior.
 
 ---
 
@@ -457,7 +460,7 @@ out of scope for this Sketch.
 
 - **Merged code and tests** on the `wi/` branch, merged to
   main on completion — [pending
-  Q13](architecture/open-questions.md#q13-autonomous-merge-and-hu-02).
+  Q13](architecture/open-questions.md#q13-hu-02-compliance).
 - **Conformance evidence** — immutable verification artifacts
   naming requirement IDs, specification commits, and tested
   candidate commits.
@@ -617,7 +620,9 @@ catching violations before they reach CI.
   Rules run at the API boundary before any mutation is applied.
 - **Git operations are explicit.** The Drafting Table creates
   branches, commits `ears-manager` outputs, and opens PRs. It
-  does not push directly to main in multi-player mode.
+  never pushes directly to main, in any mode
+  ([Git and Project-Repository
+  Integration](architecture/git-integration.md#every-change-arrives-by-pull-request)).
 
 **Tool inventory:**
 
@@ -716,10 +721,13 @@ repository.
 
 **Where it lives:** The project repository under `.protobot/`.
 
-**Schema owner:** `ears-manager` (for `project.yaml` and
-specification paths) and the Job Site (for the test catalog
-and attestation paths). On version mismatch, the owning tool
-refuses.
+**Schema owner:** `ears-manager` (for `project.yaml`,
+specification paths, and the projection classification of a
+registered specification path — see [Git and Project-Repository
+Integration](architecture/git-integration.md#path-rules)) and the
+Job Site (for the test catalog and attestation paths). Every other
+projection entry is reviewed project policy. On version mismatch,
+the owning tool refuses.
 
 ### Claim coordinator
 
@@ -835,6 +843,10 @@ that contract.
   and workflow summary
 - [System Components](architecture/components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [Git and Project-Repository
+  Integration](architecture/git-integration.md) — Project
+  identification, branches, commits, PR preparation, and approved
+  specification state
 - [User Interaction Flow](architecture/user-interaction-flow.md) — Phase details
   and sequence diagrams
 - [Open Design Questions](architecture/open-questions.md) — Unresolved
