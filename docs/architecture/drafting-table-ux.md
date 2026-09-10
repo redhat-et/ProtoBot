@@ -1,32 +1,26 @@
 # ProtoBot: Drafting Table MVP User Experience
 
 > Design document — draft, September 2026
->
-> Defines the stable interaction contract for the first local
-> Drafting Table during Sketching and Dimensioning. This document
-> describes UX semantics that any Drafting Table implementation must
-> satisfy. It does not prescribe TUI layout, keybindings, or visual
-> design.
 
 **Contents:**
 
-- [Purpose and scope](#purpose-and-scope)
-- [State categories](#state-categories)
-- [Session lifecycle](#session-lifecycle)
-- [Sketching interactions](#sketching-interactions)
-- [Dimensioning interactions](#dimensioning-interactions)
-- [Requirement proposals and gap surfacing](#requirement-proposals-and-gap-surfacing)
-- [Impact review and approval](#impact-review-and-approval)
-- [Blocked-work resolution](#blocked-work-resolution)
-- [Job Site status](#job-site-status)
-- [Authoritative mutation ownership](#authoritative-mutation-ownership)
-- [Representative transcript](#representative-transcript)
-- [Out-of-scope decisions](#out-of-scope-decisions)
+- [Purpose and Scope](#purpose-and-scope)
+- [State Categories](#state-categories)
+- [Session Lifecycle](#session-lifecycle)
+- [Sketching Interactions](#sketching-interactions)
+- [Dimensioning Interactions](#dimensioning-interactions)
+- [Requirement Proposals and Gap Surfacing](#requirement-proposals-and-gap-surfacing)
+- [Impact Review and Approval](#impact-review-and-approval)
+- [Blocked-Work Resolution](#blocked-work-resolution)
+- [Job Site Status](#job-site-status)
+- [Authoritative Mutation Ownership](#authoritative-mutation-ownership)
+- [Representative Transcript](#representative-transcript)
+- [Out-of-Scope Decisions](#out-of-scope-decisions)
 - [Related Documents](#related-documents)
 
 ---
 
-## Purpose and scope
+## Purpose and Scope
 
 This document answers the question posed by issue #28: _What stable
 interaction contract does the first local OpenCode Drafting Table
@@ -46,7 +40,7 @@ The contract is defined for the **single-player TUI** first. Web
 presentation and push notifications are future implementations
 that share the same Specification Toolkit and Validation Rules but
 differ in hosting, session management, and notification delivery
-(see [out-of-scope decisions](#out-of-scope-decisions)).
+(see [Out-of-Scope Decisions](#out-of-scope-decisions)).
 
 ### Relationship to sibling contracts
 
@@ -67,7 +61,7 @@ prescribing their internal details.
 
 ---
 
-## State categories
+## State Categories
 
 The Drafting Table works with three distinct categories of state.
 Conflating them produces the confusion the architecture documents
@@ -138,7 +132,7 @@ fields.
 
 ---
 
-## Session lifecycle
+## Session Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -200,7 +194,7 @@ On session start, the Drafting Table:
    requests.
 3. If blocked items exist, presents them before entering the
    main workflow (see
-   [blocked-work resolution](#blocked-work-resolution)).
+   [Blocked-Work Resolution](#blocked-work-resolution)).
 4. Detects in-progress branches and offers to resume or start a
    new change set.
 
@@ -224,7 +218,7 @@ The user can exit at any time. The Drafting Table:
 
 ---
 
-## Sketching interactions
+## Sketching Interactions
 
 Sketching produces the Sketch artifact: a Vision statement and
 an Architecture that enumerates external interfaces and their
@@ -275,7 +269,7 @@ met before transitioning to Dimensioning.
 
 ---
 
-## Dimensioning interactions
+## Dimensioning Interactions
 
 Dimensioning produces the Schematic: approved EARS requirements
 for each interface identified in the Architecture. This is the
@@ -311,11 +305,11 @@ proposed specification transaction. The workflow:
 5. **Gap surfacing.** The agent proactively surfaces unspecified
    behaviors (see
    [requirement proposals and gap
-   surfacing](#requirement-proposals-and-gap-surfacing)).
+   Surfacing](#requirement-proposals-and-gap-surfacing)).
 
 6. **Impact analysis.** The agent runs `ears-manager impact` and
    presents the results for review (see
-   [impact review and approval](#impact-review-and-approval)).
+   [Impact Review and Approval](#impact-review-and-approval)).
 
 7. **Change-set commit.** When the user approves the complete
    change set (changed requirements plus impact dispositions),
@@ -360,7 +354,7 @@ Interface ordering is a user choice, not enforced by the system
 
 ---
 
-## Requirement proposals and gap surfacing
+## Requirement Proposals and Gap Surfacing
 
 The agent must aggressively surface specification gaps during
 Dimensioning. Once the autonomous Building phase begins, the
@@ -380,7 +374,7 @@ The agent produces two types of proposals:
 
 2. **Gap-closing suggestions.** The agent identifies behaviors
    the user has not specified and proposes requirements to cover
-   them. These are _agent-suggested (interactive)_ in
+   them. These are _agent-suggested_ in
    provenance. Common gap categories:
 
    - **Error handling.** "What should happen when the API
@@ -441,7 +435,7 @@ agent missed.
 
 ---
 
-## Impact review and approval
+## Impact Review and Approval
 
 After the user has reviewed all proposed and gap-closing
 requirements, the agent runs impact analysis to identify
@@ -494,24 +488,13 @@ change set.
    or open a self-reviewed PR.
 
 7. **Post-merge materialization.** After the change set lands
-   on `main` (via reviewer merge or single-player push), a
-   registration hook calls the Job Site materializer with the
-   change-set ID, merge commit, and materialization key
-   ([`components.md`, multi-player
-   workflow](components.md#multi-player-workflow)). The
-   materializer constructs the contract and calls the WMS
-   Adapter's idempotent create-or-return operation.
-   Materialization produces exactly one build work item
-   ([`architecture.md`, control-flow
-   invariants](../architecture.md#data-and-control-flow)).
-   In single-player mode, a local
-   `register-approved-change-set` command or hook performs
-   the same materialization
-   ([`components.md`, single-player
-   mode](components.md#single-player-mode)). The user sees
-   confirmation that the work item was created (or already
-   existed). This is the moment when their approved change
-   set becomes autonomous work.
+   on `main` (via reviewer merge or single-player push), the
+   system materializes a build work item from the approved
+   change set
+   ([`components.md`](components.md#multi-player-workflow)).
+   The user sees confirmation that the work item was created
+   (or already existed). This is the moment when their
+   approved change set becomes autonomous work.
 
 ### Revision after impact
 
@@ -527,7 +510,7 @@ The agent re-runs impact analysis after any scope change.
 
 ---
 
-## Blocked-work resolution
+## Blocked-Work Resolution
 
 When the autonomous Building or Inspecting phase discovers
 undefined behavior, it blocks the affected work item and
@@ -571,8 +554,8 @@ For each blocked item, the agent shows:
 - The blocking reason: undefined behavior, omitted applicable
   requirement, specification question, policy question, or
   reconciliation failure
-  ([`components.md`, work-item
-  lifecycle](components.md#work-item-lifecycle-states)).
+  ([`components.md`, Build Work Item
+  Lifecycle](components.md#build-work-item-lifecycle)).
 - The relevant requirement context.
 
 ### Resolution options
@@ -619,7 +602,7 @@ and refreshes the work-item contract. The item returns to
 
 ---
 
-## Job Site status
+## Job Site Status
 
 The Drafting Table displays work-item status from the WMS so
 the user has visibility into what the Job Site is doing.
@@ -661,7 +644,7 @@ change it.
 
 ---
 
-## Authoritative mutation ownership
+## Authoritative Mutation Ownership
 
 Every authoritative mutation in the Drafting Table is owned by
 a specific system. The agent proposes; the user decides; the
@@ -703,12 +686,12 @@ never holds a real credential: in hosted modes, Bridges
 pre-fetch tokens and Gates inject them at the mutation
 boundary; in single-player mode, the user's own Git host
 token is used with no OAuth 2.1 infrastructure required
-([`architecture.md`, deployment
-topology](../architecture.md#pluggable-boundaries)).
+([`architecture.md`, Environmental
+Constraints](../architecture.md#environmental-constraints)).
 
 ---
 
-## Representative transcript
+## Representative Transcript
 
 The following transcript demonstrates a Dimensioning session
 for a CLI interface. It shows user decisions, agent
@@ -839,7 +822,7 @@ Agent: I've proposed --help requirements for each
        Applies to: ears-manager CLI
        Scope: error-handling
        Verification: isolated-interface
-       Provenance: agent-suggested (interactive)
+       Provenance: agent-suggested
 
        Accept, modify, reject, or declare out of scope?
 
@@ -861,7 +844,7 @@ Agent: REQ-CLI-018 written.
        Applies to: ears-manager CLI
        Scope: help-output
        Verification: isolated-interface
-       Provenance: agent-suggested (interactive)
+       Provenance: agent-suggested
 
        Accept, modify, reject, or declare out of scope?
 
@@ -937,7 +920,7 @@ Agent: PR #72 opened: "Add --help requirements for
 
 ---
 
-## Out-of-scope decisions
+## Out-of-Scope Decisions
 
 The following are explicitly out of scope for this MVP UX
 contract. They are listed here so the decisions are traceable
@@ -953,7 +936,7 @@ and do not silently resurface.
 | Request backlog refinement UX | The request-to-change-set refinement flow is described in [user-interaction-flow.md](user-interaction-flow.md#request-backlog-and-refinement). A detailed UX contract for the refinement interactions may be a follow-up deliverable. |
 | Multi-player review ceremony | Multi-player mode adds reviewer merge as the approval gate. The UX difference is ceremony (PR review instead of direct push), not the interaction contract defined here. |
 | Kit import UX | Kit discovery, import, and policy review are future capabilities. |
-| True-bug intake and change-type classification | True-bug intake is an external entry point ([`architecture.md`, interface #8](../architecture.md#external-interfaces)) that skips Sketching and Dimensioning and enters Building directly ([`user-interaction-flow.md`](user-interaction-flow.md#request-backlog-and-refinement)). The classification that routes a request as _undefined_, _changes_, or _contradicts_ is part of backlog refinement ([`architecture.md`, Drafting Table](../architecture.md#drafting-table)). Both require their own UX contracts; this document covers only the Sketching and Dimensioning interactions. |
+| True-bug intake and change-type classification | True-bug intake is an external entry point ([`architecture.md`, interface #8](../architecture.md#external-interface-inventory)) that skips Sketching and Dimensioning and enters Building directly ([`user-interaction-flow.md`](user-interaction-flow.md#request-backlog-and-refinement)). The classification that routes a request as _undefined_, _changes_, or _contradicts_ is part of backlog refinement ([`architecture.md`, Drafting Table Boundary](../architecture.md#drafting-table-boundary)). Both require their own UX contracts; this document covers only the Sketching and Dimensioning interactions. |
 | Conversation persistence across sessions | Session continuity relies on committed specification state, not conversation history transfer. Whether conversation context should persist is an open question for the Specification Toolkit adapter (#33). |
 
 ---

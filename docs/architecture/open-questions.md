@@ -193,8 +193,7 @@ The multi-player workflow places the
 
 ### Q1: Spec gap surfacing UX
 
-Resolved →
-[Drafting Table
+Resolved → [Drafting Table
 UX](drafting-table-ux.md#requirement-proposals-and-gap-surfacing).
 Inline suggestions within the conversation flow; the user
 accepts, modifies, rejects, or declares out of scope for each

@@ -194,10 +194,9 @@ to the WMS via MCP or API.
   escalations need faster turnaround? If so, what external channel
   (email, Slack, webhook) should be used? See
   [open question Q2][q2].
-- **Spec gap surfacing pattern.** During Dimensioning, the agent
-  must aggressively surface unspecified behaviors. What's the UX
-  for this? Inline suggestions? A separate gap report? See
-  [open question Q1](open-questions.md#q1-spec-gap-surfacing-ux).
+- **Spec gap surfacing pattern.** Resolved: inline suggestions
+  within the conversation flow. See [Drafting Table
+  UX](drafting-table-ux.md#requirement-proposals-and-gap-surfacing).
 - **Multi-interface orchestration.** When a project has many
   interfaces, does the user dimension them one at a time, or jump
   between them? See
