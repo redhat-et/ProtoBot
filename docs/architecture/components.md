@@ -190,24 +190,19 @@ to the WMS via MCP or API.
 ### Open design questions
 
 - **Async escalation UX.** The web implementation can push; the TUI
-  pulls on session start. Is pull-on-start sufficient, or do some
-  escalations need faster turnaround? If so, what external channel
-  (email, Slack, webhook) should be used? See
-  [open question Q2][q2].
-- **Spec gap surfacing pattern.** Resolved: inline suggestions
-  within the conversation flow. See [Drafting Table
-  UX](drafting-table-ux.md#requirement-proposals-and-gap-surfacing).
-- **Multi-interface orchestration.** When a project has many
-  interfaces, does the user dimension them one at a time, or jump
-  between them? See
-  [open question Q3](open-questions.md#q3-multi-interface-orchestration).
+  MVP pulls on session start, which is sufficient for that local
+  contract. Which external channel (email, Slack, webhook, or web push)
+  hosted deployments require remains open. See [open question Q2][q2].
 - **Session continuity across implementations.** A user might start
   Dimensioning in the TUI and continue in the web UI (or vice
-  versa). The proposed change set and specification state are committed
-  to its git branch, while the WMS stores work records and pointers. Does
-  conversational context (the agent's memory of the discussion so far)
-  need to transfer too, or is the committed specification state
-  sufficient?
+  versa). The TUI MVP resumes from the proposed change set and
+  specification state on its Git branch plus WMS records and pointers;
+  conversation history is not authoritative or required. Whether a web
+  implementation additionally transfers optional conversation context
+  remains open.
+
+The decided MVP gap-surfacing and interface-ordering semantics are in the
+[Drafting Table UX](drafting-table-ux.md#dimensioning-interactions).
 
 ---
 

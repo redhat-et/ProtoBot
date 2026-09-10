@@ -535,7 +535,10 @@ items from the WMS and presents them so the user can resolve
 them (add a requirement or approve an out-of-scope
 declaration). The Web Drafting Table pushes these
 notifications via a persistent browser connection or an
-external channel (Q2).
+external channel (Q2). The TUI MVP treats pull-on-start as
+sufficient and lets the user resolve an item or continue unrelated
+work; hosted push-channel selection remains open. See the [Drafting Table
+UX][dt-blocked].
 
 ### OpenCode-plus-skill strawman
 
@@ -843,3 +846,5 @@ that contract.
   design questions across all areas
 - [Related Work](architecture/related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned
+
+[dt-blocked]: architecture/drafting-table-ux.md#blocked-work-resolution

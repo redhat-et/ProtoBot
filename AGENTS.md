@@ -22,6 +22,8 @@ following hierarchy:
   interfaces, and cross-cutting concerns.
 - `docs/architecture/user-interaction-flow.md` — phase details,
   sequence diagrams, and testing strategy.
+- `docs/architecture/drafting-table-ux.md` — stable interaction
+  contract for the first local Drafting Table.
 - `docs/architecture/related-work.md` — internal and external
   projects informing the design.
 - `docs/architecture/open-questions.md` — unresolved design
