@@ -137,7 +137,7 @@ This document adds a `repository` block for the Git-facing fields:
 | `repository.canonical_remote` | URL of the canonical repository. The Drafting Table pushes to this remote only. |
 | `repository.default_branch` | The branch that holds approved specification state. `main` by default. |
 | `repository.review_mode` | `single-player` or `multi-player`. Declares the review ceremony. |
-| `repository.branch_prefix` | Prefix for change-set branches. `cs/` by default. It may not be `wi/` or any other Job Site namespace; `ears-manager check` rejects one that is. |
+| `repository.branch_prefix` | Prefix for change-set branches. `cs/` by default. It may not be `wi/`, which is the only reserved prefix today; `ears-manager check` rejects it. A further reserved prefix has to be recorded in the [Content Storage Model](components.md#content-storage-model) before it can be enforced. |
 | `schema_versions` | One version per store, as decided by [ADR-0002][adr2-versioning]. |
 | `artifacts` | The artifact registry: `id`, `kind`, `path`, `digest`, `owner`, and optional `validator` per entry ([ADR-0002][adr2-registry]). |
 
@@ -212,10 +212,10 @@ the CLI contract in
 [architecture.md](../architecture.md#ears-manager-cli) nor the
 subcommand table in
 [components.md](components.md#subcommands) lists one. This
-document records the requirement: **#30 must define a project
-initialization operation** that writes `project.yaml`, seeds the
-artifact registry, and records the schema versions. Until it
-exists, fixture step 1 has no command to run.
+contract therefore depends on #30 defining a project
+initialization operation that writes `project.yaml`, seeds the
+artifact registry, and records the schema versions. Until that
+operation exists, fixture step 1 has no command to run.
 
 Adopting an existing repository never rewrites its history and
 never moves existing files. It registers the paths that are
@@ -374,9 +374,9 @@ way, `change-set create` records the default-branch head as
 
 The initial Sketch is a change set like any other. Its Vision and
 Architecture artifacts are written through
-`ears-manager artifact put`, its manifest records the
-initialization commit as `base_commit`, and it is reviewed and
-merged the same way. Sketch updates are regular work
+`ears-manager artifact put`, its manifest records the merge commit
+that landed `CS-001` on the default branch as `base_commit`, and
+it is reviewed and merged the same way. Sketch updates are regular work
 ([Content Storage Model](components.md#content-storage-model)).
 
 ### Branch lifecycle

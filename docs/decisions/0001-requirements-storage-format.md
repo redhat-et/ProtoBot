@@ -154,11 +154,13 @@ posting as a PR comment. This rendered summary shows the
 before/after for each changed requirement and the applicable
 requirement set in a human-readable table, supplementing the
 raw file diffs. Whether this summary is posted automatically
-(via CI) or on demand (via a Drafting Table action) was left
-outside this ADR's scope and is now decided: the Drafting Table
-renders it into the pull-request body when the pull request is
-created or updated, and CI is not required to post it
-([Git and Project-Repository
+(via CI) or on demand (via a Drafting Table action) is a
+UX decision outside this ADR's scope.
+
+**[Amended September 2026]** That UX decision is now made: the
+Drafting Table renders the summary into the pull-request body when
+the pull request is created or updated, and CI is not required to
+post it ([Git and Project-Repository
 Integration](../architecture/git-integration.md#title-and-body)).
 
 **Normalization rules.** `ears-manager` enforces canonical
