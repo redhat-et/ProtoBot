@@ -304,7 +304,7 @@ proposed specification transaction. The workflow:
 
 5. **Gap surfacing.** The agent proactively surfaces unspecified
    behaviors (see
-   [requirement proposals and gap
+   [Requirement Proposals and Gap
    Surfacing](#requirement-proposals-and-gap-surfacing)).
 
 6. **Impact analysis.** The agent runs `ears-manager impact` and
@@ -944,20 +944,20 @@ and do not silently resurface.
 ## Related Documents
 
 - [Vision](../vision.md) — Purpose, intended users, desired
-  outcomes, prototype scope, and non-goals.
+  outcomes, prototype scope, and non-goals
 - [Architecture](../architecture.md) — External interface
   inventory, pluggable boundaries, persistent state,
-  environmental constraints, and Drafting Table boundary.
+  environmental constraints, and Drafting Table boundary
 - [Overview](overview.md) — Guiding principles, EARS format,
-  workflow, and platform.
+  workflow, and platform
 - [System Components](components.md) — Component architecture,
-  interfaces, and cross-cutting concerns.
+  interfaces, and cross-cutting concerns
 - [User Interaction Flow](user-interaction-flow.md) — Phase
-  details, sequence diagrams, and testing strategy.
+  details, sequence diagrams, and testing strategy
 - [Open Design Questions](open-questions.md) — Unresolved
-  design questions across all areas.
+  design questions across all areas
 - [Related Work](related-work.md) — Internal and external
-  projects informing the design.
+  projects informing the design
 
 [arch-guidance]: user-interaction-flow.md#what-belongs-in-the-architecture
 [phase2]: user-interaction-flow.md#phase-2-dimensioning
