@@ -837,6 +837,8 @@ that contract.
   interfaces, and cross-cutting concerns
 - [User Interaction Flow](architecture/user-interaction-flow.md) — Phase details
   and sequence diagrams
+- [Drafting Table UX](architecture/drafting-table-ux.md) — Stable
+  interaction contract for the first local Drafting Table
 - [Open Design Questions](architecture/open-questions.md) — Unresolved
   design questions across all areas
 - [Related Work](architecture/related-work.md) — Red Hat internal projects,

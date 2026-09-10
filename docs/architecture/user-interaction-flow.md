@@ -1129,6 +1129,8 @@ whether this is achievable given Red Hat's AIA requirements.
   constraints
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [Drafting Table UX](drafting-table-ux.md) — Stable interaction
+  contract for the first local Drafting Table
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,

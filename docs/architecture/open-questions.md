@@ -19,13 +19,6 @@ pointers to their decisions. Updated as decisions are made.
 
 ## Interactive phase
 
-### Q1: Spec gap surfacing UX
-
-How does the agent present unspecified
-   behaviors during Dimensioning? Inline suggestions? Separate "gap
-   report"? What's the interaction pattern for the user to say "out of
-   scope" vs. "add a requirement for that"?
-
 ### Q2: Async requirement suggestion delivery
 
 When the autonomous
@@ -198,6 +191,15 @@ The multi-player workflow places the
 
 ## Resolved questions
 
+### Q1: Spec gap surfacing UX
+
+Resolved →
+[Drafting Table
+UX](drafting-table-ux.md#requirement-proposals-and-gap-surfacing).
+Inline suggestions within the conversation flow; the user
+accepts, modifies, rejects, or declares out of scope for each
+gap. No separate gap report.
+
 ### Q7: Requirements storage format
 
 Resolved → [ADR-0001](../decisions/0001-requirements-storage-format.md).
@@ -233,6 +235,8 @@ relationships, eval coverage) stay open above.
   constraints
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
   and sequence diagrams
+- [Drafting Table UX](drafting-table-ux.md) — Stable interaction
+  contract for the first local Drafting Table
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
 - [Related Work](related-work.md) — Red Hat internal projects,

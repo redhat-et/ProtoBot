@@ -84,10 +84,24 @@ Ephemeral, session-scoped state owned by the agent harness.
 - Suggestions the user has not yet accepted or rejected.
 
 This state lives in the harness process (OpenCode's conversation
-context). It is not persisted to Git or the WMS. If the session
-ends without the user committing, draft conversation state is
-lost. The committed specification state and the change-set
-branch are the resumption points, not the conversation.
+context). It is not persisted to Git or the WMS as a resumption
+point. If the session ends without the user committing, draft
+conversation state is lost. The committed specification state
+and the change-set branch are the resumption points, not the
+conversation.
+
+However, the session emits structured trace data (replayable
+inputs, outputs, and decision records) for component-level
+evaluability, as required by the Architecture
+([`docs/architecture.md`](../architecture.md#specification-toolkit),
+[`docs/architecture/overview.md`](overview.md#build-for-evaluability-from-day-one)).
+Traces are a record of what happened, not a resumption
+mechanism. The trace format is an open design question
+([`docs/architecture.md`, lines
+196–200](../architecture.md#specification-toolkit)).
+Whether the user is informed that their session is recorded is
+a UX decision deferred to the Specification Toolkit adapter
+(#33).
 
 ### Authoritative Git specification state
 
@@ -128,8 +142,8 @@ fields.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NewProject: protobot new
-    [*] --> Resume: protobot resume
+    [*] --> NewProject: start a new project
+    [*] --> Resume: resume a project
 
     state "New Project" as NewProject
     state "Resume" as Resume
@@ -162,9 +176,12 @@ stateDiagram-v2
 The user starts a new project by providing an initial description
 or IdeaBot artifacts. The Drafting Table:
 
-1. Initializes the `.protobot/` control namespace via
+1. Initializes the `.protobot/` control namespace through
    `ears-manager` (project identity, artifact paths, schema
-   version).
+   version). The entry point and initialization subcommand
+   are implementation details defined by the harness and
+   `ears-manager` CLI contract (#30), not by this UX
+   contract.
 2. Creates a contributor branch for the initial Sketch.
 3. Enters the Sketching phase.
 
@@ -469,10 +486,32 @@ change set.
    - Whether implementation work is required.
 
 6. **Commit and PR.** On approval, the agent commits all
-   artifacts to the branch via `ears-manager` and Git operations
-   (governed by #30 and #34). In single-player mode, the user
-   may push directly to `main` or open a self-reviewed PR. In
-   multi-player mode, the agent prepares a PR for reviewer merge.
+   artifacts to the branch via `ears-manager` and Git
+   operations (governed by #30 and #34). In multi-player and
+   web modes, the agent prepares a PR for reviewer merge;
+   branch protection on `main` prevents direct pushes. In
+   single-player mode, the user may push directly to `main`
+   or open a self-reviewed PR.
+
+7. **Post-merge materialization.** After the change set lands
+   on `main` (via reviewer merge or single-player push), a
+   registration hook calls the Job Site materializer with the
+   change-set ID, merge commit, and materialization key
+   ([`components.md`, multi-player
+   workflow](components.md#multi-player-workflow)). The
+   materializer constructs the contract and calls the WMS
+   Adapter's idempotent create-or-return operation.
+   Materialization produces exactly one build work item
+   ([`architecture.md`, control-flow
+   invariants](../architecture.md#data-and-control-flow)).
+   In single-player mode, a local
+   `register-approved-change-set` command or hook performs
+   the same materialization
+   ([`components.md`, single-player
+   mode](components.md#single-player-mode)). The user sees
+   confirmation that the work item was created (or already
+   existed). This is the moment when their approved change
+   set becomes autonomous work.
 
 ### Revision after impact
 
@@ -529,8 +568,11 @@ Resolve now, or continue with other work?
 For each blocked item, the agent shows:
 
 - The work-item identifier and description.
-- The blocking reason (undefined behavior, omitted applicable
-  requirement, or specification question).
+- The blocking reason: undefined behavior, omitted applicable
+  requirement, specification question, policy question, or
+  reconciliation failure
+  ([`components.md`, work-item
+  lifecycle](components.md#work-item-lifecycle-states)).
 - The relevant requirement context.
 
 ### Resolution options
@@ -560,6 +602,16 @@ The user resolves a blocked item by choosing one of:
 4. **Defer.** The user acknowledges the blocked item but
    chooses to work on something else first. The item remains
    blocked in the WMS.
+
+5. **Acknowledge an informational block.** For
+   reconciliation failures and policy questions, the
+   control plane resolves the underlying condition (e.g.,
+   a conflicting merge is retried or a policy exception is
+   granted). The Drafting Table displays these items as
+   informational: the user sees why the item is blocked but
+   cannot resolve it through a specification change. The
+   item returns to `ready-for-building` when the control
+   plane clears the condition.
 
 After resolution, the control plane reruns eligibility checks
 and refreshes the work-item contract. The item returns to
@@ -627,6 +679,7 @@ owning system persists.
 | Open or update a PR | Git host API (via harness) | User explicitly requests PR creation or update. |
 | Create or refine a request | WMS Adapter | User provides intent and rationale; the adapter persists the request record. |
 | Transition a work-item state | WMS Adapter (via Validation Rules) | Transitions happen at the WMS write boundary with Validation Rules enforcement. The Drafting Table submits reviewed resolutions; it does not directly set work-item fields. |
+| Register approved change set and materialize build work item | Job Site Materializer (via WMS Adapter) | Triggered by a registration hook (multi-player merge or single-player local command). The materializer resolves the manifest, reruns deterministic impact analysis, and calls the WMS Adapter's idempotent create-or-return operation ([`components.md`](components.md#multi-player-workflow)). |
 | Update business priority | WMS Adapter | Authorized maintainer only. The Drafting Table surfaces the action; Validation Rules enforce authorization. |
 
 ### What the agent may _not_ do
@@ -640,9 +693,18 @@ The agent operates through governed tools. It cannot:
 - Approve its own suggestions — every specification delta
   requires user confirmation.
 
-These constraints are enforced structurally: branch protection,
-`ears-manager check` as a CI gate, path ownership in CI, and
-optionally harness-level tool permissions (#33).
+These constraints are enforced structurally: branch protection
+(multi-player and web modes), `ears-manager check` as a CI
+gate, path ownership in CI, credential isolation through the
+Alcove Bridge/Gate pattern
+([`components.md`](components.md#authentication-and-credential-isolation)),
+and optionally harness-level tool permissions (#33). The agent
+never holds a real credential: in hosted modes, Bridges
+pre-fetch tokens and Gates inject them at the mutation
+boundary; in single-player mode, the user's own Git host
+token is used with no OAuth 2.1 infrastructure required
+([`architecture.md`, deployment
+topology](../architecture.md#pluggable-boundaries)).
 
 ---
 
@@ -682,10 +744,10 @@ Agent: Resuming change set CS-005 on branch
        - Affected interface: ears-manager CLI
        - Impact analysis not yet run
 
-       The Architecture lists 11 ears-manager subcommands.
        REQ-CLI-004 and REQ-CLI-005 cover "requirement add"
        and "requirement list". Shall I continue proposing
-       --help requirements for the remaining subcommands?
+       --help requirements for each remaining ears-manager
+       subcommand?
 
 User:  Yes, continue.
 ```
@@ -756,9 +818,9 @@ User:  Accept.
 ### Gap surfacing
 
 ```text
-Agent: I've proposed --help requirements for all 11
-       subcommands. Before running impact analysis, I want
-       to surface a potential gap:
+Agent: I've proposed --help requirements for each
+       ears-manager subcommand. Before running impact
+       analysis, I want to surface a potential gap:
 
        The current requirements specify what --help output
        must contain, but they do not specify what happens
@@ -861,7 +923,9 @@ Agent: Committed change set CS-005 to branch
        Files committed:
        - .protobot/change-sets/cs-005.yaml
        - specs/requirements/req-cli-004.yaml through
-         req-cli-019.yaml (13 files)
+         req-cli-014.yaml (11 subcommand files)
+       - specs/requirements/req-cli-018.yaml and
+         req-cli-019.yaml (2 gap-closing files)
 
        Open a PR against main?
 
@@ -889,6 +953,7 @@ and do not silently resurface.
 | Request backlog refinement UX | The request-to-change-set refinement flow is described in [user-interaction-flow.md](user-interaction-flow.md#request-backlog-and-refinement). A detailed UX contract for the refinement interactions may be a follow-up deliverable. |
 | Multi-player review ceremony | Multi-player mode adds reviewer merge as the approval gate. The UX difference is ceremony (PR review instead of direct push), not the interaction contract defined here. |
 | Kit import UX | Kit discovery, import, and policy review are future capabilities. |
+| True-bug intake and change-type classification | True-bug intake is an external entry point ([`architecture.md`, interface #8](../architecture.md#external-interfaces)) that skips Sketching and Dimensioning and enters Building directly ([`user-interaction-flow.md`](user-interaction-flow.md#request-backlog-and-refinement)). The classification that routes a request as _undefined_, _changes_, or _contradicts_ is part of backlog refinement ([`architecture.md`, Drafting Table](../architecture.md#drafting-table)). Both require their own UX contracts; this document covers only the Sketching and Dimensioning interactions. |
 | Conversation persistence across sessions | Session continuity relies on committed specification state, not conversation history transfer. Whether conversation context should persist is an open question for the Specification Toolkit adapter (#33). |
 
 ---

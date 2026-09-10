@@ -278,6 +278,8 @@ the affected design areas will need revisiting:
   architecture, interfaces, and cross-cutting concerns
 - [User interaction flow](architecture/user-interaction-flow.md) —
   phase details, sequence diagrams, and testing strategy
+- [Drafting Table UX](architecture/drafting-table-ux.md) — stable
+  interaction contract for the first local Drafting Table
 - [Open design questions](architecture/open-questions.md) —
   unresolved decisions across all areas
 - [Related work](architecture/related-work.md) — internal and
