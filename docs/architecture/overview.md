@@ -147,8 +147,10 @@ not an afterthought:
 ### Single-player mode
 
 A single developer runs ProtoBot locally or against their own repo.
-They have write access and can push specs directly to main (or
-merge their own PRs). Approval atomically materializes a build work
+They have write access and merge their own PRs; no reviewer is
+required ([Git and Project-Repository
+Integration](git-integration.md#every-change-arrives-by-pull-request)).
+Approval atomically materializes a build work
 item in the WMS, and the Job Site claims that work item the same way it
 does in multi-player mode. Minimal ceremony.
 
@@ -312,6 +314,9 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
 - [System Components](components.md) — Component architecture,
   interfaces, the content storage model, multi-player workflow,
   and cross-cutting concerns.
+- [Git and Project-Repository Integration](git-integration.md) —
+  Project identification, branches, commits, PR preparation, and
+  approved specification state.
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas.
 - [Related Work](related-work.md) — Red Hat internal projects,

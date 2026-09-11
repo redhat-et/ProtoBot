@@ -576,5 +576,8 @@ implementations) succeed at much higher rates than those without.
   and sequence diagrams
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [Git and Project-Repository Integration](git-integration.md) —
+  Project identification, branches, commits, PR preparation, and
+  approved specification state
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas

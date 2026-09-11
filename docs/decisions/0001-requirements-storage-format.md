@@ -157,6 +157,12 @@ raw file diffs. Whether this summary is posted automatically
 (via CI) or on demand (via a Drafting Table action) is a
 UX decision outside this ADR's scope.
 
+**[Amended September 2026]** That UX decision is now made: the
+Drafting Table renders the summary into the pull-request body when
+the pull request is created or updated, and CI is not required to
+post it ([Git and Project-Repository
+Integration](../architecture/git-integration.md#title-and-body)).
+
 **Normalization rules.** `ears-manager` enforces canonical
 serialization on every write to keep diffs stable across
 editors and tooling:

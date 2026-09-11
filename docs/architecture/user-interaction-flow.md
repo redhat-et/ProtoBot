@@ -99,7 +99,7 @@ ongoing interactive work happens.
 | Interface Type | Spec Approach | Example |
 | --- | --- | --- |
 | Network service | Smithy / OpenAPI | REST API, gRPC service |
-| CLI | `usage` (jdx.dev) / docopt / `wasi:cli` _(needs evaluation)_ | `protobot generate` |
+| CLI | `usage` (jdx.dev) / docopt / `wasi:cli` _(needs evaluation)_ | Build tool, code generator |
 | REPL | Skills and prompts define the interaction protocol | Interactive notebook |
 | Linkable library | WIT (Wasm Interface Types) | Shared SDK module |
 | Web GUI (html/css) | _(open gap — not yet solved)_ | Dashboard UI |
@@ -1129,6 +1129,9 @@ whether this is achievable given Red Hat's AIA requirements.
   constraints
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [Git and Project-Repository Integration](git-integration.md) —
+  Project identification, branches, commits, PR preparation, and
+  approved specification state
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,

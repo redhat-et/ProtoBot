@@ -179,7 +179,10 @@ to the WMS via MCP or API.
   artifact, including Vision/Architecture prose and external interface
   IDLs. The Drafting Table never edits spec files directly.
 - **To project repo:** Creates branches/commits and opens PRs containing
-  artifacts produced through `ears-manager`.
+  artifacts produced through `ears-manager`. Branch naming, commit
+  content, PR preparation, and the permitted Git operations are
+  defined in
+  [Git and Project-Repository Integration](git-integration.md).
 - **To User:** Conversational interface for Sketching and
   Dimensioning. Displays Job Site progress/status. Surfaces blocked
   work items.
@@ -729,17 +732,23 @@ language/source/test layout:
 
 | Path | Owner and purpose |
 | --- | --- |
-| `.protobot/project.yaml` | Project identity, configured artifact paths, non-secret WMS/backend references, and schema versions. |
-| `.protobot/projection.yaml` | Deny-by-default path classification for Worker and attestation projections. |
+| `.protobot/project.yaml` | Project identity, configured artifact paths, non-secret WMS/backend references, the canonical remote, default branch and declared review mode ([git-integration.md](git-integration.md#repository-fields)), and schema versions. |
+| `.protobot/projection.yaml` | Deny-by-default path classification for Worker and attestation projections. `ears-manager` writes the class for a registered specification path ([git-integration.md](git-integration.md#path-rules)); every other entry is reviewed project policy. |
 | `.protobot/policy.yaml` | Required Inspectors, WIP/scheduling policy, sandbox profile, and other reviewed project policy. |
 | `.protobot/kits.lock` | Optional Kit source/version/digest/provenance locks. |
-| `.protobot/change-sets/` | Immutable approved change-set manifests. |
+| `.protobot/change-sets/` | Immutable approved change-set manifests, one flat file per change set, named `cs-<nnn>.yaml` ([git-integration.md](git-integration.md#one-change-set-one-file)). |
 | `.protobot/test-catalog.jsonl` | Stable test IDs, requirement links, verification modes, control surfaces, and validity metadata. |
 | `.protobot/attestations/` | Finding snapshots/reports, conformance metadata, and canonical demo manifests; always `attestation-only`. |
 
 `project.yaml` points to the project's Vision, Architecture/interface
 IDLs, and structured requirement store wherever project conventions put
-them. `ears-manager` is the exclusive write gate for every registered
+them. The default that `ears-manager` proposes for the requirement store
+is `.protobot/requirements/`, which keeps the files it manages together
+and leaves the rest of the tree to the project
+([git-integration.md](git-integration.md#selecting-the-paths)); a project
+may register a different path.
+
+`ears-manager` is the exclusive write gate for every registered
 specification artifact: it owns structured requirements, the interface
 registry, relationships, and change-set manifests and delegates
 format-specific validation for prose/IDL artifacts. The Job Site owns the
@@ -907,10 +916,14 @@ and a new Inspection Run. A path-disjoint result never waives these gates.
   but the directory hierarchy is not. Flat, or mirroring
   the specification levels? Naming convention for record
   files? The layout affects discoverability and queryability.
-- **Branch naming and lifecycle.** Convention for branch names
-  (e.g., `wi/<id>-<slug>`), when branches are created (on work item
-  creation or on first content write), and cleanup policy for
-  completed/abandoned branches.
+- **Branch naming and lifecycle.** The change-set half is resolved:
+  [Git and Project-Repository Integration](git-integration.md#change-set-branches)
+  decides `cs/<nnn>-<slug>`, creation at `change-set create`, and
+  deletion after merge. Still open for build work items: the
+  convention for `wi/` branch names (e.g., `wi/<id>-<slug>`), when
+  the Job Site creates them (on work item creation or on first
+  content write), and the cleanup policy for completed/abandoned
+  branches.
 
 ### Merge strategy (decided)
 
@@ -1676,11 +1689,13 @@ no special escalation mechanism needed.
 
 #### Single-player mode
 
-In single-player mode, the contributor has write access and can
-push specs directly to main (or merge their own PRs). A local
-`register-approved-change-set` command or hook performs the same
-idempotent WMS materialization as the multi-player merge hook. Direct
-push is not sufficient by itself. The difference is ceremony, not
+In single-player mode, the contributor has write access and merges
+their own PRs without a reviewer
+([Git and Project-Repository
+Integration](git-integration.md#every-change-arrives-by-pull-request)).
+A local `register-approved-change-set` command or hook performs the same
+idempotent WMS materialization as the multi-player merge hook. The
+merge is not sufficient by itself. The difference is ceremony, not
 architecture.
 
 #### Open design questions
@@ -1830,6 +1845,9 @@ confirmation.
 - [Architecture](../architecture.md) — External interface inventory,
   pluggable boundaries, persistent state, and environmental
   constraints
+- [Git and Project-Repository Integration](git-integration.md) —
+  Project identification, branches, commits, PR preparation, and
+  approved specification state
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
   and sequence diagrams
 - [Open Design Questions](open-questions.md) — Unresolved design

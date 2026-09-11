@@ -235,5 +235,8 @@ relationships, eval coverage) stay open above.
   and sequence diagrams
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [Git and Project-Repository Integration](git-integration.md) —
+  Project identification, branches, commits, PR preparation, and
+  approved specification state
 - [Related Work](related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned
