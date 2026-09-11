@@ -1,0 +1,24 @@
+---
+partition: development
+category: template-selection
+difficulty: hard
+provenance: authored compound-behavior case
+readiness: needs_clarification
+expected_templates:
+  - complex
+  - unwanted behavior
+required_findings:
+  - explain that state and submission event jointly scope validation
+  - >-
+    split validation from invalid-record notification when independently
+    verified
+  - >-
+    ask for notification channel and validation completion or partial-result
+    behavior
+disallowed_behaviors:
+  - force every behavior into one complex sentence
+  - prescribe a validator or notification technology
+rationale: >-
+  The initial response is genuinely state plus event. The invalid-record
+  response is a separate failure-path obligation with missing observable
+  details.

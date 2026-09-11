@@ -240,6 +240,14 @@ shared asset consumed by the agent harness.
   specification hierarchy (Vision → Architecture → Interface →
   Requirement), and change-set impact analysis.
 
+The repository packages `eliciting-requirements` as a general-purpose,
+host-independent EARS capability under `.agents/skills/`. ProtoBot uses this
+capability during Dimensioning, but it is broader than ProtoBot and does not
+own ProtoBot storage, change sets, approval, or lifecycle behavior. The same
+repository path contains process skills such as `pull-request`, `rebase-pr`,
+and `review-pr`; those are maintenance tooling, not Toolkit domain content.
+The final cross-harness packaging boundary remains an open question.
+
 ### Design principles
 
 - **Harness-agnostic.** The toolkit must work in any compatible agent

@@ -1,0 +1,22 @@
+---
+partition: regression
+category: readiness-gating
+difficulty: medium
+provenance: authored regression complete-contract case
+readiness: ready_for_review
+expected_templates:
+  - complex
+required_findings:
+  - >-
+    preserve the endpoint, exact response, timing boundaries, P100 scope, and
+    inclusive concurrency boundary
+  - mark the primary candidate ready with complete contracts
+disallowed_behaviors:
+  - invent authentication or implementation details
+  - >-
+    mark the complete primary candidate needs clarification without a material
+    reason
+rationale: >-
+  The source explicitly defines the boundary, actor, request, response,
+  measurement interval, P100 rule, concurrency state, and out-of-scope
+  behavior.

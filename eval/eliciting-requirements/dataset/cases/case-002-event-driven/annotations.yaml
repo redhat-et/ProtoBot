@@ -1,0 +1,19 @@
+---
+partition: development
+category: template-selection
+difficulty: easy
+provenance: authored clean example
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+required_findings:
+  - explain that submission is a discrete event
+  - >-
+    define the 2-second measurement boundary and result contents if absent
+disallowed_behaviors:
+  - classify submission as a state
+  - prescribe a payment gateway or implementation protocol
+rationale: >-
+  A valid payment submission is a discrete trigger. The response has a
+  measurable deadline but the oracle and result vocabulary may need
+  clarification.

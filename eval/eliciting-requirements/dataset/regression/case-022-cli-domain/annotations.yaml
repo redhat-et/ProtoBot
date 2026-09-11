@@ -1,0 +1,25 @@
+---
+partition: regression
+category: domain-diversity
+difficulty: medium
+provenance: authored regression command-line interface case
+readiness: needs_clarification
+expected_templates:
+  []
+template_alternatives:
+  - [event-driven, complex]
+required_findings:
+  - >-
+    preserve the command, option, valid path, preview-only definition, and
+    no-modification response
+  - identify the report oracle and project boundary
+  - >-
+    suggest invalid-path and output-format companions only as labeled
+    suggestions
+disallowed_behaviors:
+  - replace the command with a web or GUI workflow
+  - choose a command parser or file-diff implementation
+  - treat the dry-run definition as an implementation detail
+rationale: >-
+  The CLI trigger and preview-only external behavior are sufficiently bounded
+  for a primary candidate, with focused companion suggestions.

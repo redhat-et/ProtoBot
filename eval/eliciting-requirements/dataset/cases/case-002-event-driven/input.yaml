@@ -1,0 +1,10 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  Source request:
+  When a customer submits a valid payment, the payment service shall return
+  an authorization result within 2 seconds.

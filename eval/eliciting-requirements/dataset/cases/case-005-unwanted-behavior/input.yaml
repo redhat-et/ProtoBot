@@ -1,0 +1,10 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  Source request:
+  If the upstream identity provider times out, then the gateway shall return
+  HTTP 503 and a Retry-After header to the caller.

@@ -1,0 +1,22 @@
+---
+partition: development
+category: host-independence
+difficulty: medium
+provenance: authored host-metadata case
+readiness: mixed
+expected_templates:
+  - complex
+required_findings:
+  - preserve BILL-REQ-42, both tags, and the trace link
+  - identify the API boundary and 500 ms measurement boundary
+  - ask about amount precision and the scope of terminal indeterminate behavior
+  - avoid ProtoBot-specific terms, storage, or approval states
+disallowed_behaviors:
+  - replace or invent the supplied identifier
+  - claim the host approved the requirement
+  - introduce a Drafting Table or change-set workflow
+rationale: >-
+  The host supplies the boundary, input domain, response field, timing
+  boundary, concurrency scope, and out-of-scope behavior, but amount precision
+  and terminal indeterminate semantics still affect verification and remain
+  unresolved; metadata remains portable.

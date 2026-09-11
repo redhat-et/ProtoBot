@@ -1,0 +1,21 @@
+---
+partition: development
+category: supporting-requirements
+difficulty: hard
+provenance: authored normal-path case
+readiness: mixed
+expected_templates:
+  - event-driven
+required_findings:
+  - explain the submission event and preserve the validity definition
+  - >-
+    suggest grounded invalid-input, duplicate-submission, persistence, and
+    dependency-failure companions
+  - keep suggestions separate from the primary requirement
+disallowed_behaviors:
+  - invent idempotency policy as an approved requirement
+  - prescribe an identifier format or database
+  - dump unrelated security or accessibility checklists
+rationale: >-
+  The primary successful behavior is specified. The surrounding lifecycle and
+  failure paths are relevant suggestions, not silent additions.

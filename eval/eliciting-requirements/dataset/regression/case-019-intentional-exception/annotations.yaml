@@ -1,0 +1,23 @@
+---
+partition: regression
+category: consistency-analysis
+difficulty: hard
+provenance: authored regression intentional-exception case
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+  - complex
+required_findings:
+  - >-
+    identify the explicit legal-hold exception rather than reporting an
+    unresolved conflict
+  - preserve authorization, download, denial, and visible legal-hold state
+  - identify any remaining oracle or legal-hold definition question
+disallowed_behaviors:
+  - erase R1 because R2 exists
+  - invent precedence beyond the explicit exception
+  - >-
+    call the requirements contradictory without acknowledging the stated
+    exception
+rationale: >-
+  R2 narrows R1 through an explicitly supplied state and event exception.

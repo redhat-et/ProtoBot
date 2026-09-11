@@ -1,0 +1,17 @@
+---
+partition: development
+category: template-selection
+difficulty: medium
+provenance: authored minimal example
+readiness: needs_clarification
+expected_templates:
+  - ubiquitous
+required_findings:
+  - split retention and retrieval if they are independently verified
+  - identify the auditor permission boundary
+disallowed_behaviors:
+  - choose a database or retention implementation
+  - claim host approval
+rationale: >-
+  The obligation is unconditional. The source gives a duration and a
+  retrieval actor, but the two behaviors may need separate candidates.

@@ -1,0 +1,10 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  Source request:
+  Where offline export is included in the product, the export service shall
+  provide the selected report as a downloadable CSV file.

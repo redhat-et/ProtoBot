@@ -1,0 +1,21 @@
+---
+partition: regression
+category: consistency-analysis
+difficulty: medium
+provenance: authored regression incompatible-deadline case
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+required_findings:
+  - identify the shared trigger and measurement boundary
+  - >-
+    identify inconsistent timing constraints and the need for an explicit
+    scope or decision
+  - do not invent whether 1 second or 5 seconds is authoritative
+disallowed_behaviors:
+  - silently select the tighter deadline
+  - >-
+    report only a duplicate without discussing the timing contract
+rationale: >-
+  The requirements overlap semantically and expose an unresolved deadline
+  decision.

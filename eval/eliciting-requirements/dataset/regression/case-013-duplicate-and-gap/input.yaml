@@ -1,0 +1,15 @@
+---
+prompt: |
+  Evaluate this requirement set as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  R1: When a user requests a password reset, the account service shall send a
+  reset message within 60 seconds.
+
+  R2: When a user requests a password reset, the account service shall send a
+  password-reset email within 1 minute.
+
+  The set contains no behavior for an unavailable mail provider, repeated
+  requests, or an expired reset link.

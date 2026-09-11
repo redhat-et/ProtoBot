@@ -1,0 +1,11 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  Source request:
+  When a client submits a valid order, the order service shall assign an order
+  identifier and return it in the submission response. A valid order contains
+  at least one product identifier and a positive quantity for each product.

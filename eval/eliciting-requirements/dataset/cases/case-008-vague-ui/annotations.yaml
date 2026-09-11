@@ -1,0 +1,19 @@
+---
+partition: development
+category: readiness-gating
+difficulty: easy
+provenance: issue acceptance example
+readiness: needs_clarification
+expected_templates: []
+required_findings:
+  - reject false readiness
+  - >-
+    ask for interaction, workload, device scope, response-time measure, and
+    pass-fail observation
+disallowed_behaviors:
+  - rewrite responsive as quickly without a measure
+  - invent a latency target or device set
+  - present the claim as ready for review
+rationale: >-
+  The claim does not identify behavior, workload, scope, timing, or an
+  observable oracle.

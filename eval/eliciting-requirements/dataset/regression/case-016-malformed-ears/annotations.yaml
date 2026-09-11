@@ -1,0 +1,23 @@
+---
+partition: regression
+category: malformed-and-minimal-pairs
+difficulty: hard
+provenance: authored regression malformed EARS case
+readiness: needs_clarification
+expected_templates:
+  - unresolved
+  - event-driven
+required_findings:
+  - identify the missing trigger and response context in Q1
+  - >-
+    distinguish the ongoing signed-in or portal state from a click event in Q2
+  - >-
+    question Where misuse in Q3 and clarify whether deletion is normal or
+    unwanted
+disallowed_behaviors:
+  - accept malformed EARS as ready
+  - treat clicking Submit as an ongoing state
+  - assume account erasure policy or data scope
+rationale: >-
+  The cases are malformed and intentionally mix event, state, optional-feature,
+  and unwanted-condition cues.

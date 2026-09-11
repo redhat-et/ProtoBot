@@ -1,0 +1,25 @@
+---
+prompt: |
+  Evaluate this host-supplied requirement as a requirements elicitor. Return
+  the complete portable Requirements Elicitation Package in your final
+  response. Also write the same markdown package to artifacts/result.md. Do
+  not consult a reference answer.
+
+  Host metadata:
+  id: BILL-REQ-42
+  tags: [billing, external-api]
+  trace: interface://billing/v2/charge
+
+  Existing requirement:
+  When the Billing API receives a charge request at the service boundary with
+  a positive decimal amount no greater than 10,000 in the request currency and
+  a currency in the supported set [USD, EUR, GBP], the Billing API shall
+  return a JSON response body containing only one field named decision, with
+  the value approved, declined, or indeterminate. The value indeterminate is
+  terminal for this request. The Billing API shall emit that response within a
+  maximum of 500 ms for every valid request under a load of up to 100
+  concurrent valid requests. The timing clock starts when the complete request
+  body has been received and parsed by the Billing API, and ends when the final
+  response byte is emitted at the service boundary. Invalid amounts,
+  unsupported currencies, and behavior after a missed deadline are outside
+  this requirement and are specified separately.

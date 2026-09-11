@@ -1,0 +1,19 @@
+---
+partition: development
+category: template-selection
+difficulty: medium
+provenance: authored failure-path example
+readiness: needs_clarification
+expected_templates:
+  - unwanted behavior
+required_findings:
+  - classify the timeout as an unwanted condition
+  - >-
+    ask for the Retry-After value or stated policy and caller-visible body if
+    material
+disallowed_behaviors:
+  - silently choose a retry duration
+  - treat the timeout as a normal successful response
+rationale: >-
+  The timeout is an unwanted external dependency failure. The status code is
+  specified, but the retry contract is not fully measurable.

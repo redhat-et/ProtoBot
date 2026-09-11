@@ -180,10 +180,10 @@ the contract is Markdown skills, JSON tool schemas, and prompts.
 
 **External contract:**
 
-- **Skills:** Structured instructions for Sketching (elicit
-  Vision, enumerate interfaces, identify types) and
-  Dimensioning (translate Architecture into EARS requirements,
-  surface spec gaps, handle each EARS pattern type).
+- **Skills:** A reusable `eliciting-requirements` capability plus structured
+  instructions for Sketching and Dimensioning. ProtoBot uses the capability
+  during Dimensioning, but it is not tied to ProtoBot's phases, storage,
+  approval, or lifecycle.
 - **Tool definitions:** MCP tool schemas or API client code for
   `ears-manager` operations (see the
   [`ears-manager` CLI table](#ears-manager-cli)) and WMS Adapter

@@ -185,8 +185,9 @@ The initial self-hosting effort builds the components ProtoBot needs
 to function:
 
 1. **Specification Toolkit** — the portable skills, tools, and
-   prompts that encode how to do Sketching and Dimensioning, loadable
-   into any compatible agent harness.
+   prompts that encode how to do Sketching and Dimensioning, including
+   the general-purpose EARS elicitation capability, loadable into any
+   compatible agent harness.
 2. **`ears-manager`** — the CLI tool for managing the structured
    specification store (EARS requirements, interfaces, change sets).
 3. **WMS Adapter** — a thin integration layer over the chosen work

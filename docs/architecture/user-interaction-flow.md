@@ -254,8 +254,10 @@ In summary:
 > **Schematic**.
 
 This is the most time-consuming interactive phase and the **primary human
-review boundary**. The agent helps the user produce precise, EARS-formatted
-requirements for each interface identified in the Architecture.
+review boundary**. The agent uses the reusable EARS elicitation capability to
+help the user produce precise, EARS-formatted requirements for each interface
+identified in the Architecture. The surrounding Dimensioning workflow owns
+change sets, impact analysis, and approval.
 
 ```mermaid
 sequenceDiagram

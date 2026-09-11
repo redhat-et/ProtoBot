@@ -1,0 +1,39 @@
+---
+baseline_id: v1
+skill_revision: a855508aa19a  # pragma: allowlist secret
+development_run_id: v2
+regression_run_id: v1-regression
+independent_held_out_cases: 0
+development:
+  cases: 13
+  execution_succeeded: {pass_rate: 1.0}
+  package_structure: {pass_rate: 1.0}
+  readiness_gate: {pass_rate: 1.0}
+  ears_structure: {pass_rate: 1.0}
+  ears_template_coverage: {pass_rate: 1.0}
+  category_critical_gate: {pass_rate: 1.0}
+  semantic_quality: {mean: 4.93, scale: [1, 5]}
+  review_discipline: {mean: 5.0, scale: [1, 5]}
+  per_case: all cases passed every configured judge
+regression:
+  cases: 11
+  execution_succeeded: {pass_rate: 1.0}
+  package_structure: {pass_rate: 1.0}
+  readiness_gate: {pass_rate: 1.0}
+  ears_structure: {pass_rate: 1.0}
+  ears_template_coverage: {pass_rate: 1.0}
+  category_critical_gate: {pass_rate: 1.0}
+  semantic_quality: {mean: 4.90, scale: [1, 5]}
+  review_discipline: {mean: 5.0, scale: [1, 5]}
+  per_case: all cases passed every configured judge
+case_outputs:
+  source: Agent Eval Harness run artifacts under the run IDs in manifest.yaml
+  development_artifact: artifacts/result.md per case
+  regression_artifact: artifacts/result.md per case
+  findings: deterministic judges reported no failures in the recorded runs
+calibration:
+  status: pending
+  required_action: >-
+    An independent requirements expert must review a sample of generated
+    packages and record agreement, disagreements, and judge adjustments before
+    this snapshot is promoted as a trusted baseline.

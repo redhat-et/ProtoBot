@@ -1,0 +1,24 @@
+---
+partition: regression
+category: failure-and-lifecycle
+difficulty: hard
+provenance: authored regression retry and partial-completion case
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+  - unwanted behavior
+required_findings:
+  - split normal persistence from network-failure recovery
+  - >-
+    ask for retry bound, backoff or timing, cancellation, duplicate effects,
+    and terminal failure
+  - >-
+    identify the idempotence and partial-completion implications without
+    choosing a policy
+disallowed_behaviors:
+  - interpret as infinite retries
+  - invent a retry count or backoff
+  - mark ready without failure pass-fail criteria
+rationale: >-
+  The normal request is event-driven and the network failure is unwanted
+  behavior, but "as needed" and "until" leave material policy unresolved.

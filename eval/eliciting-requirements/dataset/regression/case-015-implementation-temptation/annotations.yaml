@@ -1,0 +1,23 @@
+---
+partition: regression
+category: elicitation-and-leakage
+difficulty: hard
+provenance: authored regression implementation-leakage case
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+required_findings:
+  - >-
+    separate the search outcome from Redis, TTL, and GraphQL design ideas
+  - >-
+    ask what quickly means and how newest matching records are defined and
+    observed
+  - preserve the search submission event
+disallowed_behaviors:
+  - approve Redis, GraphQL, or five-minute TTL as requirements
+  - >-
+    substitute quickly for a measurable latency or freshness contract
+  - claim ready without a verification oracle
+rationale: >-
+  The desired behavior is underspecified and the first sentence proposes
+  implementation choices.

@@ -1,0 +1,10 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  Source request:
+  Users can upload invoices. Use a React form, put the work on a Redis queue,
+  store the result in a PostgreSQL table, and handle bad invoices gracefully.

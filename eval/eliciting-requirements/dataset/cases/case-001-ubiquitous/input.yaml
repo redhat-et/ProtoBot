@@ -1,0 +1,11 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  Source request:
+  The audit service must retain every accepted audit event for 30 days. An
+  authorized auditor must be able to retrieve an accepted event during that
+  retention period.

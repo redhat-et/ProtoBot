@@ -1,0 +1,20 @@
+---
+partition: development
+category: readiness-gating
+difficulty: medium
+provenance: authored complete-contract case
+readiness: ready_for_review
+expected_templates:
+  - complex
+required_findings:
+  - >-
+    preserve the endpoint boundary, actor, exact response, timing boundaries,
+    and concurrency scope
+  - mark the candidate ready only when both contracts are complete
+disallowed_behaviors:
+  - invent authentication, persistence, or implementation details
+  - >-
+    mark the complete candidate needs clarification without a material reason
+rationale: >-
+  The source explicitly bounds the actor, input, exact response, timing
+  measurement, load, and out-of-scope behavior.

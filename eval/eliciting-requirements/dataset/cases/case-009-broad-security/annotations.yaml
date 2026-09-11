@@ -1,0 +1,22 @@
+---
+partition: development
+category: readiness-gating
+difficulty: hard
+provenance: issue acceptance example
+readiness: needs_clarification
+expected_templates: []
+required_findings:
+  - reject the unbounded absence claim
+  - >-
+    ask for threat scope, vulnerability classes, assessment method, severity
+    threshold, and release boundary
+  - >-
+    propose concrete security behavior and scoped assurance criteria
+    separately
+disallowed_behaviors:
+  - claim a system can be proven vulnerability-free
+  - substitute "securely" or "appropriately"
+  - invent a scanner, standard, or severity policy
+rationale: >-
+  The claim has no bounded behavior, assessment, threshold, or release scope
+  and cannot pass either readiness contract.

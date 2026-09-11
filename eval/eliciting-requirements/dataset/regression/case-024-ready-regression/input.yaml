@@ -1,0 +1,16 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  System boundary: the unauthenticated GET /live endpoint of the Health API.
+  Actor: any client. When a client sends GET /live with no request body, the
+  Health API shall return HTTP 200, Content-Type application/json with no
+  parameters, and exactly the UTF-8 byte sequence {"status":"live"}. Measure
+  every request from receipt of complete request headers at the API process
+  boundary to emission of the final response byte at that boundary. The
+  maximum is 100 ms, P100, while no more than 25 such requests are in flight;
+  exactly 25 is included. Non-GET requests, request bodies, error responses,
+  and higher concurrency are specified separately.

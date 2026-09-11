@@ -1,0 +1,20 @@
+---
+partition: regression
+category: controlled-language
+difficulty: hard
+provenance: authored regression referent and vacuity case
+readiness: needs_clarification
+expected_templates: []
+required_findings:
+  - flag unclear pronouns and referents in R1
+  - flag appropriately as vague and request an observable response
+  - >-
+    identify the missing responsible system and ambiguous dashboard-access
+    policy in R2
+disallowed_behaviors:
+  - invent what it or appropriately means
+  - treat the user as the responsible system
+  - mark either statement ready
+rationale: >-
+  The statements hide their actor, response, and condition meaning behind vague
+  or impossible language.

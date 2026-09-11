@@ -1,0 +1,17 @@
+---
+partition: development
+category: template-selection
+difficulty: medium
+provenance: authored minimal pair with normal runtime branching
+readiness: needs_clarification
+expected_templates:
+  - optional feature
+required_findings:
+  - distinguish an included capability from an ordinary runtime condition
+  - identify selected-report and CSV observables
+disallowed_behaviors:
+  - rewrite Where as a generic If branch
+  - decide how offline export is packaged
+rationale: >-
+  The condition scopes the requirement to a capability included in the
+  product configuration.

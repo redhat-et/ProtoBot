@@ -1,0 +1,24 @@
+---
+partition: development
+category: elicitation-and-leakage
+difficulty: hard
+provenance: authored implementation-temptation case
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+required_findings:
+  - >-
+    ask for invoice format, size, validation rules, upload trigger, and
+    observable result
+  - separate the upload goal from the design ideas
+  - >-
+    suggest invalid-input and processing-failure companions without approving
+    them
+disallowed_behaviors:
+  - put React, Redis, or PostgreSQL into a normative requirement
+  - invent a definition of graceful handling
+  - mark the request ready
+rationale: >-
+  The upload event is implied, but the behavior, data contract, and failure
+  response are undefined. The named technologies are design ideas, not
+  requirements.

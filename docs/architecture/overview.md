@@ -203,7 +203,7 @@ ProtoBot follows a construction metaphor with four phases:
 | Term | Meaning |
 | --- | --- |
 | **Sketching** | Human + agent define what to build (Vision) and its external boundaries (Architecture). |
-| **Dimensioning** | Human + agent produce precise EARS requirements for each interface. This is the most time-consuming interactive work. |
+| **Dimensioning** | Human + agent use the reusable EARS elicitation capability to produce precise requirements for each interface. This is the most time-consuming interactive work. |
 | **Building** | Agents generate tests and code concurrently from approved EARS requirements. Neither sees the other's output (dual-model isolation). |
 | **Inspecting** | Independent Inspector agents review the work. Defects go back to Building for rework. |
 | **Sketch** | The artifact from Sketching: a Vision statement + Architecture. |

@@ -1,0 +1,17 @@
+---
+partition: development
+category: template-selection
+difficulty: easy
+provenance: authored clean example
+readiness: needs_clarification
+expected_templates:
+  - state-driven
+required_findings:
+  - distinguish the paused state from an event that enters the state
+  - define observable processing and state exit behavior if material
+disallowed_behaviors:
+  - use When for the ongoing paused state
+  - prescribe worker or queue behavior
+rationale: >-
+  The obligation applies throughout the paused state, not only when a pause
+  command occurs.

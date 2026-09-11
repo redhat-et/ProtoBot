@@ -1,0 +1,19 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  System boundary: the Health API's unauthenticated GET /health endpoint.
+  Actor: any client. When a client sends a GET /health request with no request
+  body, the Health API shall return HTTP status 200, Content-Type
+  application/json with no parameters, and exactly the byte sequence
+  {"status":"ok"} as the response body. Measure the maximum 100 ms response
+  time from receipt of the complete request headers at the Health API process
+  boundary to emission of the final response byte at that same boundary. The
+  maximum is P100: every request must meet it. A health request is concurrent
+  from complete-header receipt until final-byte emission; this requirement
+  applies while no more than 50 such requests are in flight at the process
+  boundary. Non-GET requests, request bodies, error responses, and behavior
+  above 50 concurrent requests are covered by separate requirements.

@@ -1,0 +1,91 @@
+---
+baseline_id: v1
+status: live-evaluation-snapshot
+recorded_at: 2026-09-08
+skill: eliciting-requirements
+skill_revision: a855508aa19a  # pragma: allowlist secret
+harness:
+  repository: https://github.com/opendatahub-io/agent-eval-harness
+  revision: c64e24661eb7
+  version: 1.47.2
+model:
+  skill: google-vertex/claude-sonnet-4-6@default
+  judge: claude-opus-4-6 via Vertex
+  runner: >-
+    Agent Eval Harness cli adapter invoking the answer-key-isolating OpenCode
+    wrapper
+  settings: default, parallelism 3
+corpus:
+  development_cases: 13
+  regression_cases: 11
+  independent_held_out_cases: 0
+  development_config: eval/eliciting-requirements/eval.yaml
+  regression_config: eval/eliciting-requirements/eval-regression.yaml
+judges:
+  deterministic:
+    - execution_succeeded
+    - package_structure
+    - readiness_gate
+    - ears_structure
+    - ears_template_coverage
+    - category_critical_gate
+  semantic:
+    - semantic_quality
+    - review_discipline
+category_floors:
+  template-selection: {min_mean: 3.5, min_pass_rate: 1.0}
+  readiness-gating: {min_mean: 3.5, min_pass_rate: 1.0}
+  consistency-analysis: {min_mean: 3.5, min_pass_rate: 1.0}
+  elicitation-and-leakage: {min_mean: 3.5, min_pass_rate: 1.0}
+  controlled-language: {min_mean: 3.5, min_pass_rate: 1.0}
+  domain-diversity: {min_mean: 3.5, min_pass_rate: 1.0}
+thresholds:
+  execution_succeeded: {min_pass_rate: 1.0}
+  package_structure: {min_pass_rate: 1.0}
+  readiness_gate: {min_pass_rate: 1.0}
+  ears_structure: {min_pass_rate: 1.0}
+  ears_template_coverage: {min_pass_rate: 1.0}
+  category_critical_gate: {min_pass_rate: 1.0}
+  semantic_quality: {min_mean: 3.5}
+  review_discipline: {min_mean: 3.5}
+run:
+  development_command: >-
+    /eval-run --config eval/eliciting-requirements/eval.yaml
+    --model google-vertex/claude-sonnet-4-6@default --run-id v2
+  regression_command: >-
+    /eval-run --config eval/eliciting-requirements/eval-regression.yaml
+    --model google-vertex/claude-sonnet-4-6@default --run-id v1-regression
+  required_artifacts:
+    - summary.yaml
+    - run_result.json
+    - collection.json
+    - per-case generated outputs
+    - per-case judge findings
+    - per-case traces and metrics
+    - human calibration review
+  results_path: eval/runs/eliciting-requirements/v2/
+  regression_results_path: eval/runs/eliciting-requirements/v1-regression/
+  note: >-
+    Live model execution is recorded by the harness and must not be fabricated
+    in this repository manifest.
+  observed_development_run: v2
+  observed_regression_run: v1-regression
+  observed_wall_clock_seconds:
+    development: 715
+    regression: 613
+  observed_cost: unavailable from the CLI adapter
+  observed_results: results.yaml
+  human_calibration: pending independent expert review
+case_baseline:
+  source_of_truth: dataset/*/*/annotations.yaml and reference.md
+  scoring: semantic properties, not exact output text
+  critical_false_ready_cases:
+    - case-008-vague-ui
+    - case-009-broad-security
+    - case-014-uncertainty
+    - case-015-implementation-temptation
+    - case-016-malformed-ears
+    - case-017-retry-and-idempotence
+    - case-018-inconsistent-deadlines
+    - case-020-referent-and-vacuous
+    - case-021-passive-and-instructions

@@ -1,0 +1,20 @@
+---
+partition: development
+category: consistency-analysis
+difficulty: medium
+provenance: authored contradiction case
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+required_findings:
+  - >-
+    identify a direct conflict between R1 and R2 under the duplicate-order
+    condition
+  - show the two incompatible responses and likely consequence
+  - ask the user to choose or define an explicit condition or precedence
+disallowed_behaviors:
+  - choose idempotence or new-order behavior without user authority
+  - report only a textual similarity or duplicate
+rationale: >-
+  The requirements have overlapping conditions and incompatible responses. No
+  priority is supplied.

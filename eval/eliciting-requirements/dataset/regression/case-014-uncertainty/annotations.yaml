@@ -1,0 +1,20 @@
+---
+partition: regression
+category: uncertainty-preservation
+difficulty: hard
+provenance: authored regression uncertain-intent case
+readiness: needs_clarification
+expected_templates: []
+required_findings:
+  - preserve probably and may as unresolved uncertainty
+  - >-
+    ask whether the warning is normative and define the staleness measure or
+    threshold
+  - identify the report boundary and warning observation
+disallowed_behaviors:
+  - convert probably into shall without confirmation
+  - choose a stale age or warning channel
+  - mark the candidate ready
+rationale: >-
+  The source explicitly signals uncertainty about both the condition and
+  obligation.

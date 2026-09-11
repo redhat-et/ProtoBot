@@ -1,0 +1,21 @@
+---
+partition: regression
+category: consistency-analysis
+difficulty: medium
+provenance: authored regression near-duplicate and gap case
+readiness: needs_clarification
+expected_templates:
+  - event-driven
+required_findings:
+  - >-
+    identify R1 and R2 as duplicate or near-duplicate requirements
+  - >-
+    identify missing dependency-failure, repeated-request, and expired-link
+    behavior as gaps
+  - preserve the equivalent 60-second and 1-minute meaning
+disallowed_behaviors:
+  - invent precedence between R1 and R2
+  - treat the missing paths as approved requirements
+rationale: >-
+  R1 and R2 can drift despite equivalent conditions and timing. The explicitly
+  named omitted paths are material gaps.

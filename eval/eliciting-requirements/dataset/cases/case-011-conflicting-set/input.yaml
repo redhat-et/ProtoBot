@@ -1,0 +1,14 @@
+---
+prompt: |
+  Evaluate this requirement set as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  R1 [orders]: When a client submits a duplicate order, the order service
+  shall return the identifier of the existing order.
+
+  R2 [orders]: When a client submits a duplicate order, the order service
+  shall create a new order with a new identifier.
+
+  The source does not state which behavior has priority.
