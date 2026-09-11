@@ -1,6 +1,6 @@
 # ProtoBot: Git and Project-Repository Integration
 
-> Design document — draft, September 2026
+> Design document — September 2026
 >
 > Defines how the Drafting Table turns governed specification changes
 > into reviewable Git history, in single-player and multi-player modes.
@@ -232,19 +232,26 @@ Drafting Table never stages it.
 
 ### Selecting the paths
 
-`protobot new` (the session-start command in the pending #28
-contract) proposes a default layout and the user confirms or
-changes it before the initialization commit:
+At initialization the Drafting Table proposes a default layout and
+the user confirms or changes it before the commit. There is no
+`protobot` executable; the operation that writes `project.yaml` is
+the one this contract records as a dependency on #30. The proposed
+default is:
 
 | Registry entry | `kind` | Proposed path |
 | --- | --- | --- |
 | `vision` | `vision` | `docs/vision.md` |
 | `architecture` | `architecture` | `docs/architecture.md` |
-| `requirements` | `requirement-store` | `specs/requirements/` |
+| `requirements` | `requirement-store` | `.protobot/requirements/` |
 | `change-sets` | `change-set` | `.protobot/change-sets/` |
 
 Interface IDLs and interface prose are registered as they are
 created, one entry per artifact, with the path the user chooses.
+
+The requirement store sits inside `.protobot/` by default, because
+`ears-manager` manages every record in it and keeping those files
+together leaves the rest of the tree to the project. The path is
+still a registry entry, so a project may point it elsewhere.
 
 `.protobot/change-sets/` is fixed by the
 [Content Storage Model](components.md#content-storage-model) and
@@ -343,10 +350,12 @@ cs/<nnn>-<slug>
   Change set `CS-005` uses `cs/005-…`
   ([ADR-0002 — Change-Set Manifests][adr2-changeset]).
 - `<slug>` is derived from the manifest `intent`: lowercased,
-  non-alphanumeric runs replaced by a single hyphen, trimmed to 40
-  characters at a hyphen boundary. When nothing alphanumeric
-  survives, the slug is `change-set`, so `CS-005` becomes
-  `cs/005-change-set`.
+  non-alphanumeric runs replaced by a single hyphen, then cut at
+  the last hyphen before position 40, or at exactly 40 characters
+  when no hyphen precedes it. When nothing alphanumeric survives,
+  the slug is `change-set`, so `CS-005` becomes
+  `cs/005-change-set`. Every intent therefore yields exactly one
+  branch name.
 - `cs/` is the default and comes from `repository.branch_prefix`.
 
 The prefix is the machine-readable part. A tool that must decide
@@ -371,6 +380,12 @@ that order. There the branch exists first, because `project.yaml`
 must be written before a change set can be created at all. Either
 way, `change-set create` records the default-branch head as
 `base_commit`, whether or not it also cuts the branch.
+
+That head is read from the local ref for
+`repository.default_branch`, after a fetch from
+`repository.canonical_remote`. A branch is never cut from a stale
+ref, and the recorded `base_commit` is never the remote-tracking
+ref, so the branch and the manifest always name the same commit.
 
 The initial Sketch is a change set like any other. Its Vision and
 Architecture artifacts are written through

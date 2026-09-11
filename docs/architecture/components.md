@@ -742,7 +742,13 @@ language/source/test layout:
 
 `project.yaml` points to the project's Vision, Architecture/interface
 IDLs, and structured requirement store wherever project conventions put
-them. `ears-manager` is the exclusive write gate for every registered
+them. The default that `ears-manager` proposes for the requirement store
+is `.protobot/requirements/`, which keeps the files it manages together
+and leaves the rest of the tree to the project
+([git-integration.md](git-integration.md#selecting-the-paths)); a project
+may register a different path.
+
+`ears-manager` is the exclusive write gate for every registered
 specification artifact: it owns structured requirements, the interface
 registry, relationships, and change-set manifests and delegates
 format-specific validation for prose/IDL artifacts. The Job Site owns the
