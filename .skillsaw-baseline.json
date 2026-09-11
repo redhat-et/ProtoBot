@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated_by": "skillsaw 0.20.0",
-  "generated_at": "2026-09-09T14:26:32.124702+00:00",
+  "generated_at": "2026-09-10T16:31:08.446352+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -40,7 +40,7 @@
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
       "line": 215,
-      "message": "Section '`ears-manager` CLI' is ~704 tokens (max recommended: 500)",
+      "message": "Section '`ears-manager` CLI' is ~703 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
@@ -63,7 +63,7 @@
       "fingerprint": "7a47180e53e905ba",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 583,
+      "line": 586,
       "message": "Section 'Governed tool integrations' is ~659 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -71,7 +71,7 @@
       "fingerprint": "118f4daf88827566",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 782,
+      "line": 785,
       "message": "Section 'Environmental Constraints' is ~516 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -116,10 +116,18 @@
       "severity": "info"
     },
     {
-      "fingerprint": "dfe8e903debd7a70",
+      "fingerprint": "c4cf96f3ec3152a2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
       "line": 25,
+      "message": "Unlinked path reference: 'docs/architecture/drafting-table-ux.md' \u2014 consider wrapping in link syntax [docs/architecture/drafting-table-ux.md](docs/architecture/drafting-table-ux.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "dfe8e903debd7a70",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 27,
       "message": "Unlinked path reference: 'docs/architecture/related-work.md' \u2014 consider wrapping in link syntax [docs/architecture/related-work.md](docs/architecture/related-work.md)",
       "severity": "info"
     },
@@ -127,7 +135,7 @@
       "fingerprint": "fac138a385b101b2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 27,
+      "line": 29,
       "message": "Unlinked path reference: 'docs/architecture/open-questions.md' \u2014 consider wrapping in link syntax [docs/architecture/open-questions.md](docs/architecture/open-questions.md)",
       "severity": "info"
     },
@@ -135,7 +143,7 @@
       "fingerprint": "61dde6b158f12c87",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 45,
+      "line": 47,
       "message": "Unlinked path reference: 'docs/architecture/components.md' \u2014 consider wrapping in link syntax [docs/architecture/components.md](docs/architecture/components.md)",
       "severity": "info"
     },
@@ -143,7 +151,7 @@
       "fingerprint": "85e506936b75ec55",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 46,
+      "line": 48,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -151,7 +159,7 @@
       "fingerprint": "dfb22c7918b88aef",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 53,
+      "line": 55,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -159,16 +167,8 @@
       "fingerprint": "bcc45982044b09c4",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 54,
+      "line": 56,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
-      "severity": "info"
-    },
-    {
-      "fingerprint": "cc82115000a84fe8",
-      "rule_id": "content-weak-language",
-      "file_path": ".agents/skills/pull-request/SKILL.md",
-      "line": 21,
-      "message": "Weak language (hedging): 'if possible' \u2014 Remove 'if possible' \u2014 state conditions explicitly",
       "severity": "info"
     },
     {

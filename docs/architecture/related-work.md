@@ -574,6 +574,8 @@ implementations) succeed at much higher rates than those without.
   constraints
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
   and sequence diagrams
+- [Drafting Table UX](drafting-table-ux.md) — Stable interaction
+  contract for the first local Drafting Table
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
 - [Open Design Questions](open-questions.md) — Unresolved design

@@ -19,29 +19,15 @@ pointers to their decisions. Updated as decisions are made.
 
 ## Interactive phase
 
-### Q1: Spec gap surfacing UX
-
-How does the agent present unspecified
-   behaviors during Dimensioning? Inline suggestions? Separate "gap
-   report"? What's the interaction pattern for the user to say "out of
-   scope" vs. "add a requirement for that"?
-
 ### Q2: Async requirement suggestion delivery
 
 When the autonomous
    phase discovers unspecified behavior, it blocks the work item and
-   escalates to the user (decided). The remaining questions: what
-   notification channel delivers the escalation (email, Slack,
-   webhook)? Is the TUI's pull-on-start model fast enough for all
-   escalation types, or do some need the web UI's push model? See
-   [Drafting Table](components.md#drafting-table).
-
-### Q3: Multi-interface orchestration
-
-When a project has many
-   interfaces (API + CLI + web GUI), does the user dimension them
-   sequentially or can they jump between interfaces? Is there a
-   dependency graph?
+   escalates to the user (decided). The TUI MVP pulls blocked work on
+   session start and lets the user resolve an item or continue unrelated
+   work ([Drafting Table UX][dt-blocked]). The remaining question is
+   which push or external notification channels (web, email, Slack, or
+   webhook) later hosted deployments require.
 
 ### Q4: IdeaBot handoff format
 
@@ -198,6 +184,28 @@ The multi-player workflow places the
 
 ## Resolved questions
 
+### Q1: Spec gap surfacing UX
+
+Resolved → [Drafting Table UX][dt-gaps].
+Critical gaps appear inline, and every interface ends with a complete gap
+checkpoint. Each gap adds or revises a requirement, receives an explicit
+out-of-scope disposition, or remains unresolved and blocks approval.
+
+### Q3: Multi-interface orchestration
+
+Resolved for the MVP → [Drafting Table UX][dt-ordering].
+Dimensioning handles one affected interface at a time with explicit
+navigation back to earlier interfaces. A required dependency-graph
+subsystem is deferred.
+
+### Q6: Drafting Table session continuity
+
+Resolved for the TUI MVP → [Drafting Table UX][dt-resume].
+Conversation history is non-authoritative and is not required to resume;
+Git specification/change-set state and WMS links/state are sufficient.
+Transfer of optional conversation context between TUI and web
+implementations remains future work.
+
 ### Q7: Requirements storage format
 
 Resolved → [ADR-0001](../decisions/0001-requirements-storage-format.md).
@@ -233,7 +241,14 @@ relationships, eval coverage) stay open above.
   constraints
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
   and sequence diagrams
+- [Drafting Table UX](drafting-table-ux.md) — Stable interaction
+  contract for the first local Drafting Table
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
 - [Related Work](related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned
+
+[dt-blocked]: drafting-table-ux.md#blocked-work-resolution
+[dt-gaps]: drafting-table-ux.md#hybrid-gap-surfacing-ux
+[dt-ordering]: drafting-table-ux.md#interface-ordering
+[dt-resume]: drafting-table-ux.md#resuming-an-existing-session

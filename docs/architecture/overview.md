@@ -309,6 +309,8 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
 - [User Interaction Flow](user-interaction-flow.md) — Phase
   details, sequence diagrams, testing strategy, and incremental
   development.
+- [Drafting Table UX](drafting-table-ux.md) — Stable
+  interaction contract for the first local Drafting Table.
 - [System Components](components.md) — Component architecture,
   interfaces, the content storage model, multi-player workflow,
   and cross-cutting concerns.
