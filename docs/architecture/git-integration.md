@@ -233,10 +233,10 @@ Drafting Table never stages it.
 ### Selecting the paths
 
 At initialization the Drafting Table proposes a default layout and
-the user confirms or changes it before the commit. There is no
-`protobot` executable; the operation that writes `project.yaml` is
-the one this contract records as a dependency on #30. The proposed
-default is:
+the user confirms or changes it before the commit. The write goes
+through the `ears-manager` initialization operation that
+[Project initialization](#project-initialization) records as a
+dependency on #30. The proposed default is:
 
 | Registry entry | `kind` | Proposed path |
 | --- | --- | --- |

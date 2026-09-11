@@ -99,7 +99,7 @@ ongoing interactive work happens.
 | Interface Type | Spec Approach | Example |
 | --- | --- | --- |
 | Network service | Smithy / OpenAPI | REST API, gRPC service |
-| CLI | `usage` (jdx.dev) / docopt / `wasi:cli` _(needs evaluation)_ | `protobot generate` |
+| CLI | `usage` (jdx.dev) / docopt / `wasi:cli` _(needs evaluation)_ | Build tool, code generator |
 | REPL | Skills and prompts define the interaction protocol | Interactive notebook |
 | Linkable library | WIT (Wasm Interface Types) | Shared SDK module |
 | Web GUI (html/css) | _(open gap — not yet solved)_ | Dashboard UI |
