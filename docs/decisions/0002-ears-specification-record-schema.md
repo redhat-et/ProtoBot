@@ -225,7 +225,7 @@ Architecture change:
 | Value | Description |
 | --- | --- |
 | `network-service` | Network service (REST API, gRPC service). Specification approach: Smithy or OpenAPI. |
-| `cli` | Command-line interface. Specification approach: `usage` (jdx.dev) / docopt / `wasi:cli` (evaluation pending, [Q18](../architecture/open-questions.md#q18-cli-interface-spec-evaluation)). |
+| `cli` | Command-line interface. Specification approach: command grammar and typed result contract defined by each CLI interface; `usage`, docopt, or `wasi:cli` may provide optional tooling. |
 | `repl` | Read-eval-print loop. Specification approach: skills and prompts define the interaction protocol. |
 | `linkable-library` | Linkable library or SDK. Specification approach: WIT (Wasm Interface Types). |
 | `web-gui` | Web GUI (HTML/CSS). Specification approach: open gap — not yet established. |
@@ -270,8 +270,8 @@ change:
 #### Interface Operations
 
 Each operation in the `interface_operations` list describes one
-interface change within the change set. `ears-manager add interface`
-and `ears-manager update` write these entries
+interface change within the change set. `ears-manager interface add`
+and `ears-manager interface update` write these entries
 ([components.md](../architecture/components.md#subcommands)).
 Interface retirement is recorded as a `revise` operation that
 sets `status: retired` on the interface record.
@@ -323,7 +323,7 @@ logical structure of each entry within that file.
 | --- | --- | --- | --- |
 | `id` | string (ID) | yes | Stable identifier. Format: a short lowercase-hyphenated name describing the artifact (e.g., `vision`, `architecture`, `api-gateway-openapi`). |
 | `kind` | string (enum) | yes | Artifact kind. See [Artifact Kind Enum](#artifact-kind-enum). |
-| `path` | string | yes | Relative path from the repository root to the artifact file. |
+| `path` | string | yes | Relative path from the repository root to the artifact file or registered store directory allowed by its `kind`. |
 | `digest` | string | yes | Content digest for integrity verification. Format: `<algorithm>:<value>` (e.g., `sha256:...`). Updated by `ears-manager` on every write. |
 | `owner` | string | yes | The component or role responsible for this artifact (e.g., `ears-manager`, `user`, `kit`). |
 | `validator` | string (enum) | no | A name drawn from `ears-manager`'s built-in validator registry. `ears-manager` ships a fixed set of validator names (e.g., `markdownlint`, `openapi-lint`, `protoc`) and resolves each to a known, bundled validation routine. `ears-manager` never executes a caller-supplied command line; unrecognized names are rejected. When absent, no content validation is performed beyond path and digest tracking. |
@@ -337,7 +337,7 @@ logical structure of each entry within that file.
 | `interface-idl` | An interface specification in a machine-readable IDL format (OpenAPI, protobuf, etc.). |
 | `interface-prose` | An interface specification in prose form. |
 | `requirement-store` | The structured requirement store directory managed by `ears-manager`. |
-| `change-set` | A change-set manifest file. |
+| `change-set` | A change-set manifest file, or the fixed change-set store directory registry aggregate. |
 
 ---
 

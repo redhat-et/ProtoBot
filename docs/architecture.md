@@ -222,10 +222,17 @@ deterministically.
 **Interface type:** CLI — a statically linked Go binary with a
 stable subcommand surface.
 
+The complete caller contract is defined in the
+[`ears-manager` CLI Integration Contract](architecture/ears-manager-cli.md).
+That contract defines request grammar, JSON and human output, diagnostics,
+exit statuses, mutation authority, comparison, impact review, and the
+project-initialization boundary.
+
 **External contract:**
 
 | Subcommand | Purpose |
 | --- | --- |
+| `project init` | Initialize the `.protobot/` control namespace and default registered paths. |
 | `requirement add` | Add a new EARS requirement with applicability metadata. |
 | `requirement list` | List requirements (filterable). |
 | `requirement show` | Show a requirement by ID. |
@@ -271,7 +278,9 @@ CRUD tool. The agent decides _what_ requirements to write;
 
 See [System Components —
 `ears-manager`](architecture/components.md#ears-manager) for subcommand
-details and validation rules.
+details and validation rules, and the [CLI Integration
+Contract](architecture/ears-manager-cli.md) for the stable request/result
+boundary.
 
 ---
 
@@ -631,6 +640,7 @@ catching violations before they reach CI.
 
 | Tool | System | Operations |
 | --- | --- | --- |
+| `ears-manager project init` | Specification store | Initialize the project control namespace and registered specification paths |
 | `ears-manager requirement *` | Specification store | Add, list, show, update, retire requirements |
 | `ears-manager interface *` | Specification store | Add, list, show, update interfaces |
 | `ears-manager artifact put/get/list` | Specification store | Manage Vision, Architecture, IDL artifacts |
@@ -823,7 +833,7 @@ approach.
 
 | Interface | Type | Specification approach |
 | --- | --- | --- |
-| `ears-manager` CLI | CLI | `usage` (jdx.dev) / docopt / `wasi:cli` — [evaluation pending (Q18)](architecture/open-questions.md#q18-cli-interface-spec-evaluation) |
+| `ears-manager` CLI | CLI | Command grammar, typed result envelope, and exit-status contract defined in the [CLI Integration Contract](architecture/ears-manager-cli.md) |
 | WMS Adapter API | Network service | Smithy or OpenAPI |
 | Specification Toolkit | Agent skill package | Skill manifest + MCP tool schemas (JSON Schema) |
 | Validation Rules | Linkable library or declarative rule set | WIT or declarative state-machine schema _(open — see [components.md](architecture/components.md#validation-rules))_ |
@@ -846,6 +856,8 @@ that contract.
   and workflow summary
 - [System Components](architecture/components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [`ears-manager` CLI Integration Contract](architecture/ears-manager-cli.md)
+  — Command grammar, results, diagnostics, and impact review
 - [Git and Project-Repository
   Integration](architecture/git-integration.md) — Project
   identification, branches, commits, PR preparation, and approved

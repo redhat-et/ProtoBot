@@ -344,20 +344,30 @@ manages change sets, and enforces EARS methodology rules
 deterministically. Semantic impact analysis still requires agent and
 human judgment, but its inputs and approved result are structured.
 
-It is used by three callers:
+The stable caller boundary is defined in the
+[CLI Integration Contract](ears-manager-cli.md). This component document
+describes responsibilities and data ownership; the contract document defines
+the command grammar, result envelopes, diagnostics, exit statuses, and
+golden fixture.
+
+It is used by these callers:
 
 - **Agents** (via the Specification Toolkit) — the Drafting Table
-  agent calls `ears-manager add requirement`, `ears-manager add
-  interface`, and change-set commands during Dimensioning. The Job
-  Site receives changed and applicable requirement IDs in the build
-  work-item contract and resolves them at its immutable specification
-  commit via `ears-manager list` / `ears-manager show`. Workers also
+  agent calls `ears-manager requirement add`, `ears-manager interface
+  add`, and change-set commands during Dimensioning. The Job Site receives
+  changed and applicable requirement IDs in the build work-item contract and
+  resolves them at its immutable specification commit via
+  `ears-manager requirement list` /
+  `ears-manager requirement show`. Workers also
   receive the full approved Schematic for context. See
   [ongoing obligations](user-interaction-flow.md#ongoing-obligations)
   and [open question Q19][q19].
 - **CI** — `ears-manager check` runs on every branch push to
   validate that spec files are well-formed, all EARS statements
   match required templates, and referential integrity holds.
+- **Job Site Materializer** — reads the approved manifest and requirement
+  records at the immutable specification commit recorded in a build
+  work-item contract.
 - **Humans** — a developer or architect can run `ears-manager`
   directly to inspect or change registered specification artifacts
   without involving an agent.
@@ -377,18 +387,19 @@ It is used by three callers:
 
 | Subcommand | Purpose |
 | --- | --- |
+| `ears-manager project init` | Initialize `.protobot/project.yaml`, seed the artifact registry and schema versions, and classify registered specification paths. |
 | `ears-manager check` | Validate all spec files: EARS formatting, required fields, applicability metadata, change-set integrity, and referential integrity. Exit non-zero on failure. Suitable for CI gates. |
-| `ears-manager add requirement` | Add a new EARS requirement with interface or project-wide applicability selectors and optional narrower scopes. Validates the EARS statement and metadata before writing. |
-| `ears-manager add interface` | Register a new interface in the Architecture within the active proposed change set. |
+| `ears-manager requirement add` | Add a new EARS requirement with interface or project-wide applicability selectors and optional narrower scopes. Validates the EARS statement and metadata before writing. |
+| `ears-manager requirement list/show` | Read requirements at the working tree or an immutable `--at` revision. |
+| `ears-manager requirement update/retire` | Modify requirements through a proposed change set. |
+| `ears-manager interface add` | Register a new interface in the Architecture within the active proposed change set. |
+| `ears-manager interface list/show` | Read interfaces at the working tree or an immutable `--at` revision. |
+| `ears-manager interface update` | Modify interfaces through a proposed change set. |
 | `ears-manager artifact put` | Create/update a registered Vision, Architecture, or external interface-IDL artifact within the active change set. Records kind/path/digest and invokes its configured validator without requiring `ears-manager` to understand every format. |
-| `ears-manager artifact get` | Read a registered opaque/prose/IDL artifact by kind or ID through the governed path registry. |
-| `ears-manager change-set` | Create, inspect, and update a proposed change set. Records its base revision, intent, affected scope, and requirement operations. Approved change sets are immutable. |
-| `ears-manager compare` | Compare a proposed change set with the current Schematic and open deltas. Reports exact duplicates, stable-ID before/after changes, declared conflicts/supersession, and dependency cycles for agent/user review. |
-| `ears-manager impact` | Compare a proposed change set with the Schematic and produce potentially applicable requirements from scope intersections and explicit relationships. Records the reviewed applicable set with rationale. |
-| `ears-manager list` | List requirements, interfaces, change sets, or registered artifacts. Filter requirements by interface, applicability scope, EARS pattern, or explicit relationship. |
-| `ears-manager show` | Show a requirement, interface, change set, or registered artifact metadata by ID. |
-| `ears-manager update` | Modify an existing interface or requirement through a proposed change set and revalidate it. |
-| `ears-manager retire` | Retire a requirement through a proposed change set after checking references and impact. |
+| `ears-manager artifact get/list` | Read a registered opaque/prose/IDL artifact by ID or unique kind through the governed path registry. |
+| `ears-manager change-set create/list/show/update` | Create, inspect, and update a proposed change set. Records its base revision, intent, affected scope, and requirement operations. Approved change sets are immutable. |
+| `ears-manager change-set compare` | Compare a proposed change set with the current Schematic and open deltas. Reports exact duplicates, stable-ID before/after changes, declared conflicts/supersession, and dependency cycles for agent/user review. |
+| `ears-manager impact` | Read-only comparison of a proposed change set with the Schematic that produces potentially applicable requirements from scope intersections and explicit relationships. Reviewed dispositions are written by `change-set update`. |
 
 ### What it validates
 
@@ -442,6 +453,11 @@ relationships. It is deterministic and should prefer false positives to
 missed obligations. The Dimensioning agent examines the change
 semantically and may add candidates that metadata alone cannot find. A
 human approves the changed set and all impact dispositions together.
+
+The CLI returns deterministic candidates without mutating the manifest. The
+Toolkit records the complete reviewed set, including semantic additions,
+through `change-set update`; each entry carries a disposition, rationale, and
+origin. See the [CLI Integration Contract][cli-impact].
 Active requirements added or revised by the changed set plus the included
 `applicable` requirements form the binding delivery-obligation set.
 Retired requirements remain in the audit delta but are not obligations.
@@ -498,6 +514,9 @@ idempotency input.
   directly. This eliminates split transactions and inconsistent artifact
   ownership without forcing one parser to understand every IDL.
 
+See the [CLI Integration Contract](ears-manager-cli.md) for the stable
+machine-readable and human-readable interface used by all of these callers.
+
 ### Open design questions
 
 - **Spec directory layout.** The record format is decided
@@ -508,7 +527,8 @@ idempotency input.
   → Requirement)? Naming convention for record files? The
   layout affects discoverability and `ears-manager`'s internal
   complexity.
-- **Query richness.** How far does `ears-manager list` go? Simple
+- **Query richness.** How far do the resource-specific `list` commands go?
+  Simple
   filtering (by interface, applicability scope, or pattern type)? Or
   richer queries like "requirements with no usable scope" or
   "interfaces with no requirements"? Richer queries make the agent's
@@ -1854,6 +1874,8 @@ confirmation.
   and sequence diagrams
 - [Drafting Table UX](drafting-table-ux.md) — Stable interaction
   contract for the first local Drafting Table
+- [`ears-manager` CLI Integration Contract](ears-manager-cli.md) —
+  Command grammar, results, diagnostics, and impact review
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,
@@ -1862,3 +1884,4 @@ confirmation.
 [q2]: open-questions.md#q2-async-requirement-suggestion-delivery
 [q9]: open-questions.md#q9-isolated-vs-implementation-aware-tests
 [q19]: open-questions.md#q19-applicability-metadata-and-semantic-impact-coverage
+[cli-impact]: ears-manager-cli.md#impact-review-protocol

@@ -8,7 +8,6 @@
 - [Building phase](#building-phase)
 - [Inspecting phase](#inspecting-phase)
 - [Compliance](#compliance)
-- [Interface specifications](#interface-specifications)
 - [Resolved questions](#resolved-questions)
 - [Related Documents](#related-documents)
 
@@ -170,18 +169,6 @@ The multi-player workflow places the
     generation likely rates "High risk" on the AI Agent Risk
     Evaluator, which may make an additional checkpoint unavoidable.
 
-## Interface specifications
-
-### Q18: CLI interface spec evaluation
-
-`usage` (jdx.dev), docopt,
-    and `wasi:cli` are listed as candidates for CLI interface
-    specification. Need to evaluate which (if any) is suitable for
-    ProtoBot's needs. See the interface-type taxonomy in
-    [Specification Hierarchy](user-interaction-flow.md#specification-hierarchy).
-
----
-
 ## Resolved questions
 
 ### Q1: Spec gap surfacing UX
@@ -216,6 +203,15 @@ One-file-per-record YAML.
 Resolved → [ADR-0002](../decisions/0002-ears-specification-record-schema.md).
 Full EARS text stored as a free-form string tagged with a pattern
 `type` enum; `ears-manager` validates via keyword-based regex.
+
+### Q18: CLI interface spec evaluation
+
+Resolved for the first implementation →
+[`ears-manager` CLI Integration Contract](ears-manager-cli.md).
+The stable interface is the command grammar, typed request fields, JSON
+result envelope, human diagnostic form, and exit-status table. No third-party
+CLI IDL is a runtime dependency; `usage` (jdx.dev), docopt, and `wasi:cli`
+remain optional implementation or documentation aids.
 
 ### Q19: Scope-selector model and relationship storage (partial)
 

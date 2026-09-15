@@ -62,6 +62,7 @@ commit-scoped conformance evidence are recorded separately.
 - [Vision](docs/vision.md)
 - [Architecture overview](docs/architecture/overview.md)
 - [Architecture interfaces and constraints](docs/architecture.md)
+- [`ears-manager` CLI integration contract](docs/architecture/ears-manager-cli.md)
 - [System components](docs/architecture/components.md)
 - [User interaction flow](docs/architecture/user-interaction-flow.md)
 - [Related work](docs/architecture/related-work.md)

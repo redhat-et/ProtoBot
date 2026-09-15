@@ -148,7 +148,7 @@ A reviewer sees exactly which requirements changed, with no
 noise from unrelated records.
 
 **Supplementary rendered summary.** For change sets that touch
-many requirements, `ears-manager compare` and
+many requirements, `ears-manager change-set compare` and
 `ears-manager impact` produce structured output suitable for
 posting as a PR comment. This rendered summary shows the
 before/after for each changed requirement and the applicable

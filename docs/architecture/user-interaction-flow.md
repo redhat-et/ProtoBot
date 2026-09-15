@@ -99,7 +99,7 @@ ongoing interactive work happens.
 | Interface Type | Spec Approach | Example |
 | --- | --- | --- |
 | Network service | Smithy / OpenAPI | REST API, gRPC service |
-| CLI | `usage` (jdx.dev) / docopt / `wasi:cli` _(needs evaluation)_ | Build tool, code generator |
+| CLI | Command grammar and typed result contract defined by each CLI interface; `usage`, docopt, or `wasi:cli` may provide optional tooling | Build tool, code generator |
 | REPL | Skills and prompts define the interaction protocol | Interactive notebook |
 | Linkable library | WIT (Wasm Interface Types) | Shared SDK module |
 | Web GUI (html/css) | _(open gap — not yet solved)_ | Dashboard UI |
@@ -864,9 +864,9 @@ refinement. Before a request is ready for Dimensioning, they:
   add, revision, and retirement; and
 - confirm intent, rationale, business priority, dependencies, and owner.
 
-`ears-manager compare` performs deterministic identity, exact-duplicate,
-relationship, and dependency-cycle checks. The agent proposes semantic
-duplicates or contradictions; the human confirms the classification and
+`ears-manager change-set compare` performs deterministic identity,
+exact-duplicate, relationship, and dependency-cycle checks. The agent proposes
+semantic duplicates or contradictions; the human confirms the classification and
 any specification change. A duplicate may close against its existing
 request/change set rather than adding another requirement. This preserves
 a coherent review unit without restoring a permanent Feature hierarchy.
@@ -1131,6 +1131,8 @@ whether this is achievable given Red Hat's AIA requirements.
   constraints
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [`ears-manager` CLI Integration Contract](ears-manager-cli.md) —
+  Command grammar, results, diagnostics, and impact review
 - [Git and Project-Repository Integration](git-integration.md) —
   Project identification, branches, commits, PR preparation, and
   approved specification state
