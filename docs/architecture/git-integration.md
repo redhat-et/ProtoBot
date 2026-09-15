@@ -139,6 +139,7 @@ This document adds a `repository` block for the Git-facing fields:
 | `repository.review_mode` | `single-player` or `multi-player`. Declares the review ceremony. |
 | `repository.branch_prefix` | Prefix for change-set branches. `cs/` by default. It may not be `wi/`, which is the only reserved prefix today; `ears-manager check` rejects it. A further reserved prefix has to be recorded in the [Content Storage Model](components.md#content-storage-model) before it can be enforced. |
 | `schema_versions` | One version per store, as decided by [ADR-0002][adr2-versioning]. |
+| `stores` | Relative paths for the requirement, interface, and change-set stores, as decided by [ADR-0003](../decisions/0003-ears-manager-storage-layout.md). |
 | `artifacts` | The artifact registry: `id`, `kind`, `path`, `digest`, `owner`, and optional `validator` per entry ([ADR-0002][adr2-registry]). |
 
 `ears-manager` owns this file and is the only writer
@@ -186,13 +187,13 @@ for a reviewable pull request.
 Initialization writes `.protobot/project.yaml` through
 `ears-manager`. It is a change set on its own branch and merges
 through a pull request, like every other specification change. The
-first change set of a project is `CS-001`, so its branch is
-`cs/001-project-init`.
+first change set of a project is `CS-00001`, so its branch is
+`cs/00001-project-init`.
 
 The order on that branch is fixed, because each step needs the
 one before it:
 
-1. Cut `cs/001-project-init` from the default branch.
+1. Cut `cs/00001-project-init` from the default branch.
 2. Write `project.yaml`, which gives the project its identity and
    its registry.
 3. Run `change-set create`, which writes the manifest and records
@@ -238,39 +239,27 @@ through the `ears-manager` initialization operation that
 [Project initialization](#project-initialization) records as a
 dependency on #30. The proposed default is:
 
-| Registry entry | `kind` | Proposed path |
+| Managed path | Role | Proposed path |
 | --- | --- | --- |
-| `vision` | `vision` | `docs/vision.md` |
-| `architecture` | `architecture` | `docs/architecture.md` |
-| `requirements` | `requirement-store` | `.protobot/requirements/` |
-| `change-sets` | `change-set` | `.protobot/change-sets/` |
+| `vision` | opaque artifact | `docs/vision.md` |
+| `architecture` | opaque artifact | `docs/architecture.md` |
+| `requirements` | structured requirement store | `.protobot/requirements/` |
+| `interfaces` | structured interface store | `.protobot/interfaces/` |
+| `change-sets` | structured change-set store | `.protobot/change-sets/` |
 
 Interface IDLs and interface prose are registered as they are
 created, one entry per artifact, with the path the user chooses.
 
-The requirement store sits inside `.protobot/` by default, because
-`ears-manager` manages every record in it and keeping those files
-together leaves the rest of the tree to the project. The path is
-still a registry entry, so a project may point it elsewhere.
-
-`.protobot/change-sets/` is fixed by the
-[Content Storage Model](components.md#content-storage-model) and
-is not a user choice. The other paths are defaults, not mandates:
-an existing project points its entries at the files it already
-has.
-
-Two of these entries name a directory rather than a file. ADR-0002
-defines `requirement-store` as a directory and `change-set` as a
-single manifest file
-([ADR-0002][adr2-registry]), so the folder entry above uses a kind
-that describes one of its members. The registry needs either a
-directory kind for the folder or a rule that a `change-set` entry
-may name the folder. Whichever way ADR-0002 and #30 settle it, the
-digest rule below already covers both.
+The three structured store paths are recorded in the `stores` block
+of `project.yaml`, with defaults and filename mapping defined by
+[ADR-0003](../decisions/0003-ears-manager-storage-layout.md). A
+project may register different relative paths that remain inside the
+working tree. The `artifacts` list remains for opaque Vision,
+Architecture, interface-IDL, and interface-prose files.
 
 ### One change set, one file
 
-A change set is one manifest file, named `cs-<nnn>.yaml` after its
+A change set is one manifest file, named `cs-<nnnnn>.yaml` after its
 change-set ID, in a flat `.protobot/change-sets/` folder. It is a
 record like any other, so it follows the one-file-per-record rule
 ([ADR-0001][adr1-history]).
@@ -290,12 +279,10 @@ abandoned change set is deleted with its branch, so it never
 reaches the default branch. Every file in the folder is a
 permanent audit record of one approved specification transaction.
 
-The layout _inside_ the requirement store — flat or mirroring the
-specification levels, and the file-naming convention — stays with
-`ears-manager` and remains an open design question
-([`ears-manager` — Open design questions](components.md#ears-manager)).
-This document constrains only which paths may be committed and by
-whom.
+The minimum layout inside each structured store and the file-naming
+convention are defined by
+[ADR-0003](../decisions/0003-ears-manager-storage-layout.md). This
+document constrains which paths may be committed and by whom.
 
 ### Path rules
 
@@ -343,18 +330,18 @@ unstageable.
 The Drafting Table creates one branch per change set, named:
 
 ```text
-cs/<nnn>-<slug>
+cs/<nnnnn>-<slug>
 ```
 
-- `<nnn>` is the zero-padded sequence number of the change-set ID.
-  Change set `CS-005` uses `cs/005-…`
+- `<nnnnn>` is the five-digit zero-padded sequence number of the change-set ID.
+  Change set `CS-00005` uses `cs/00005-…`
   ([ADR-0002 — Change-Set Manifests][adr2-changeset]).
 - `<slug>` is derived from the manifest `intent`: lowercased,
   non-alphanumeric runs replaced by a single hyphen, then cut at
   the last hyphen before position 40, or at exactly 40 characters
   when no hyphen precedes it. When nothing alphanumeric survives,
-  the slug is `change-set`, so `CS-005` becomes
-  `cs/005-change-set`. Every intent therefore yields exactly one
+  the slug is `change-set`, so `CS-00005` becomes
+  `cs/00005-change-set`. Every intent therefore yields exactly one
   branch name.
 - `cs/` is the default and comes from `repository.branch_prefix`.
 
@@ -390,7 +377,7 @@ ref, so the branch and the manifest always name the same commit.
 The initial Sketch is a change set like any other. Its Vision and
 Architecture artifacts are written through
 `ears-manager artifact put`, its manifest records the merge commit
-that landed `CS-001` on the default branch as `base_commit`, and
+that landed `CS-00001` on the default branch as `base_commit`, and
 it is reviewed and merged the same way. Sketch updates are regular work
 ([Content Storage Model](components.md#content-storage-model)).
 
@@ -456,16 +443,16 @@ approver of every specification delta
 ### Message format
 
 ```text
-spec(CS-005): add --help requirements for ears-manager subcommands
+spec(CS-00005): add --help requirements for ears-manager subcommands
 
 Adds 13 requirements covering per-subcommand help output and
 the unrecognized-flag error path. Two existing requirements are
 recorded as applicable.
 
-Change-Set: CS-005
+Change-Set: CS-00005
 ```
 
-- The subject is `spec(CS-<nnn>): <intent>`, where `<intent>` is
+- The subject is `spec(CS-<nnnnn>): <intent>`, where `<intent>` is
   the manifest `intent` reduced to one line.
 - The body is optional prose. It never restates the diff.
 - The `Change-Set:` trailer is mandatory and machine-readable. A
@@ -647,7 +634,7 @@ ceremony and the credential path differ.
 | Concern | Single-player | Multi-player and Web |
 | --- | --- | --- |
 | Who owns specification artifacts | `ears-manager` | `ears-manager` |
-| Branch naming and creation | `cs/<nnn>-<slug>` from the default branch | Identical |
+| Branch naming and creation | `cs/<nnnnn>-<slug>` from the default branch | Identical |
 | Commit content, message, trailer | As above | Identical |
 | Pull-request body | Rendered from `compare` and `impact` | Identical |
 | How a change reaches the default branch | Pull request | Pull request |
@@ -744,7 +731,7 @@ operations at the harness permission layer.
 | Initialize the control namespace | Through the `ears-manager` operation #30 must define; commits `.protobot/project.yaml` on a change-set branch |
 | Read repository state | `status`, `log`, `diff`, `show`, `ls-files`, `rev-parse`, `merge-base` |
 | Fetch | From `repository.canonical_remote` only |
-| Create a change-set branch | Named `cs/<nnn>-<slug>`, cut from `repository.default_branch` |
+| Create a change-set branch | Named `cs/<nnnnn>-<slug>`, cut from `repository.default_branch` |
 | Stage | Registered artifact paths, the change-set manifest, `project.yaml`, and the `ears-manager` classification entries in `projection.yaml`, by explicit path |
 | Commit | On explicit user request, with the required message and trailer |
 | Push a change-set branch | Non-force, to the canonical remote only |
@@ -819,7 +806,7 @@ diagnostic and the safe retry.
 | Store schema version newer than the tool | `ears-manager` reads `schema_versions` | Names the store, the file version, and the supported version | Upgrade `ears-manager`; migration is a reviewed change set, never automatic |
 | Registered path digest mismatch | Pre-stage comparison | Names each path and both digests | Discard the direct edit, or re-apply it through `ears-manager` |
 | Registered path missing from the projection manifest | `ears-manager check` | Names the path and the required class `shared` | Re-run the registration; `ears-manager` writes the classification entry and the Drafting Table stages `projection.yaml` with it |
-| Branch `cs/<nnn>-<slug>` already exists | Branch creation | Names the branch and whether it is local, remote, or both | Resume that change set, or create the change set under a new ID |
+| Branch `cs/<nnnnn>-<slug>` already exists | Branch creation | Names the branch and whether it is local, remote, or both | Resume that change set, or create the change set under a new ID |
 | Default branch has moved since `base_commit` | `merge-base` check before push or merge | Names the recorded base and the current head | Refresh: merge the default branch in, then `change-set update` |
 | Push rejected, non-fast-forward | Push exit status | Names the branch and the remote head | Refresh and push again; never force |
 | Push rejected by branch protection | Push exit status | Names the protected branch | Push the change-set branch instead and open a pull request. A push to the default branch is a bug in the caller, not a state to retry |
@@ -859,12 +846,12 @@ protection rule.
 
 | # | Action | Expected result |
 | --- | --- | --- |
-| 1 | Initialize the project: cut `cs/001-project-init`, write `project.yaml`, create `CS-001`, commit | The branch exists and is checked out. `.protobot/project.yaml` carries identity, `canonical_remote`, `default_branch`, `review_mode`, schema versions, and the four default registry entries. `.protobot/projection.yaml` carries a `shared` class for each of those four paths. One commit of three files, subject `spec(CS-001): <intent>`, trailer `Change-Set: CS-001`. The default branch is unchanged. `ears-manager check` exits zero. |
-| 2 | Merge `CS-001`, register, then create change set `CS-002` for the initial Sketch | The default branch head is a merge commit. Branch `cs/002-<slug>` exists and is checked out. Its tip equals the new default-branch head, and the manifest records that head's full 40-character hash as `base_commit`. No other branch was created. |
+| 1 | Initialize the project: cut `cs/00001-project-init`, write `project.yaml`, create `CS-00001`, commit | The branch exists and is checked out. `.protobot/project.yaml` carries identity, `canonical_remote`, `default_branch`, `review_mode`, schema versions, and the four default registry entries. `.protobot/projection.yaml` carries a `shared` class for each of those four paths. One commit of three files, subject `spec(CS-00001): <intent>`, trailer `Change-Set: CS-00001`. The default branch is unchanged. `ears-manager check` exits zero. |
+| 2 | Merge `CS-00001`, register, then create change set `CS-00002` for the initial Sketch | The default branch head is a merge commit. Branch `cs/00002-<slug>` exists and is checked out. Its tip equals the new default-branch head, and the manifest records that head's full 40-character hash as `base_commit`. No other branch was created. |
 | 3 | Write Vision and Architecture through `ears-manager artifact put` | Both registered paths exist. Their registry digests match their content. `ears-manager` has added a `shared` class for each new path. `git status` lists only the two artifacts, the manifest, `project.yaml`, and `projection.yaml`. |
 | 4 | Edit a registered artifact directly with a text editor, then request a commit | Nothing is staged and no commit is created. The diagnostic names the path and both digests. `ears-manager check` exits non-zero for the same path. |
-| 5 | Discard the direct edit and request a commit | Exactly one commit. It contains only the two artifacts, the manifest, `project.yaml`, and `projection.yaml`. Subject is `spec(CS-002): <intent>`; the body carries the `Change-Set: CS-002` trailer. |
-| 6 | Push the branch and prepare the pull request | `origin` has `cs/002-<slug>` at the same commit; the default branch is unchanged. The rendered body contains the intent, the `base_commit`, every changed operation, every impact disposition with origin and rationale, `implementation_required`, and the file list. It matches the output of `change-set compare` and `impact`. |
+| 5 | Discard the direct edit and request a commit | Exactly one commit. It contains only the two artifacts, the manifest, `project.yaml`, and `projection.yaml`. Subject is `spec(CS-00002): <intent>`; the body carries the `Change-Set: CS-00002` trailer. |
+| 6 | Push the branch and prepare the pull request | `origin` has `cs/00002-<slug>` at the same commit; the default branch is unchanged. The rendered body contains the intent, the `base_commit`, every changed operation, every impact disposition with origin and rationale, `implementation_required`, and the file list. It matches the output of `change-set compare` and `impact`. |
 | 7 | Commit an unrelated change on the default branch, then refresh the change set | The change-set branch gains a merge commit with two parents. The manifest's `base_commit` equals the new default-branch head. `git log --walk-reflogs` shows no rebase and the branch's first commit is unchanged. |
 | 8 | Merge the branch into the default branch with a merge commit, then register | The default branch head is a merge commit with two parents. The registration stub recorded one call with the change-set ID, that merge commit, and the materialization key. Running registration again records no new call and returns the first result. A write to the merged manifest is refused. |
 
@@ -878,7 +865,7 @@ protection rule.
 | Create or write a `wi/` branch | Refused; no such ref exists in the fixture |
 | Write under `.protobot/attestations/` | Refused; the path stays absent |
 | Push to the default branch, in either `review_mode` | Refused before the push runs |
-| Register a second, different merge commit for `CS-002` | Rejected for reconciliation; the first registration stands |
+| Register a second, different merge commit for `CS-00002` | Rejected for reconciliation; the first registration stands |
 | Run every step in a clone with no IdeaBot material | Identical results; no step depends on IdeaBot input |
 
 ---

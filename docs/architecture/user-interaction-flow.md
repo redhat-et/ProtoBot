@@ -295,7 +295,7 @@ problem observed in IdeaBot).
 not in `.feature` files):
 
 ```yaml
-id: REQ-AUTH-001
+id: REQ-AUTH-00001
 type: event-driven
 text: >-
   When a user submits valid credentials, the system shall

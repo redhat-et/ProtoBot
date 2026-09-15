@@ -59,11 +59,10 @@ its stable ID. `ears-manager` owns the mapping from ID to file
 path and enforces canonical serialization on every write.
 
 The exact directory hierarchy (how files are organized within the
-spec store) and the logical field-level schema (which fields each
-record type contains) are out of scope for this ADR and are
-addressed by follow-up work (repository layout and
-[ADR-0002](0002-ears-specification-record-schema.md)
-respectively).
+spec store) is addressed by
+[ADR-0003](0003-ears-manager-storage-layout.md). The logical
+field-level schema (which fields each record type contains) is
+addressed by [ADR-0002](0002-ears-specification-record-schema.md).
 
 ---
 
@@ -435,6 +434,8 @@ serialized and organized on disk.
   this format fits into
 - [ADR-0002](0002-ears-specification-record-schema.md) —
   logical schema for specification records (resolved)
+- [ADR-0003](0003-ears-manager-storage-layout.md) —
+  repository layout and schema-version keys
 - #30 — `ears-manager` CLI integration (unchanged by
   this decision)
 - #34 — Git and project-repository integration (the PR

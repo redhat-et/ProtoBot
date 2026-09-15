@@ -100,7 +100,7 @@ relationships to other requirements.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string (ID) | yes | Stable identifier. Format: `REQ-<SCOPE>-<NNN>` where `<SCOPE>` is a short uppercase tag derived from the interface or project area and `<NNN>` is a zero-padded sequence number. Must be unique across the specification store. |
+| `id` | string (ID) | yes | Stable identifier. Format: `REQ-<SCOPE>-<NNNNN>` where `<SCOPE>` is a short uppercase tag derived from the interface or project area and `<NNNNN>` is a five-digit zero-padded sequence number. Must be unique across the specification store. |
 | `type` | string (enum) | yes | EARS pattern type. See [EARS Pattern Enum](#ears-pattern-enum). |
 | `text` | string | yes | The full EARS requirement statement. Free-form text validated against the keyword structure of the declared `type` via regex. See [EARS Template Validation](#ears-template-validation). |
 | `applies_to` | object | yes | Applicability selector. See [Applicability Selector](#applicability-selector). |
@@ -243,7 +243,7 @@ the intent, the operations performed, and the impact assessment.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string (ID) | yes | Stable identifier. Format: `CS-<NNN>` where `<NNN>` is a zero-padded sequence number. |
+| `id` | string (ID) | yes | Stable identifier. Format: `CS-<NNNNN>` where `<NNNNN>` is a five-digit zero-padded sequence number. |
 | `base_commit` | string | yes | The immutable base specification commit this change set is based on. A full 40-character hexadecimal Git commit hash. Mutable refs (branch names, tags) are not accepted. Together with the WMS merge-commit reference, this forms the materialization idempotency input ([components.md](../architecture/components.md#change-set-impact-analysis)). |
 | `intent` | string | yes | Human-readable description of what this change set accomplishes and why. |
 | `operations` | list\[object\] | yes | Requirement operations in this change set. See [Change-Set Operations](#change-set-operations). |
@@ -501,7 +501,7 @@ synchronization problems between the spec store and the WMS.
 ### Example Requirement Record
 
 ```yaml
-id: REQ-AUTH-001
+id: REQ-AUTH-00001
 type: event-driven
 text: >-
   When a user submits valid credentials, the system shall
@@ -517,9 +517,9 @@ provenance: user-authored
 created: "2026-08-01T14:30:00Z"
 relationships:
   - type: depends-on
-    target: REQ-AUTH-002
+    target: REQ-AUTH-00002
   - type: related-to
-    target: REQ-SESSION-001
+    target: REQ-SESSION-00001
 status: active
 ```
 
@@ -539,7 +539,7 @@ status: active
 ### Example Change-Set Manifest
 
 ```yaml
-id: CS-001
+id: CS-00001
 base_commit: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
 intent: >-
   Add authentication requirements for the API gateway
@@ -547,11 +547,11 @@ intent: >-
   error handling.
 operations:
   - action: add
-    requirement_id: REQ-AUTH-001
+    requirement_id: REQ-AUTH-00001
   - action: add
-    requirement_id: REQ-AUTH-002
+    requirement_id: REQ-AUTH-00002
   - action: add
-    requirement_id: REQ-AUTH-003
+    requirement_id: REQ-AUTH-00003
 interface_operations: []
 artifact_operations: []
 affected_interfaces:
@@ -560,13 +560,13 @@ affected_scopes:
   - authentication
 implementation_required: true
 impact_assessment:
-  - requirement_id: REQ-GW-010
+  - requirement_id: REQ-GW-00010
     disposition: applicable
     rationale: >-
       Existing gateway routing requirement intersects with
       the authentication scope.
     origin: mechanical
-  - requirement_id: REQ-LOG-005
+  - requirement_id: REQ-LOG-00005
     disposition: not-applicable
     rationale: >-
       Logging requirement shares the api-gateway interface
@@ -613,6 +613,8 @@ artifacts:
   — the open question about scope vocabulary
 - [Content Storage Model](../architecture/components.md#content-storage-model)
   — where artifact-registry entries are stored
+- [ADR-0003](0003-ears-manager-storage-layout.md)
+  — structured store layout and schema-version keys
 - #46 — the issue this ADR resolves
 - #45 — storage format (resolved by ADR-0001, independent of
   this schema)

@@ -56,6 +56,30 @@ runs autonomous Building and Inspecting, and a pluggable WMS Adapter tracks
 work-item lifecycle. Project content remains in Git; workflow state and
 commit-scoped conformance evidence are recorded separately.
 
+## Repository Layout
+
+ProtoBot is a language-agnostic monorepo. Each independently buildable
+component owns its native module and toolchain. The current Go component is
+organized as:
+
+```text
+ears-manager/
+  go.mod
+  cmd/ears-manager/
+  internal/{project,records,schema,storage}/
+```
+
+Other implementations can use their native layout under the same monorepo,
+for example `wms/github/`, `wms/jira/`, or `drafting-table/web/`. The root
+`go.work` makes local Go component development convenient without coupling
+other languages to Go.
+
+The `ears-manager` install target is:
+
+```text
+go install github.com/redhat-et/protobot/ears-manager/cmd/ears-manager@latest
+```
+
 ## Documentation
 
 - [ProtoBot project board](https://github.com/orgs/redhat-et/projects/35/views/1)
