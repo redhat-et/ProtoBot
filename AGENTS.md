@@ -123,9 +123,9 @@ agents must follow these rules:
 ### Aligning skills with the specification hierarchy
 
 A skill that implements or describes a ProtoBot or Specification
-Toolkit capability must remain consistent with the documents
-listed above. When creating, modifying, or reviewing such a
-skill, agents must:
+Toolkit capability must remain consistent with every governed
+Markdown document under `docs/`. When creating, modifying, or
+reviewing such a skill, agents must:
 
 1. **Register new Toolkit capabilities.** Add the capability to
    `components.md`, and distinguish it from repository process

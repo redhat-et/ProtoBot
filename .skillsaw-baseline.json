@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated_by": "skillsaw 0.20.0",
-  "generated_at": "2026-09-18T15:22:32.572826+00:00",
+  "generated_at": "2026-09-18T15:46:44.848750+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -33,6 +33,14 @@
       "file_path": "AGENTS.md",
       "line": 53,
       "message": "Section 'Rules for creating or modifying specification documents' is ~507 tokens (max recommended: 500)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "2838fa04ecdf928f",
+      "rule_id": "content-section-length",
+      "file_path": "AGENTS.md",
+      "line": 123,
+      "message": "Section 'Aligning skills with the specification hierarchy' is ~503 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
