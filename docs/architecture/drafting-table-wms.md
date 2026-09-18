@@ -1,6 +1,8 @@
 # ProtoBot: Drafting Table WMS Integration Contract
 
 > Interface contract — issue #31 — September 2026
+> Document revision: `wms-contract-doc/v1` (document revision,
+> distinct from the per-work-item `contract_version` field)
 >
 > Defines the backend-neutral WMS operations available to the Drafting
 > Table during backlog refinement and blocked-work resolution.
@@ -111,18 +113,32 @@ For a blocked-work submission, `human_approval_id` and
 `approval_resolution_digest` are required inputs. The WMS Adapter resolves
 the approval from trusted Gate state and verifies the approved subject,
 delegated principal, work-item ID, resolution kind, expected state/version,
-request fingerprint, policy version, expiry, and single-use status. Missing,
-unknown, cross-item, wrong-kind, digest-mismatched, expired, or consumed
-approvals return `UNAUTHORIZED_ACTION` before any resource write. The same
-checks apply to an informational acknowledgement.
+request fingerprint, policy version, expiry, and single-use status. For
+`blocked-work.submit-resolution`, the delegated principal must match the
+configured Materializer subject from trusted project/Gate configuration (the
+same identity `resolve-block` will later present). For
+`blocked-work.acknowledge`, the delegated principal must match the trusted
+Drafting Table subject that writes the acknowledgement. Missing, unknown,
+cross-item, wrong-kind, digest-mismatched, expired, consumed, revoked, or
+delegated-principal-mismatched approvals return `UNAUTHORIZED_ACTION`
+before any resource write. The same checks apply to an informational
+acknowledgement.
 
 Acceptance of `blocked-work.submit-resolution` verifies the approval binding
-and stores it with the durable submission; it does not consume or reserve the
-single-use approval. A new reviewed submission may supersede the one pending
-submission, leaving the prior approval unused. The Materializer rechecks and
-consumes the selected approval only when authoritative `resolve-block`
-succeeds. `blocked-work.acknowledge` has no later lifecycle consumer, so its
-approval is consumed atomically when the acknowledgement is written.
+and stores it with the durable submission; it does not consume or reserve
+the single-use approval. A new reviewed submission may supersede the one
+pending submission; that write marks the prior submission `superseded` and
+revokes its Gate approval so the approval is terminal. Authoritative
+`resolve-block` must name the currently-active `resolution_submission_id`
+and consume only that submission's approval. A superseded submission's
+revoked approval cannot unblock the item.
+_(Note: Corrected from prior contract text, which required only
+`human_approval_id` and `approval_resolution_digest`; authoritative
+`resolve-block` now additionally requires the currently-active
+`resolution_submission_id` to bind approval consumption to that specific
+active submission and prevent replay of superseded approvals.)_
+`blocked-work.acknowledge` has no later lifecycle consumer, so its approval
+is consumed atomically when the acknowledgement is written.
 
 ---
 
@@ -160,11 +176,14 @@ work-item contract version.
 owned by the WMS Adapter. It has its own `resolution_submission_id`,
 `resolution_submission_revision`, work-item ID, resolution kind, approval
 ID/digest, and submission status. Creating or replaying this record does not
-mutate the work item's lifecycle state or `contract_version`; the Materializer
-later consumes it through the authoritative `resolve-block` operation. The
-submission record carries the planned dependency or confirmation reference;
-the authoritative lifecycle mutation and any dependency-state update happen
-only during Materializer processing.
+mutate the work item's lifecycle state, `contract_version`, or
+`dependencies`. The submission record carries the planned dependency or
+confirmation reference. The only authoritative work-item mutation is later
+Materializer `resolve-block`, whose full refresh observes that recorded
+planned dependency without a pre-transition work-item write.
+_(Note: Corrected from prior contract text, which implied Materializer
+processing created or refreshed a dependency directly onto the blocked work
+item for `add-requirement`.)_
 
 ### Work-item read projection
 
@@ -200,7 +219,7 @@ HTTP, or local adapter binding may choose a transport-specific spelling.
 | Operation | Caller and authorization | Expected version / idempotency | Success result | Failure behavior |
 | --- | --- | --- | --- | --- |
 | `request.create` | Drafting Table under a project-scoped `drafting-table` context. | New request; required idempotency key. | Complete request at `request_revision: 1`; no change set or work item is created implicitly. | Exact key/fingerprint retry returns `replayed`; a different fingerprint returns `IDEMPOTENCY_CONFLICT`; a semantic duplicate under a new key returns `DUPLICATE_REQUEST`; invalid fields or WMS failure leave no partial record. |
-| `request.refine` | Drafting Table submits refinement under a Gate-bound human approval for classification, scope, relationships, owner, and intent. | `expected_request_revision`, `human_approval_id`, `approval_refinement_digest`, and idempotency key. | Updated request, refinement state, classification, links, and incremented request revision. | Reject missing/invalid approval, stale revision, invalid relationship/classification, unauthorized target, duplicate request, or unavailable WMS. |
+| `request.refine` | Drafting Table submits refinement under a Gate-bound human approval for classification, scope, relationships, owner, and intent. | `expected_request_revision`, `human_approval_id`, `approval_refinement_digest`, and idempotency key. | Updated request, refinement state, classification, links, incremented request revision, and `approval_status: consumed`. | Reject missing, mismatched, expired, or already-consumed approval, stale revision, invalid relationship/classification, unauthorized target, duplicate request, or unavailable WMS. |
 | `request.update-priority` | `human-maintainer` only. | `expected_request_revision` and idempotency key. | New business priority, request revision, audit event, and an atomic priority snapshot update for linked proposed change sets/build items. | Reject agent/service caller, stale revision, invalid priority, or failed atomic WMS update. |
 | `request.link-change-set` | Drafting Table or human maintainer with visibility to both records. | Expected request revision, target change-set revision when mutable, and idempotency key. | Existing request-to-change-set link and updated request revision. | Reject missing/unauthorized target, duplicate link, stale endpoint, or invalid change-set state. This does not create a change set. |
 | `request.link-build-work-item` | Drafting Table may link only to an existing authorized build item; Materializer may create the automatic link as part of materialization. | Expected request revision, existing target ID, and idempotency key. | Existing request-to-build-item link and updated request revision. | Reject missing target, duplicate link, stale source, or any attempt to materialize the target as a side effect. |
@@ -209,9 +228,9 @@ HTTP, or local adapter binding may choose a transport-specific spelling.
 | `work-item.get` | Drafting Table with project read visibility. | `work_item_id`; return current contract version. | One sanitized work-item projection. | Return visibility-safe `NOT_FOUND` or `WMS_UNAVAILABLE`; never mutate state. |
 | `work-item.query` | Drafting Table with project read visibility. | No expected version. | Filtered sanitized work-item projections by state, owner, dependency, or priority; each result includes its current contract version. | Return `INVALID_REQUEST`, visibility-safe not-found, or `WMS_UNAVAILABLE`; never mutate state. |
 | `blocked-work.query` | Drafting Table on session start/resume or explicit user request. | No expected version; every item includes current state and contract version. | Sanitized blocked items with reason class, next action, dependencies, and resolution options. | Mark blocked-work status unavailable if WMS is unavailable; never claim review is complete. |
-| `lifecycle.preflight` | Drafting Table, Job Site, or Materializer before an authoritative operation. | Caller snapshot includes expected state/version; no mutation key is required for a read-only preflight. | `authority: preflight` decision and diagnostics from the shared Validation Rules evaluator. | Advisory rejection only; the caller must still submit the authoritative operation. |
-| `blocked-work.submit-resolution` | Drafting Table submits `add-requirement`, `out-of-scope`, or `impact-amendment` with Gate-bound human approval. | `expected_state: blocked`, `expected_contract_version`, approval-resolution digest, and idempotency key. | A durable resolution-submission record at the next `resolution_submission_revision` (or its existing revision on replay); a new reviewed submission may supersede one pending submission atomically. The work item remains `blocked` and its `contract_version` is unchanged until Materializer processing. | Return `UNAUTHORIZED_ACTION`, `STALE_STATE`, `STALE_CONTRACT_VERSION`, `PRECONDITION_FAILED`, or replay the exact prior result. |
-| `blocked-work.acknowledge` | Drafting Table submits an informational acknowledgement with Gate-bound human approval. | `expected_state: blocked`, `expected_contract_version`, approval-resolution digest, and idempotency key. | A durable acknowledgement record at `resolution_submission_revision: 1`; the work item remains `blocked`. The approval is consumed atomically with this resource write; an exact retry replays without consuming it again. | Apply the same authorization, stale-state/version, precondition, and replay behavior as `blocked-work.submit-resolution`. |
+| `lifecycle.preflight` | Drafting Table, Job Site, or Materializer before an authoritative operation. | Caller snapshot includes expected state/version; no mutation key is required for a read-only preflight. A pre-submission `add-requirement` preflight payload may carry `change_set_id` directly (rather than `resolution_submission_id`) to preview the planned-dependency check, and the evaluator treats it as the hypothetical planned dependency for that preview only. | `authority: preflight` decision and diagnostics from the shared Validation Rules evaluator. | Advisory rejection only; the caller must still submit the authoritative operation. |
+| `blocked-work.submit-resolution` | Drafting Table submits `add-requirement`, `out-of-scope`, or `impact-amendment` with Gate-bound human approval. | `expected_state: blocked`, `expected_contract_version`, `human_approval_id`, `approval_resolution_digest`, and idempotency key. | A durable resolution-submission record at the next `resolution_submission_revision` (or its existing revision on replay); a new reviewed submission may supersede one pending submission atomically and revoke that submission's Gate approval. The work item remains `blocked` and its `contract_version` is unchanged until Materializer `resolve-block`. | Return `UNAUTHORIZED_ACTION`, `STALE_STATE`, `STALE_CONTRACT_VERSION`, `PRECONDITION_FAILED`, or replay the frozen original result. |
+| `blocked-work.acknowledge` | Drafting Table submits an informational acknowledgement with Gate-bound human approval. | `expected_state: blocked`, `expected_contract_version`, `human_approval_id`, `approval_resolution_digest`, and idempotency key. | A durable acknowledgement record at `resolution_submission_revision: 1`; the work item remains `blocked`. The approval is consumed atomically with this resource write; an exact retry replays without consuming it again. | Apply the same authorization, stale-state/version, precondition, and replay behavior as `blocked-work.submit-resolution`. |
 
 The operation set is intentionally disjoint from Job Site execution. A
 fake adapter must reject a Drafting Table caller attempting `claim`,
@@ -273,7 +292,13 @@ For `request.refine`, the Gate binds `human_approval_id` and
 `approval_refinement_digest` to the approved human subject, request ID,
 proposed refinement fields, delegated Drafting Table subject, expiry, and
 single-use state. The adapter rejects a missing, mismatched, expired, or
-already-consumed approval before changing the request.
+already-consumed approval before changing the request. A successful refine
+consumes `human_approval_id` in the same durable write as the request
+revision; an exact idempotent replay does not consume it again.
+_(Note: Corrected from prior contract text, which did not explicitly
+require `approval_status: consumed` on successful refinement or verify that
+a consumed refine approval cannot be replayed under a different idempotency
+key.)_
 
 ### Result envelope
 
@@ -328,7 +353,7 @@ contract. The choices have distinct WMS behavior:
 
 | User choice | Submission payload | Immediate WMS effect |
 | --- | --- | --- |
-| Add a requirement | `resolution_kind: add-requirement`, linked change-set ID, resolution digest | Submit reviewed resolution; Materializer later validates and refreshes the blocked item. |
+| Add a requirement | `resolution_kind: add-requirement`, linked change-set ID, resolution digest | Submit reviewed resolution; no work-item mutation until Materializer `resolve-block`. |
 | Approve out of scope | `resolution_kind: out-of-scope`, approved declaration/change-set ID, digest | Submit reviewed declaration; no direct state change. |
 | Amend impact | `resolution_kind: impact-amendment`, linked change-set ID, digest | Submit reviewed impact amendment; expected state/version remain required. |
 | Defer | No adapter operation; session-local decision only. | No WMS call or lifecycle mutation; item remains `blocked` and the session may continue. |
@@ -348,37 +373,49 @@ but does not pass it to the Validation Rules evaluator as `resolve-block`.
 The submission result is not a Validation Rules decision and carries no
 authoritative lifecycle outcome. A successful submission writes only the
 resolution-submission record; it is not an unblock. The Materializer later
-invokes the authoritative `resolve-block` lifecycle operation only after its
-full refresh preconditions
-pass, consumes the approval atomically, and produces the single
-`blocked -> ready-for-building` transition defined by Validation Rules.
-Before that operation can be applied, the submission records these
-resolution-specific prerequisites:
+invokes the authoritative `resolve-block` lifecycle operation, names the
+currently-active `resolution_submission_id`, and produces the single
+`blocked -> ready-for-building` transition defined by Validation Rules
+only after that command's full refresh preconditions pass. `resolve-block`
+consumes only the named active submission's approval, atomically with the
+transition. There is no same-state `blocked` work-item mutation and no
+`blocked -> waiting` transition. Before a resolution is submitted, a caller
+may run `lifecycle.preflight` for `resolve-block` to preview refresh
+preconditions; for an `add-requirement` preview where no
+`resolution_submission_id` exists yet, the preflight payload may carry
+`change_set_id` directly, and the evaluator treats it as the hypothetical
+planned dependency for that preview only. Before `resolve-block` can be
+applied, the active submission records these resolution-specific refresh
+preconditions:
 
 - `add-requirement`: the submission records a planned dependency on the
-  linked change-set build work; the original item remains `blocked` until
-  Materializer processing creates or refreshes that dependency and it
-  completes;
+  linked change-set build work. That planned dependency is not written
+  onto the work item. `resolve-block`'s full refresh observes it on the
+  named submission; if it is incomplete, the evaluator returns
+  `PRECONDITION_FAILED` and the item remains `blocked`;
 - `out-of-scope`: the item remains `blocked` until the required independent
   Inspector confirmation is recorded;
-- `impact-amendment`: the linked change set must validate and its full refresh
-  must pass; and
-- `acknowledge`: the acknowledgement records the informational condition and
-  remains `blocked`; it does not clear the condition or invoke `resolve-block`.
-  Any later lifecycle resolution must use its own approved submission and
-  Validation Rules preconditions.
+- `impact-amendment`: the linked change set must validate and its full
+  refresh must pass; and
+- `acknowledge`: the acknowledgement records the informational condition
+  and remains `blocked`; it does not clear the condition or invoke
+  `resolve-block`. Any later lifecycle resolution must use its own
+  approved submission and Validation Rules preconditions.
 
 Any failed refresh leaves the item `blocked` and returns the shared
 diagnostic. The Materializer, not the Drafting Table, owns the lifecycle
 transition and contract-version increment.
 
 Only one nonterminal lifecycle resolution submission may be active for a
-work item at a time. An exact retry replays its existing submission; a new
-reviewed lifecycle resolution atomically marks the prior pending submission
-`superseded` and becomes the active submission. Informational acknowledgements
-are separate audit records and do not compete with the lifecycle submission.
-A submission becomes `consumed` only when the Materializer's authoritative
-`resolve-block` succeeds; a superseded submission leaves its approval unused.
+work item at a time. An exact key/fingerprint retry returns the frozen
+original result without a second mutation; current submission status
+(`superseded` or `consumed`) is visible only on a subsequent read of the
+submission record. A new reviewed lifecycle resolution atomically marks
+the prior pending submission `superseded`, revokes that submission's Gate
+approval, and becomes the active submission. Informational acknowledgements
+are separate audit records and do not compete with the lifecycle
+submission. A submission becomes `consumed` only when the Materializer's
+authoritative `resolve-block` succeeds against it.
 
 ---
 
@@ -440,12 +477,19 @@ The fixture asserts:
 - preflight is advisory and the authoritative resolution preserves
   `blocked` state/version checks;
 - resolution submissions own a separate revision and leave the work item
-  blocked until Materializer processing;
-- a new lifecycle resolution supersedes the pending one atomically, while an
-  acknowledgement remains an independent audit record;
+  blocked until Materializer `resolve-block`;
+- a new lifecycle resolution supersedes the pending one atomically and
+  revokes the prior approval, while an acknowledgement remains an
+  independent audit record;
 - approval checks reject missing, forged, cross-item, wrong-digest, expired,
-  and consumed approvals;
-- an exact resolution retry replays without a second mutation;
+  consumed, revoked, and delegated-principal-mismatched approvals;
+- an exact resolution retry replays the frozen original result;
+- Materializer `resolve-block` independently rejects a revoked prior
+  approval and a non-active submission ID;
+- Materializer `resolve-block` rejects an active `add-requirement`
+  submission whose planned dependency is incomplete with
+  `PRECONDITION_FAILED` while ordinary dependencies are satisfied,
+  leaving approval unused and work-item dependencies unchanged;
 - stale resolution state/version is rejected;
 - a Drafting Table caller cannot claim, execute, complete, schedule, or
   mutate findings, and direct `resolve-block` is rejected; and

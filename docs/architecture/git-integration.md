@@ -606,7 +606,7 @@ change_set_id + NUL + merge_commit)`; the same registration retry therefore
 reuses both keys and the same request fingerprint. Repeating it with the
 same merge commit
 returns the prior result. If the merge succeeds and the registration write
-fails, the retry is the same registration call - never a second merge. A
+fails, the retry is the same registration call — never a second merge. A
 registration that arrives with a different merge commit for the same change
 set is rejected for reconciliation.
 

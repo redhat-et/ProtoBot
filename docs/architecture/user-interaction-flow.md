@@ -922,15 +922,18 @@ flowchart LR
 undefined behavior, it is surfaced to the user as an agent-suggested
 requirement. This **blocks the work item** until the user either adds
 a requirement (which enters Dimensioning as a linked change set) or
-approves an explicit out-of-scope specification declaration. The blocked
-work item depends on that change set's build work if implementation is
-required.
-After the dependency completes, the control plane reruns impact/refresh
-eligibility and appends a new contract version. The item returns to
-`ready-for-building` only if those checks pass. A Job Site must obtain a
-new fenced claim before refreshing its branch from main and rerunning all
-gates. Any newly discovered obligation requires a reviewed impact
-amendment before dispatch.
+approves an explicit out-of-scope specification declaration. The
+blocked-work resolution submission records a planned dependency on
+that change set's build work if implementation is required; the work
+item remains `blocked` and does not receive a same-state dependency
+write. After the planned dependency completes, Materializer
+`resolve-block` observes it during full refresh and appends a new
+contract version only on the `blocked -> ready-for-building`
+transition. The item returns to `ready-for-building` only if those
+checks pass. A Job Site must obtain a new fenced claim before
+refreshing its branch from main and rerunning all gates. Any newly
+discovered obligation requires a reviewed impact amendment before
+dispatch.
 
 ---
 

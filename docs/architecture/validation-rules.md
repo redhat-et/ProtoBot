@@ -212,10 +212,12 @@ floor:
 
 For blocked-work resolution, the Drafting Table submits the user's
 reviewed resolution and `human_approval_id` without changing lifecycle
-state. The Materializer verifies that approval, refreshes the authoritative
-record, and performs `resolve-block` through the WMS boundary. This keeps
-the conversational surface useful without granting it a direct unblock
-authority.
+state. The Materializer names the currently-active
+`resolution_submission_id`, verifies that submission's approval, refreshes
+the authoritative record (including any planned dependency recorded on
+that submission), and performs `resolve-block` through the WMS boundary.
+This keeps the conversational surface useful without granting it a direct
+unblock authority. There is no same-state `blocked` mutation.
 
 The approval binding is checked and consumed in the same transaction as
 `resolve-block`. A mismatched, expired, revoked, or already-consumed
@@ -233,10 +235,13 @@ The requested operation must be in both the role's exclusive command
 family and Gate-issued `allowed_actions`. Payload refs must be a subset of
 `allowed_refs`. A caller cannot select or downgrade `policy_version`.
 Every authoritative `resolve-block` request must also contain
-`human_approval_id` and `approval_resolution_digest`. Their binding and
-single-use consumption occur after an idempotency replay check, so an exact
-lost-response retry can return the original result without consuming the
-approval twice.
+`human_approval_id`, `approval_resolution_digest`, and the currently-active
+`resolution_submission_id`. The named submission must be the work item's
+active nonterminal lifecycle resolution, and the approval must belong to
+that submission. Their binding and single-use consumption occur after an
+idempotency replay check, so an exact lost-response retry can return the
+original result without consuming the approval twice. A superseded
+submission's revoked approval cannot satisfy this binding.
 
 The authorization context contains no downstream credential. In hosted
 deployments, the Bridge/Gate obtains a scoped credential only after the
@@ -374,7 +379,7 @@ into an arbitrary update.
 | `materialize` | `initial` at version 0 | `waiting`, `ready-for-building`, `blocked`, or `omitted` | A unique `materialization_key` and complete contract are supplied; the result follows dependency, impact, readiness, and implementation-effect checks. |
 | `refresh-dependencies` | `waiting` | `ready-for-building` | All dependencies are completed and the full pre-claim refresh passes. |
 | `revalidate` | `waiting` or `ready-for-building` | `blocked` | Refresh finds unresolved impact, specification, policy, or reconciliation work. |
-| `resolve-block` | `blocked` | `ready-for-building` | Every authoritative request includes a Gate-bound `human_approval_id` and matching `approval_resolution_digest`; the approval is consumed only after a full refresh passes. Conversation alone cannot perform this transition. |
+| `resolve-block` | `blocked` | `ready-for-building` | Every authoritative request includes a Gate-bound `human_approval_id`, matching `approval_resolution_digest`, and the currently-active `resolution_submission_id`; the approval is consumed only after a full refresh passes, including any planned dependency recorded on that submission. Conversation alone cannot perform this transition. There is no same-state `blocked` mutation. |
 | `claim` | `ready-for-building` | `building` | Atomic expected-state/version check passes; a new owner, lease, and fencing token are recorded. |
 | `renew-lease` | `building` or `inspecting` | Same state | Current owner presents the current fencing token and an unexpired authorization context. |
 | `tests-pass` | `building` | `inspecting` | Current owner presents the expected state/version/fence and the Building gate has passed. |
@@ -422,6 +427,13 @@ silently preserve an unresolved dependency. If review, policy, impact, or
 reconciliation is unresolved, `revalidate` returns `blocked`. A complete
 contract with no implementation effect returns `omitted` and creates no
 executable work item.
+
+`resolve-block` uses the same full refresh. For an `add-requirement`
+submission, that refresh also requires the planned dependency recorded on
+the named `resolution_submission_id` to be completed. The planned
+dependency is not copied onto the work item before the transition; an
+incomplete planned dependency returns `PRECONDITION_FAILED` and leaves
+the item `blocked`.
 
 `refresh-active` is the pre-merge revalidation path for a Job Site that
 still holds an active lease. A passing refresh records a new contract
@@ -525,8 +537,9 @@ reports the first failed check using a deterministic check order:
 2. role-family, `allowed_actions`, and payload-ref subset checks;
 3. idempotency-key replay or conflict;
 4. `materialize` create-or-return by `materialization_key`;
-5. `resolve-block` approval binding and single-use consumption, when that
-   operation is requested;
+5. `resolve-block` active `resolution_submission_id` and approval binding,
+   when that operation is requested; single-use consumption is recorded
+   only if the command is later allowed;
 6. terminal-state check;
 7. active-owner contention for `claim` (`DUPLICATE_CLAIM`);
 8. expected state;
@@ -606,7 +619,7 @@ authorities:
 
 | State | Owner | Validation Rules responsibility |
 | --- | --- | --- |
-| Request backlog, request revisions, and blocked-resolution submissions | WMS Adapter/backend | Validate request-namespace preconditions and supply durable submission records; consume only the selected approval and lifecycle fields during authoritative `resolve-block`. |
+| Request backlog, request revisions, and blocked-resolution submissions | WMS Adapter/backend | Validate request-namespace preconditions and supply durable submission records; consume only the currently-active submission's approval and lifecycle fields during authoritative `resolve-block`. |
 | Work-item state, contract versions, leases, and fencing tokens | WMS Adapter and its claim coordinator | Validate all reads used for a mutation and require atomic compare-and-swap semantics. |
 | Idempotency results, materialization reservations, and lifecycle audit events | WMS Adapter / external coordinator | Ensure retries return the original result and never duplicate a mutation, including `omitted` outcomes. |
 | Specification records and impact dispositions | Git through `ears-manager` | Consume successful validation/check evidence; do not parse or mutate records. |
@@ -655,7 +668,7 @@ rejection or replay, plus one audit event for each accepted mutation.
 | `VR-020` | `building` or `inspecting` owner runs `refresh-active` with the current fence and compatible latest main. | Contract version increments, the old fence is rejected, and a new fence is issued for continued `building`. |
 | `VR-021` | An `inspecting` owner returns to work after an in-contract defect. | `return-to-building` issues a new fence; the old fence cannot mutate the new attempt. |
 | `VR-022` | Drafting Table submits a blocked resolution with missing or forged `human_approval_id`. | Rejected with `UNAUTHORIZED_ACTION`; the item remains `blocked`. |
-| `VR-023` | Drafting Table submits a valid reviewed resolution; Materializer performs `resolve-block`. | Approval is verified, `blocked -> ready-for-building` succeeds, and the Drafting Table itself performs no lifecycle mutation. |
+| `VR-023` | Drafting Table submits a valid reviewed resolution; Materializer performs `resolve-block` naming the active submission whose refresh preconditions pass. | Approval is verified and consumed, `blocked -> ready-for-building` succeeds, and the Drafting Table itself performs no lifecycle mutation. |
 | `VR-024` | Materialize at `initial` version 0 with a new `materialization_key`, then repeat with the same source contract and a new command key. | The first result creates version 1; the second returns the existing item without a duplicate. |
 | `VR-025` | Reuse a `materialization_key` with a different source commit or contract payload. | Rejected with `IDEMPOTENCY_CONFLICT`; no second item is created. |
 | `VR-026` | A reconciler runs `recover-lease` for an expired/missing-fence `building` item whose `current_record` has matching `lease-recovered`/`none` evidence. | Allowed; the item returns to `ready-for-building` without a fencing-token rejection, and the old lease cannot write. |
@@ -664,7 +677,7 @@ rejection or replay, plus one audit event for each accepted mutation.
 | `VR-029` | A request has empty or wildcard allowlists, or attempts to select a weaker `policy_version`. | Rejected with `UNAUTHORIZED_ACTION`; no mutation. |
 | `VR-030` | A valid `human_approval_id` bound to another work item or resolution is used for `resolve-block`. | Rejected with `UNAUTHORIZED_ACTION`; the approval is not consumed and the item remains `blocked`. |
 | `VR-031` | A new `resolve-block` request uses an approval that is expired, revoked, already consumed, or has a mismatched resolution digest. | Rejected with `UNAUTHORIZED_ACTION`; no lifecycle mutation occurs. |
-| `VR-032` | A role-valid Materializer requests `resolve-block` without `human_approval_id` or `approval_resolution_digest`. | Rejected with `UNAUTHORIZED_ACTION`; the item remains `blocked`. |
+| `VR-032` | A role-valid Materializer requests `resolve-block` without `human_approval_id`, `approval_resolution_digest`, or the currently-active `resolution_submission_id`. | Rejected with `UNAUTHORIZED_ACTION`; the item remains `blocked`. |
 | `VR-033` | A successful `resolve-block` response is lost; the Materializer retries the exact request with the same key after the approval was consumed. | The original allowed result is replayed before approval consumption is checked again; no second transition occurs. |
 | `VR-034` | A trusted `reconciler` handles a merge conflict without a Job Site fence while `current_record` contains matching `conflict`/non-merged evidence. | `merging -> ready-for-building` succeeds without issuing a fence to the reconciler; caller proof fields are ignored. |
 | `VR-035` | Git merge is recorded, but the WMS record remains `merging` because the completion write did not commit; `current_record` contains a matching merge envelope and a `reconciler` calls `record-merge`. | Completion succeeds without a live Job Site fence; an identical reconciler retry returns `replayed: true`. |
@@ -675,6 +688,8 @@ rejection or replay, plus one audit event for each accepted mutation.
 | `VR-040` | `recover-lease` or `abandon` is requested with missing, malformed, or mismatched reconciliation evidence on `current_record`. | Rejected with `PRECONDITION_FAILED`; no mutation occurs even when the caller has the correct role. |
 | `VR-041` | A claim uses `expected_state: blocked` against a current blocked item with no active owner. | Rejected with `INVALID_TRANSITION`; the expected state is current but the item must be resolved before claiming. |
 | `VR-042` | A Materializer uses a valid approval whose delegated principal or approved human subject does not match the trusted authorization context. | Rejected with `UNAUTHORIZED_ACTION`; the approval is not consumed and the item remains `blocked`. |
+| `VR-043` | A role-valid Materializer requests `resolve-block` with a `human_approval_id` belonging to a superseded resolution submission, or names a `resolution_submission_id` that is not currently active. | Rejected with `UNAUTHORIZED_ACTION`; no lifecycle mutation occurs. |
+| `VR-044` | A role-valid Materializer requests `resolve-block` naming the active `add-requirement` submission whose planned dependency is not completed. | Rejected with `PRECONDITION_FAILED`; the item remains `blocked` and the approval is not consumed. |
 
 The matrix covers the required stale-write, duplicate-claim,
 unauthorized-mutation, and idempotent-retry cases. Backend adapter tests

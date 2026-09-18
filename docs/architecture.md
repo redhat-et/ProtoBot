@@ -740,9 +740,10 @@ The WMS backend also stores request records and revisions, request-to-change-
 set/build-item links, priority audit events and snapshots, and durable
 blocked-work resolution-submission or acknowledgement records. A submission
 has its own revision and approval/digest binding; writing or replaying it
-does not change the work-item lifecycle state or contract version. The
-Materializer consumes an eligible submission through the authoritative
-Validation Rules boundary.
+does not change the work-item lifecycle state, contract version, or
+dependencies. The Materializer consumes the currently-active submission
+through authoritative `resolve-block`; a superseded submission's Gate
+approval is revoked and cannot be applied.
 
 **Where it lives:** The configured WMS backend, one per project.
 
