@@ -56,6 +56,42 @@ func TestDecodeRejectsUnsafeYAML(t *testing.T) {
 	}
 }
 
+func TestDecodeFieldsPreservesNestedFieldPresence(t *testing.T) {
+	data := []byte("id: CS-00001\nverification:\n  rationale: why\n")
+	var value struct {
+		ID           string `yaml:"id"`
+		Verification struct {
+			Mode      string `yaml:"mode"`
+			Rationale string `yaml:"rationale"`
+		} `yaml:"verification"`
+	}
+	fields, err := DecodeFields(data, &value)
+	if err != nil {
+		t.Fatalf("DecodeFields returned error: %v", err)
+	}
+	for _, field := range []string{"id", "verification", "verification.rationale"} {
+		if !fields[field] {
+			t.Errorf("DecodeFields did not report %q", field)
+		}
+	}
+	if fields["verification.mode"] {
+		t.Fatal("DecodeFields reported omitted verification.mode")
+	}
+}
+
+func TestDecodeRejectsExplicitNullValues(t *testing.T) {
+	for _, data := range []string{
+		"verification: null\n",
+		"operations: null\n",
+		"implementation_required: null\n",
+	} {
+		var value map[string]any
+		if _, err := DecodeFields([]byte(data), &value); err == nil {
+			t.Fatalf("DecodeFields accepted explicit null: %q", data)
+		}
+	}
+}
+
 func TestCanonicalEncodingIsStable(t *testing.T) {
 	first := records.Requirement{
 		ID:        "REQ-AUTH-00001",
@@ -191,10 +227,10 @@ func TestCanonicalEncodingNormalizesAllRecordTypes(t *testing.T) {
 	}
 
 	projectFirst := records.ProjectConfig{
-		SchemaVersions: records.SchemaVersions{Project: 1, Specification: 1},
+		SchemaVersions: records.SchemaVersions{Project: records.CurrentProjectSchemaVersion, Specification: records.CurrentSpecificationSchemaVersion},
 		Artifacts: []records.ArtifactEntry{
-			{ID: "vision", Kind: records.ArtifactVision, Path: "docs/vision.md", Digest: "sha256:one", Owner: "user"},
-			{ID: "architecture", Kind: records.ArtifactArchitecture, Path: "docs/architecture.md", Digest: "sha256:two", Owner: "user"},
+			{ID: "vision", Kind: records.ArtifactVision, Path: "docs/vision.md", Digest: "sha256:e06dbbb451a2eeaa837b763f4f15e991a056fdef2c4f3aae9ee65de002c2a39f", Owner: "user"},
+			{ID: "architecture", Kind: records.ArtifactArchitecture, Path: "docs/architecture.md", Digest: "sha256:e1bc4fc7df69cdced24b2a22486b16eca8b1aa4be49b3bcf1094d4cc9cd1cff5", Owner: "user"},
 		},
 	}
 	projectSecond := projectFirst
@@ -211,8 +247,8 @@ func TestCanonicalEncodingNormalizesAllRecordTypes(t *testing.T) {
 		t.Fatal("project configs with reordered artifacts did not canonicalize identically")
 	}
 	projectFirst.Artifacts = []records.ArtifactEntry{
-		{ID: "vision", Kind: records.ArtifactVision, Path: "docs/z.md", Digest: "sha256:z", Owner: "user"},
-		{ID: "vision", Kind: records.ArtifactVision, Path: "docs/a.md", Digest: "sha256:a", Owner: "user"},
+		{ID: "vision", Kind: records.ArtifactVision, Path: "docs/z.md", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000001", Owner: "user"},
+		{ID: "vision", Kind: records.ArtifactVision, Path: "docs/a.md", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000002", Owner: "user"},
 	}
 	projectSecond.Artifacts = append([]records.ArtifactEntry(nil), projectFirst.Artifacts[1], projectFirst.Artifacts[0])
 	left, err = Encode(projectFirst)

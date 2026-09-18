@@ -66,7 +66,7 @@ organized as:
 ears-manager/
   go.mod
   cmd/ears-manager/
-  internal/{project,records,schema,storage}/
+  internal/{project,records,schema,specvalidation,storage}/
 ```
 
 Other implementations can use their native layout under the same monorepo,

@@ -19,7 +19,7 @@ version for each configuration store:
 
 ```yaml
 schema_versions:
-  project: 1
+  project: 2
   specification: 1
 stores:
   requirements: .protobot/requirements
@@ -43,10 +43,12 @@ paths, traversal paths, and symlink escapes are invalid.
 structured interface records in the interface store are distinct from
 opaque interface IDL or prose artifacts registered in that list.
 
-`ears-manager` supports schema version `1` for both `project` and
-`specification`. It refuses missing, invalid, or newer versions. Older
-versions require an explicitly implemented reviewed migration and are
-not silently interpreted as version `1`.
+`ears-manager` supports project schema version `2` and specification
+schema version `1`. It refuses missing, invalid, or newer versions.
+Project schema version `1` requires an explicitly implemented reviewed
+migration for the tightened artifact owner and digest constraints and is
+not silently interpreted as version `2`. Explicit YAML null values are
+also rejected rather than treated as omitted fields.
 
 The stable filename mapping is owned by `ears-manager`:
 

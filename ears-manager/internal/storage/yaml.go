@@ -17,42 +17,52 @@ import (
 const managedHeader = "# managed by ears-manager; do not edit by hand\n"
 
 func Decode(data []byte, target any) error {
+	_, err := DecodeFields(data, target)
+	return err
+}
+
+// DecodeFields safely decodes one YAML document and returns the paths of
+// fields present in the source document. The field set is used by semantic
+// validation to distinguish omitted required values from zero values.
+func DecodeFields(data []byte, target any) (map[string]bool, error) {
 	if target == nil {
-		return fmt.Errorf("YAML decode target must not be nil")
+		return nil, fmt.Errorf("YAML decode target must not be nil")
 	}
 	if !utf8.Valid(data) {
-		return fmt.Errorf("YAML input is not valid UTF-8")
+		return nil, fmt.Errorf("YAML input is not valid UTF-8")
 	}
 	if bytes.HasPrefix(data, []byte{0xef, 0xbb, 0xbf}) {
-		return fmt.Errorf("YAML input must not contain a UTF-8 BOM")
+		return nil, fmt.Errorf("YAML input must not contain a UTF-8 BOM")
 	}
 
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	var document yaml.Node
 	if err := decoder.Decode(&document); err != nil {
-		return fmt.Errorf("parse YAML: %w", err)
+		return nil, fmt.Errorf("parse YAML: %w", err)
 	}
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
-		return fmt.Errorf("YAML document is empty")
+		return nil, fmt.Errorf("YAML document is empty")
 	}
 	if err := inspectNode(document.Content[0], "$"); err != nil {
-		return err
+		return nil, err
 	}
 
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("YAML input contains more than one document")
+			return nil, fmt.Errorf("YAML input contains more than one document")
 		}
-		return fmt.Errorf("read YAML document boundary: %w", err)
+		return nil, fmt.Errorf("read YAML document boundary: %w", err)
 	}
 
 	strictDecoder := yaml.NewDecoder(bytes.NewReader(data))
 	strictDecoder.KnownFields(true)
 	if err := strictDecoder.Decode(target); err != nil {
-		return fmt.Errorf("decode YAML record: %w", err)
+		return nil, fmt.Errorf("decode YAML record: %w", err)
 	}
-	return nil
+	fields := make(map[string]bool)
+	collectFields(document.Content[0], "", fields)
+	return fields, nil
 }
 
 func Encode(value any) ([]byte, error) {
@@ -118,6 +128,9 @@ func inspectNode(node *yaml.Node, location string) error {
 	if node.Kind == yaml.AliasNode {
 		return fmt.Errorf("unsafe YAML alias at %s", location)
 	}
+	if node.Tag == "!!null" {
+		return fmt.Errorf("YAML null values are not allowed at %s", location)
+	}
 	if node.Style&yaml.TaggedStyle != 0 {
 		return fmt.Errorf("unsafe YAML tag at %s", location)
 	}
@@ -152,6 +165,27 @@ func inspectNode(node *yaml.Node, location string) error {
 		}
 	}
 	return nil
+}
+
+func collectFields(node *yaml.Node, location string, fields map[string]bool) {
+	switch node.Kind {
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); i += 2 {
+			key := node.Content[i].Value
+			field := key
+			if location != "" {
+				field = location + "." + key
+			}
+			fields[field] = true
+			collectFields(node.Content[i+1], field, fields)
+		}
+	case yaml.SequenceNode:
+		for i, child := range node.Content {
+			field := fmt.Sprintf("%s[%d]", location, i)
+			fields[field] = true
+			collectFields(child, field, fields)
+		}
+	}
 }
 
 func canonicalValue(value any) any {
