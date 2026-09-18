@@ -66,7 +66,7 @@ organized as:
 ears-manager/
   go.mod
   cmd/ears-manager/
-  internal/{project,records,schema,storage}/
+  internal/{cli,project,records,schema,specvalidation,storage}/
 ```
 
 Other implementations can use their native layout under the same monorepo,
@@ -79,6 +79,17 @@ The `ears-manager` install target is:
 ```text
 go install github.com/redhat-et/protobot/ears-manager/cmd/ears-manager@latest
 ```
+
+### First `ears-manager` release
+
+The first command slice provides `check`, requirement add/list/show/update/
+retire, interface add/list/show, artifact get/put, and minimal proposed
+change-set creation. Writes are validated against a candidate specification
+before an atomic file transaction is applied; JSON output and exit statuses
+are deterministic.
+
+Project bootstrap, change-set comparison and impact analysis, and governed
+Git branch/commit/pull-request automation remain separate follow-on work.
 
 ## Documentation
 

@@ -681,16 +681,17 @@ fire.
 ### The pre-stage digest comparison
 
 Before staging anything, the Drafting Table recomputes the content
-digest of every registered artifact the change set touches and
-compares it with the `digest` recorded in the registry.
+digest of every registered artifact the change set touches using the
+canonical text rules in [ADR-0002][adr2-digest], then compares it with the
+`digest` recorded in the registry.
 `ears-manager` updates that digest on every governed write
 ([ADR-0002][adr2-registry]), so a mismatch means the file changed
-by some other route.
+by some other route beyond an allowed line-ending representation.
 
-When a registry entry names a directory rather than a file, the
-digest covers that directory's canonical file set, so an added or
-deleted record is a mismatch too. This holds for the requirement
-store and for the change-set folder alike.
+Artifact registry entries name regular files. The structured requirement,
+interface, and change-set directories are configured through the `stores`
+block rather than registered as artifacts; directory digesting is outside
+the v1 artifact registry and is not part of EM-03.
 
 On a mismatch the Drafting Table:
 
@@ -855,7 +856,7 @@ protection rule.
 | 1 | Initialize the project: cut `cs/00001-project-init`, write `project.yaml`, create `CS-00001`, commit | The branch exists and is checked out. `.protobot/project.yaml` carries identity, `canonical_remote`, `default_branch`, `review_mode`, schema versions, and the four default registry entries. `.protobot/projection.yaml` carries a `shared` class for each of those four paths. One commit of three files, subject `spec(CS-00001): <intent>`, trailer `Change-Set: CS-00001`. The default branch is unchanged. `ears-manager check` exits zero. |
 | 2 | Merge `CS-00001`, register, then create change set `CS-00002` for the initial Sketch | The default branch head is a merge commit. Branch `cs/00002-<slug>` exists and is checked out. Its tip equals the new default-branch head, and the manifest records that head's full 40-character hash as `base_commit`. No other branch was created. |
 | 3 | Write Vision and Architecture through `ears-manager artifact put` | Both registered paths exist. Their registry digests match their content. `ears-manager` has added a `shared` class for each new path. `git status` lists only the two artifacts, the manifest, `project.yaml`, and `projection.yaml`. |
-| 4 | Edit a registered artifact directly with a text editor, then request a commit | Nothing is staged and no commit is created. The diagnostic names the path and both digests. `ears-manager check` exits non-zero for the same path. |
+| 4 | Make a substantive direct edit to a registered artifact, then request a commit | Nothing is staged and no commit is created. The diagnostic names the path and both digests. `ears-manager check` exits non-zero for the same path. |
 | 5 | Discard the direct edit and request a commit | Exactly one commit. It contains only the two artifacts, the manifest, `project.yaml`, and `projection.yaml`. Subject is `spec(CS-00002): <intent>`; the body carries the `Change-Set: CS-00002` trailer. |
 | 6 | Push the branch and prepare the pull request | `origin` has `cs/00002-<slug>` at the same commit; the default branch is unchanged. The rendered body contains the intent, the `base_commit`, every changed operation, every impact disposition with origin and rationale, `implementation_required`, and the file list. It matches the output of `change-set compare` and `impact`. |
 | 7 | Commit an unrelated change on the default branch, then refresh the change set | The change-set branch gains a merge commit with two parents. The manifest's `base_commit` equals the new default-branch head. `git log --walk-reflogs` shows no rebase and the branch's first commit is unchanged. |
@@ -935,6 +936,7 @@ resurface.
 [adr1-history]: ../decisions/0001-requirements-storage-format.md#change-set-history-representation
 [adr1-pr]: ../decisions/0001-requirements-storage-format.md#4-pr-reviewability-plan
 [adr2-changeset]: ../decisions/0002-ears-specification-record-schema.md#change-set-manifests
+[adr2-digest]: ../decisions/0002-ears-specification-record-schema.md#digest-calculation
 [adr2-registry]: ../decisions/0002-ears-specification-record-schema.md#artifact-registry-entries
 [adr2-versioning]: ../decisions/0002-ears-specification-record-schema.md#schema-versioning
 [change-types]: user-interaction-flow.md#incremental-development-and-change-types

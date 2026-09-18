@@ -395,8 +395,10 @@ It is used by these callers:
   Site, CI, and maintainers.
 - **Specification working tree:** Registered artifact paths in the
   current change-set/build branch; no independent service database.
-- **Validator plugins/tools:** Format-specific IDL/prose/schema checks
-  invoked under registered artifact policy.
+- **Validator registry:** Code-controlled, extensible format-specific
+  IDL/prose/schema checks selected by stable names in the artifact registry.
+  New formats, such as Smithy, add a registry entry and bundled routine;
+  caller-supplied commands are never executed.
 - **Outputs:** Deterministic structured results, diagnostics, diffs,
   impact candidates, and non-zero validation status for CI.
 
@@ -438,7 +440,8 @@ It is used by these callers:
   requirement relationships and change-set references must resolve.
   The minimum relationship vocabulary is `depends-on`, `conflicts-with`,
   `supersedes`, and `related-to`; `depends-on` and `supersedes` must be
-  acyclic. Dangling references are flagged.
+  acyclic, and a `supersedes` target must be retired. Dangling references
+  are flagged.
 - **Artifact governance.** Vision, Architecture, interface IDL, and
   interface-prose files are registered by kind, path, digest, owner, and
   validator. Structured requirement, interface, and change-set records use

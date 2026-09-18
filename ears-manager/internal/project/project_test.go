@@ -159,7 +159,7 @@ func TestProjectArtifactRegistryIsTypedAndCanonical(t *testing.T) {
 		ID:     "vision",
 		Kind:   records.ArtifactVision,
 		Path:   "docs/vision.md",
-		Digest: "sha256:example",
+		Digest: "sha256:e06dbbb451a2eeaa837b763f4f15e991a056fdef2c4f3aae9ee65de002c2a39f",
 		Owner:  "user",
 	}
 	if err := project.SaveArtifact(artifact); err != nil {

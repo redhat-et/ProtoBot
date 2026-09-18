@@ -1,5 +1,11 @@
 package main
 
-// The command surface is defined by issue #30. This package intentionally
-// exists as the static binary target for the storage foundation.
-func main() {}
+import (
+	"os"
+
+	"github.com/redhat-et/protobot/ears-manager/internal/cli"
+)
+
+func main() {
+	os.Exit(cli.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}

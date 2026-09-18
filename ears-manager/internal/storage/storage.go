@@ -117,6 +117,47 @@ func ValidatePathWithin(root, relativePath string) (string, error) {
 	return candidate, nil
 }
 
+// ValidatePathWithinNoSymlinks applies project containment rules and rejects
+// symlink components, including a symlinked final target. Governed writes use
+// this stricter form so lexical reserved-path checks cannot be bypassed by an
+// alias that resolves into the control namespace.
+func ValidatePathWithinNoSymlinks(root, relativePath string) (string, error) {
+	candidate, err := ValidatePathWithin(root, relativePath)
+	if err != nil {
+		return "", err
+	}
+	canonicalRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve root: %w", err)
+	}
+	canonicalRoot, err = filepath.EvalSymlinks(canonicalRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve root symlinks: %w", err)
+	}
+	relative, err := filepath.Rel(canonicalRoot, candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve relative path: %w", err)
+	}
+	current := canonicalRoot
+	for _, component := range strings.Split(relative, string(os.PathSeparator)) {
+		if component == "" || component == "." {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, statErr := os.Lstat(current)
+		if errors.Is(statErr, fs.ErrNotExist) {
+			break
+		}
+		if statErr != nil {
+			return "", statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("path %q contains a symlink component", relativePath)
+		}
+	}
+	return candidate, nil
+}
+
 func (s *Store[T]) PathForID(id string) (string, error) {
 	filename, _, err := s.relativePathForID(id)
 	if err != nil {
