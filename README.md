@@ -73,12 +73,16 @@ source-control-manager/
   internal/{cli,mcpserver,scm,gitx,host,ears,render,...}/
   internal/golden/          # the golden repository fixture, replayed
   internal/testing/         # the gh and ears-manager stubs of the fixture
+wms/
+  go.mod
+  validation/               # backend-neutral lifecycle evaluator
+  memory/                    # in-memory WMS conformance adapter
 ```
 
-Other implementations can use their native layout under the same monorepo,
-for example `wms/github/`, `wms/jira/`, or `drafting-table/web/`. The root
-`go.work` makes local Go component development convenient without coupling
-other languages to Go.
+Additional WMS backends can use their native layout under the same monorepo,
+for example `wms/github/` or `wms/jira/`; other components can use a native
+layout such as `drafting-table/web/`. The root `go.work` makes local Go
+component development convenient without coupling other languages to Go.
 
 The install targets are:
 

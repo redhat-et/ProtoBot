@@ -2113,6 +2113,8 @@ confirmation.
   authorization, transitions, rejection semantics, and acceptance matrix
 - [Drafting Table WMS Integration Contract](drafting-table-wms.md) —
   Backend-neutral request, query, linking, and blocked-resolution operations
+- [WMS Implementations](../../wms/README.md) — Backend-neutral Go evaluator
+  and in-memory conformance adapter placement
 - [Git and Project-Repository Integration](git-integration.md) —
   Project identification, branches, commits, PR preparation, and
   approved specification state

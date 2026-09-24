@@ -284,11 +284,13 @@ Every operation carries a transport-neutral envelope:
 The request envelope is untrusted input. The WMS Adapter resolves the
 project and Gate-issued actor context from trusted configuration; subject,
 role, allowed actions/refs, policy version, expiry, and approval bindings
-are not caller-controlled request fields. Unknown operation names and
-actions outside the context are rejected with `UNAUTHORIZED_ACTION`.
-Lifecycle mutations use the Validation Rules request fields, including
-expected state, `expected_contract_version`, and any required approval or
-fencing token.
+are not caller-controlled claims. A blocked-work request may carry an
+approval ID and digest as references, but the WMS resolves and checks them
+against Gate-owned approval state. Unknown operation names and actions
+outside the context are rejected with `UNAUTHORIZED_ACTION`. Lifecycle
+mutations use the Validation Rules request fields, including expected
+state, `expected_contract_version`, and any required approval or fencing
+token.
 
 For `request.refine`, the Gate binds `human_approval_id` and
 `approval_refinement_digest` to the approved human subject, request ID,

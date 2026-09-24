@@ -3,4 +3,5 @@ go 1.25.12
 use (
 	./ears-manager
 	./source-control-manager
+	./wms
 )

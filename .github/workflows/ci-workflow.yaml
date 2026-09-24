@@ -154,6 +154,51 @@ jobs:
         run: go install ./cmd/source-control-manager
         working-directory: source-control-manager
 
+  wms:
+    name: WMS validation and in-memory adapter checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        # https://github.com/actions/checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up Go
+        # https://github.com/actions/setup-go
+        # zizmor: ignore[cache-poisoning]
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: wms/go.mod
+
+      - name: Check formatting
+        run: |
+          files="$(gofmt -l wms)" || exit $?
+          test -z "$files"
+
+      - name: Run golangci-lint
+        # https://github.com/golangci/golangci-lint-action
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+          args: --timeout=5m
+          skip-cache: true
+          working-directory: wms
+
+      - name: Run vet
+        run: go vet ./...
+        working-directory: wms
+
+      - name: Run tests, the WMS golden fixture included
+        run: go test ./...
+        working-directory: wms
+
+      - name: Build Go packages
+        run: CGO_ENABLED=0 go build -trimpath -buildvcs=false ./...
+        working-directory: wms
+
   # This job provides a single status check for merge gates.
   ci-success:
     name: CI Workflow - Success
@@ -162,6 +207,7 @@ jobs:
       - pre-commit
       - go
       - scm
+      - wms
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
