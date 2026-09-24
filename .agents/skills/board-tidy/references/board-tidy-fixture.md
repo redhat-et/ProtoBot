@@ -117,4 +117,5 @@ this fixture, or the live Step 5 proposal, in the description of the
 change. Lint checks alone do not satisfy this requirement.
 
 Review agents must treat a missing dry-run or fixture before/after as
-a finding when the diff changes eligibility or stale-status logic.
+a finding when the diff changes Step 3 eligibility, Step 4
+stale-status rules, or the Step 2 `items` shape those rules consume.

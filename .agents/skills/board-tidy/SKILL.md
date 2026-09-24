@@ -211,5 +211,5 @@ Step 6 mutations, and paste the before/after recommendations into
 the description of the change.
 
 Review agents must treat a missing dry-run or fixture before/after
-as a finding when the diff changes eligibility or stale-status
-logic.
+as a finding when the diff changes Step 3 eligibility, Step 4
+stale-status rules, or the Step 2 `items` shape those rules consume.
