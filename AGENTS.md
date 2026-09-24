@@ -41,6 +41,15 @@ later, agents must follow these rules:
    the same list or governed collection, not only
    specification-hierarchy keyword checks.
 
+4. **Match intra-entry restatement terminology.** When
+   an entry restates a requirement's cases in a separate
+   enforcement or consequence clause, both statements
+   must use identical terminology. An undeclared alias
+   or omitted term is a defect. Review agents must
+   check this restatement. Findings should include
+   intra-entry terminology drift, not only sibling-entry
+   terminology matching.
+
 Examples of sibling entries for each governed scope listed above:
 
 - **Numbered rules in `AGENTS.md`:** the other numbered
