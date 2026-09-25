@@ -124,12 +124,19 @@ agent:
   `.protobot/`. A deny rule wins over every allow rule in every scope,
   so it binds the Drafting Table role too, which is correct: the role
   never writes there either.
-- **The hook** calls the guard before every tool call of every session
-  (H8). The matcher covers MCP tools as well. The `timeout` bounds
+- **The hook** attempts to call the guard before every tool call of
+  every session (H8). The matcher covers MCP tools as well. The `timeout` bounds
   the guard; a hook that times out, a killed guard, or a shim the
   shell cannot run (status 126 or 127 from an unset
   `CLAUDE_PROJECT_DIR` or a lost execute bit) yields no status 2, and
-  Claude Code lets that call through. H8 records the gap.
+  Claude Code lets that call through. The role's native
+  `Bash(ears-manager *)` permission still admits the CLI, but does not
+  inspect `--content-file` or `--impact-file` values, variable
+  expansion, or redirection. Such a call can therefore bypass those
+  guard-only checks, and the later integrity and CI layers do not
+  recover file-source provenance. These are explicit fail-open gaps,
+  not refusals or successful H8 enforcement; see the shared
+  [file-source exception](adapter-contract.md#file-source-arguments).
 - The file holds no allow rule, so it changes nothing else for other
   sessions.
 
@@ -405,7 +412,7 @@ through `Read`. It needs no binding file.
 | H5 | Nothing on idle or exit | No `Stop` or `SessionEnd` hook | Designed |
 | H6 | Replayable session record | The transcript under `~/.claude/projects/` and the `stream-json` output with `--include-hook-events` | Designed; no export or redaction command exists |
 | H7 | Headless replay with no permission prompt | `-p`, `dontAsk`, `--permission-prompts none`, and `ANTHROPIC_BASE_URL` to a replay endpoint | Designed; the replay endpoint is unverified |
-| H8 | Guard before every tool call | The project hook and the shim | Designed. A hook timeout, a killed guard, or a shim the shell cannot run lets that call through (gap); the role signal is `PROTOBOT_ROLE` from the launch, which an exported variable in the user's own shell can also set |
+| H8 | Invoke the guard on each tool call and enforce its decision | The project hook and the shim | Designed. A hook timeout, a killed guard, or a shim the shell cannot run lets the call through; allowed `ears-manager` commands can then bypass guard-only option/value and shell-syntax checks, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (documented gap); `dontAsk` still denies `git` and `gh`. The role signal is `PROTOBOT_ROLE` from the launch, which an exported variable in the user's own shell can also set |
 | H9 | Hide file-writing, subagent, and web tools | The agent's `tools` list and the deny rules | Designed |
 | H10 | Toolkit skills only | `skillOverrides` turns off every skill the binding can name; the guard refuses a call to any other | Observed for project and built-in skills; a user-scope or plugin skill stays in the model's list (gap) |
 | H11 | No credential in binding files; no session upload | Placeholders; no `--remote-control`, `--cloud`, or `/feedback`; `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in the fixture | Designed |
@@ -425,6 +432,13 @@ What the Claude Code layer stops, by route:
 | Output redirection in a shell command | Refused by the guard; a prefix rule cannot see it | Refused by the guard when the redirection target is written from the project root |
 | Tool of another MCP server | Not loaded, because of `--strict-mcp-config` | The user's own configuration |
 | Subagent | `Agent` not offered | Not applicable |
+
+The shell rows that depend on the guard apply only when the hook returns
+a decision. If the hook fails open, native command-prefix permissions
+do not replace the guard's argument and shell-syntax checks; in
+particular, later checks cannot establish whether file-source bytes came
+from standard input or an external path. See the shared
+[file-source exception](adapter-contract.md#file-source-arguments).
 
 ---
 

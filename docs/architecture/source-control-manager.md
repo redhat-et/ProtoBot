@@ -1337,10 +1337,12 @@ registration command on the user's machine, and the Materializer in the
 Job Site's environment, each with its own read credential.
 
 Multi-player on a laptop keeps the user's own credential, the recorded
-deviation from the Bridge/Gate constraint that #33 describes: the model
-never sees the token, because Git's credential helper and `gh`'s store
-give it to those programs only, but no Gate stands between the SCM and
-the token. The Web Drafting Table is a non-goal of the first project
+deviation from the Bridge/Gate constraint that #33 describes. Git's
+credential helper and `gh`'s store give the token to those programs
+only, so on guard-checked calls the model never sees it; a fail-open
+call can expose it, as #33's per-binding fail-open rows record
+([Credentials][credentials]). No Gate stands between the SCM and the
+token. The Web Drafting Table is a non-goal of the first project
 ([Vision — Non-goals][vision-nongoals]), so the hosted face is defined
 here and built later.
 
@@ -1631,9 +1633,12 @@ either.
 
 ### Security posture
 
-- **The role holds no Git or host credential, and runs no Git or `gh`
-  command.** The guard refuses both in the role's shell, and the binding
-  gives the role only the `scm` tools for them.
+- **The role holds no Git or host credential, and is given no Git or
+  `gh` command.** The guard refuses both in the role's shell on the
+  calls it checks, and the binding gives the role only the `scm` tools
+  for them. A call that passes without a guard decision is bounded only
+  by the binding's native rules or sandbox, which each binding records
+  ([Credentials][credentials]).
 - **Locally, the SCM narrows and does not isolate.** It runs as the user
   with the user's credentials. Every other session, agent, and terminal
   on the machine still has `git` and `gh`

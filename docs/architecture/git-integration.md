@@ -713,7 +713,7 @@ ceremony and the credential path differ.
 | Who approves | The author merges their own pull request. No reviewer is required. | A reviewer merges; CODEOWNERS and required reviews apply |
 | Registration trigger | Local `register-approved-change-set` | Merge hook on the default branch |
 | Where the [Source Control Manager](source-control-manager.md#deployment-topology) runs | On the user's machine, started by the harness binding | On each contributor's machine for a local harness; hosted behind the Gate for the Web Drafting Table |
-| Git host credential | The user's own Git host token, used by the SCM | On a local harness, the user's own token through Git's credential helper and `gh`, used by the SCM and never readable by the role ([#33 Credentials](agent-harness/adapter-contract.md#credentials)); hosted and Web, OAuth 2.1 through the Bridge/Gate pattern, and the agent runtime never sees the credential |
+| Git host credential | The user's own Git host token, used by the SCM | On a local harness, the user's own token through Git's credential helper and `gh`, used by the SCM and not readable by the role on guard-checked calls; a fail-open call can expose it ([#33 Credentials](agent-harness/adapter-contract.md#credentials)); hosted and Web, OAuth 2.1 through the Bridge/Gate pattern, and the agent runtime never sees the credential |
 | Merge strategy | Merge commit | Merge commit |
 | Where code lands | Job Site merges `wi/` branches | Identical |
 
@@ -739,10 +739,12 @@ project; it does not change any rule in this document.
 
 ## Ungoverned-edit detection
 
-The Drafting Table never writes a registered specification file
-directly, and neither does anything else. A file edited outside
-`ears-manager` must be rejected or caught before it can reach the
-default branch. Four layers do that, in order of how early they
+No component is meant to write a registered specification file
+directly; for the Drafting Table the guard enforces this on the calls
+it checks, and a call without a guard decision may still write one
+([File-source arguments][fail-open]). A file edited outside
+`ears-manager`, by any route, must be rejected or caught before it can
+reach the default branch. Four layers do that, in order of how early they
 fire.
 
 | Layer | Where | Catches |
@@ -809,11 +811,19 @@ no ref, path, remote, or message from the agent, except the checked
 prefix and default branch at initialization and an optional commit
 body, and derives every target from the change set ([Mapping to #34's
 permitted operations][scm-mapping]).
-The agent runs no Git or Git host command itself: the guard refuses
-them in the role's shell, where only `ears-manager`, the clock, and
-registration remain
+The role is designed to run no Git or Git host command itself: on calls
+it checks, the guard refuses them in the role's shell, where only
+`ears-manager`, the clock, and registration remain
 ([Shell operations](agent-harness/adapter-contract.md#shell-operations)).
-The later layers hold when the harness layer is off.
+The SCM enforces its operation rules when called through its tools;
+branch protection and CI continue to gate merges even if the harness
+layer is off. They do not intercept direct shell `git` or `gh` calls
+that an absent guard and permissive native rules let through
+([What the harness layer stops][layer-stops]). On a call without a
+guard decision, OpenCode's and Claude Code's native rules still refuse
+`git` and `gh`; Codex has no native command rules, so its sandbox
+blocks Git writes and Git host calls but not Git reads
+([File-source arguments][fail-open]).
 
 ### Allowed
 
@@ -1045,3 +1055,6 @@ resurface.
 [projections]: components.md#worker-repository-projections-decided
 [scm-fixture]: source-control-manager.md#repository-fixture-against-the-scm
 [scm-mapping]: source-control-manager.md#mapping-to-34s-permitted-operations
+
+[layer-stops]: agent-harness/adapter-contract.md#what-the-harness-layer-stops
+[fail-open]: agent-harness/adapter-contract.md#file-source-arguments

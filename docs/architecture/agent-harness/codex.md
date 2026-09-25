@@ -140,7 +140,8 @@ profile:
 }
 ```
 
-- **The hook calls the guard before every tool call (H8).** Codex sends
+- **The hook attempts to call the guard before every tool call (H8).**
+  Codex sends
   the `PreToolUse` input on standard input, in the shape the guard
   expects: `hook_event_name`, `session_id`, `cwd`, `tool_name`, and
   `tool_input`, plus `model`, `permission_mode`, `tool_use_id`,
@@ -177,7 +178,11 @@ profile:
   the contract requires. A guard process that is killed, or that hangs
   past the hook timeout, is a gap the native layer cannot close. The
   [sandbox](#the-role-profile) bounds what that one call can write,
-  not what it can read.
+  not what it can read. In particular, a passed `ears-manager` call can
+  consume a non-`-` `--content-file` or `--impact-file` value: the sandbox
+  does not establish the provenance of those bytes, and neither do the
+  later integrity and CI checks
+  ([File-source arguments](adapter-contract.md#file-source-arguments)).
 - Every matching hook of every configuration layer runs, so a user's
   own hooks run beside this one and cannot replace it.
 
@@ -510,7 +515,7 @@ when the prompt text mentions `$<name>` (documented), and the guard
 does not see that route, because it is not a tool call. Whether pasted
 text, such as IdeaBot material, triggers it too is not observed. The
 route changes what the model reads, not what it can do: the guard and
-the profile bound every effect
+the profile bound every effect of a guard-checked call
 ([Untrusted input](adapter-contract.md#untrusted-input)). H10 records
 the gap, and the fixture confirms the reach of `$<name>` before H10 is
 marked met ([Open points](#open-points)).
@@ -549,7 +554,7 @@ file.
 | H5 | Nothing on idle or exit | No `Stop` or `SessionEnd` hook | Designed |
 | H6 | Replayable session record | The session file under `$CODEX_HOME/sessions/` and the `codex exec --json` event stream | Designed; hook events are not recorded, and a refusal is recorded as the tool output |
 | H7 | Headless replay with no permission prompt | `codex exec --json`, `approval_policy = "never"`, and a custom model provider pointed at a replay endpoint | Observed with a stub endpoint; the fixture has not run |
-| H8 | Guard before every tool call | The project hook; the launcher, which checks the hook file and the profile and starts Codex with `--dangerously-bypass-hook-trust`; the probe as the second layer | Observed for shell commands. The launcher closes the untrusted-hook and changed-hook cases and pins the profile. A guard process that is killed, or that hangs past the hook timeout, still lets that one call through (gap). The sandbox then bounds what the call can write, not what it can read: a read of any file the user can read, a host credential file included, can reach the model, and the `wms` and `scm` servers have network. The later layers hold for writes; nothing holds for that read |
+| H8 | Invoke the guard on each tool call and enforce its decision | The project hook; the launcher, which checks the hook file and the profile and starts Codex with `--dangerously-bypass-hook-trust`; the probe as the second layer | Observed for shell commands. The launcher closes the untrusted-hook and changed-hook cases and pins the profile; outside it, an untrusted hook does not run. A killed guard, non-2 exit, or hook timeout lets that call through (documented gaps). The sandbox bounds what a call can write, not what it can read: a host credential file can reach the model, and the `wms` and `scm` servers have network. Later checks catch unauthorized persistent edits to registered paths, but cannot establish the provenance of a passed file-source read ([File-source arguments](adapter-contract.md#file-source-arguments)) |
 | H9 | Hide file-writing, subagent, and web tools | `web_search = "disabled"`, `multi_agent = false` | Observed for web and subagent tools; `apply_patch` cannot be hidden and is refused by the guard (gap) |
 | H10 | Toolkit skills only | `include_instructions = false`; the profile names the Toolkit skills; the guard refuses any other `SKILL.md` read | Observed that the catalog is gone; `$<name>` in the prompt text can still insert another skill's text, and the fixture has not run (gap) |
 | H11 | No credential in binding files; no session upload | Placeholders; `[analytics]` and `[feedback]` off; no `codex cloud` or `remote-control` | Designed |
@@ -568,21 +573,26 @@ and the role's shell has no network, so registration is the user's
 the Git host reach the role through the `scm` server, outside the
 sandbox.
 
-What the Codex layer stops, by route:
+What the Codex layer stops on the normal active-hook path, by route.
+Sandbox restrictions still apply if the hook fails open, but guard-only
+refusals below do not:
 
 | Write route to a guarded path | Role profile | Every other session |
 | --- | --- | --- |
 | Any write under `.git/`, and any network from the shell | Refused by the sandbox; the `scm` server writes `.git/` from its own process, bounded by its Drafting Table face | Refused by the sandbox in a `workspace-write` session |
-| `apply_patch` under `.protobot/` or on a registered path | Offered to OpenAI models; refused by the guard | Refused by the guard |
-| Shell writer, such as `sed -i` | Refused by the guard | Not stopped |
-| Output redirection in a shell command | Refused by the guard | Refused by the guard when the redirection target is written from the project root |
-| Tool of another MCP server | Refused by the guard | The user's own configuration |
+| `apply_patch` under `.protobot/` or on a registered path | Offered to OpenAI models; refused by the active guard | Refused by the active guard |
+| Shell writer, such as `sed -i` | Refused by the active guard | Not stopped |
+| Output redirection in a shell command | Refused by the active guard | Refused by the active guard when the redirection target is written from the project root |
+| Tool of another MCP server | Refused by the active guard | The user's own configuration |
 | Subagent | Not offered | Not applicable |
 
 The native layer stops less than in the other two bindings: no Codex
 rule refuses a command for the role alone, and no setting hides
-`apply_patch`. The guard carries the difference, and the later layers
-still hold ([What the harness layer stops][layer-stops]). The sandbox
+`apply_patch`. An active guard carries the difference; on a fail-open
+call, native rules do not replace its shell and argument checks. The
+later layers catch unauthorized persistent edits to registered paths
+when those edits reach the SCM or CI checks, not reads or file-source
+provenance ([What the harness layer stops][layer-stops]). The sandbox
 stops more: no command in the role writes `.git/` or reaches the
 network.
 

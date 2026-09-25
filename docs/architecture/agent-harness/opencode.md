@@ -211,8 +211,12 @@ The `bash` block copies the harness-neutral
 patterns, with a wildcard where a form takes a value. Git and `gh` have
 no rule, so `"*": deny` refuses every `git` and `gh` command; the role
 reaches them only through the `scm` tools. The guard enforces the same
-operations with the project's real values and the current branch; this
-copy refuses early and still holds when plugins do not load.
+operations with the project's real values and the current branch. The
+native copy refuses early for constraints its patterns can express;
+the guard supplies the state and argument-value checks. OpenCode's
+native rules do not implement a value-level restriction for
+`--content-file` and `--impact-file`, so the shared guard must refuse
+non-`-` values for these options.
 
 ```yaml
 bash:
@@ -228,13 +232,27 @@ bash:
 A pattern without `*` matches only that exact command. A pattern with
 `*` still matches a longer command, so the guard refuses every option
 that #30's grammar does not show, and a registration whose change set
-is not the current branch's.
+is not the current branch's. In particular, the native
+`"ears-manager *": allow` rule must not be treated as permission to pass
+non-`-` values to `--content-file` or `--impact-file`; the binding does
+not implement a native value-level restriction for these options. The
+binding also has no native fail-closed check for the plugin's presence.
+If the plugin is absent or its hook is not registered for a call, the
+`"ears-manager *": allow` rule remains effective: OpenCode may run
+non-`-` file-source values, `--text "$GH_TOKEN"`, output redirection,
+and other shell forms that only the guard rejects. The binding does not
+claim the rest of the shell path is protected in that state; these are
+documented H8 gaps, not behavior supplied by native permissions or later
+layers. See the shared
+[file-source exception](adapter-contract.md#file-source-arguments).
 
 OpenCode matches these patterns against the whole command text,
 here-document bodies included, but does not look inside an output
 redirection. `ears-manager --output json check > docs/vision.md`
-matches `ears-manager *`, so the copy alone would let that command
-empty the file. The guard refuses it.
+matches `ears-manager *`, so the native copy alone would let that command
+empty the file. The active guard refuses it; a call that reaches the
+allowed command without a guard decision is not refused by the native
+rule.
 
 ### The `drafting-table` command
 
@@ -364,7 +382,7 @@ entry point's name must differ from every skill name.
 | H5 | Nothing on idle or exit | The shim registers no idle or exit hook | Designed |
 | H6 | Replayable session record | OpenCode's session record and `opencode export`; the resolved rules come from `opencode debug agent` | Observed for `opencode export` (behavior 8) |
 | H7 | Headless replay with no permission prompt | `opencode run --format json`, a replay provider, no `ask` rules | Observed for the replay provider and the `ask` rejection (behaviors 6, 9); the fixture has not run |
-| H8 | Guard before every tool call | The shim | Observed that a thrown error in `tool.execute.before` blocks the call (behavior 7); the shim is designed |
+| H8 | Invoke the guard on each tool call and enforce its decision | The shim | Active-hook refusal is observed (behavior 7); if the plugin is absent or no hook is registered, allowed `ears-manager` commands bypass guard-only shell restrictions, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (documented gap); `"*": deny` still refuses `git` and `gh` |
 | H9 | Hide file-writing, subagent, and web tools | `"*": deny` | Observed (behavior 3) |
 | H10 | Toolkit skills only | `skill` rule with `"*": deny` first; other skills are hidden from the model's list and refused | Observed (behavior 2) |
 | H11 | No credential in binding files; no session upload | Placeholders; `share: disabled` | Designed |
@@ -376,20 +394,24 @@ run. "Observed" means a stub run on 1.18.30 showed it, and the number
 points at [Observed OpenCode behaviors](#observed-opencode-behaviors).
 Nothing else is marked met; issue #77 runs the fixture.
 
-What the OpenCode layer stops, by route:
+What the OpenCode layer stops on its normal native and active-guard
+paths, by route. The plugin-unavailable exception above applies to any
+row that depends on the guard:
 
 | Write route to a guarded path | `drafting-table` agent | Every other agent |
 | --- | --- | --- |
 | File tool under `.protobot/` | Tool not offered | Refused by the project rule and the guard |
 | File tool on a registered path elsewhere | Tool not offered | Refused by the guard |
-| Shell writer, such as `sed -i` | Refused by the native copy and the guard | Not stopped |
-| Output redirection in a shell command | Refused by the guard | Refused by the guard when the redirection target is written from the project root |
+| Shell writer, such as `sed -i` | Refused by the native copy and the active guard | Not stopped |
+| Output redirection in a shell command | Refused by the active guard; not checked inside an allowed native command pattern | Refused by the active guard when the redirection target is written from the project root |
 | Tool of another MCP server | Not offered | The user's own configuration |
 | Subagent | `task` not offered | Not applicable |
 
-The routes that are not stopped are caught by the later layers, as
-[What the harness layer stops](adapter-contract.md#what-the-harness-layer-stops)
-describes.
+Later integrity and CI layers catch unauthorized persistent edits to
+registered paths; they do not enforce shell grammar, argument values,
+variable expansion, or file-source provenance. In particular, they do
+not make an allowed shell command safe when the plugin is unavailable;
+see [What the harness layer stops][layer-stops].
 
 ---
 
@@ -511,3 +533,5 @@ clients, and shell.
   questions across all areas.
 - [Related Work](../related-work.md) — Internal and external
   projects informing the design.
+
+[layer-stops]: adapter-contract.md#what-the-harness-layer-stops

@@ -164,7 +164,11 @@ Git repository:
 
 Every mutation to this state goes through
 [`ears-manager`](ears-manager-cli.md).
-The Drafting Table never writes specification files directly.
+The Drafting Table is not meant to write specification files directly;
+the harness guard enforces this on the calls it checks, and a call
+without a guard decision is limited as
+[What the harness layer stops](agent-harness/adapter-contract.md#what-the-harness-layer-stops)
+records.
 `ears-manager check` validates well-formedness as a CI gate before merge.
 
 ### WMS lifecycle state
@@ -187,7 +191,7 @@ modify work-item fields.
 | State category | Owning authority | Drafting Table behavior |
 | :--- | :--- | :--- |
 | **Conversation messages & notes** | Local harness; ephemeral | Non-authoritative; maintained for flow but never treated as approval. |
-| **Proposed spec & change sets** | Git branch via `ears-manager` | Presents & revises; never directly edits registered spec paths. |
+| **Proposed spec & change sets** | Git branch via `ears-manager` | Presents & revises; does not directly edit registered spec paths on guard-checked calls. |
 | **Approved specifications** | Canonical Git history | Treats approved commit as current Schematic baseline. |
 | **Work items & Job Site status** | WMS via WMS Adapter | Reads for display; submits validated mutations with version checks. |
 | **Lifecycle validity** | Validation Rules at WMS gate | Preflights for feedback; never overrides an authoritative rejection. |

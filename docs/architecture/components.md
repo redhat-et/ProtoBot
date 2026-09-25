@@ -110,11 +110,13 @@ ProtoBot has eight primary logical components and reusable asset families:
 6. **Source Control Manager (SCM)** — The deterministic component that
    turns the user's decision about a governed object into Git and Git
    host state: commits, pushes, pull requests, refresh merges, and the
-   initialization branch. The Drafting Table reaches Git and the Git
-   host only through it, apart from the target change-set branch behavior
-   assigned to `ears-manager change-set create`. The EM-04 first release
-   writes the manifest but does not cut that branch (see the
-   [`ears-manager` CLI first-release
+   initialization branch. The Drafting Table is designed to reach Git
+   and the Git host only through it, apart from the target change-set
+   branch behavior assigned to `ears-manager change-set create`; the
+   guard enforces this on the calls it checks
+   ([Permitted Git operations](git-integration.md#permitted-git-operations)).
+   The EM-04 first release writes the manifest but does not cut that
+   branch (see the [`ears-manager` CLI first-release
    scope](ears-manager-cli.md#em-04-first-release-scope)). The Job Site
    reads approved merge commits through the SCM. It never decides content.
 7. **Validation Rules** — Domain logic that enforces well-formedness
@@ -178,8 +180,11 @@ MCP.
 - Any coding-agent harness can host the TUI Drafting Table through a
   harness binding. The shared adapter core — a manifest, the Drafting
   Table role, the permitted shell operations, and one guard command
-  that every harness calls before each tool call — is defined in
+  that bindings wire into the pre-tool-call path as an optional early
+  layer — is defined in
   [Agent Harness Adapter Contract](agent-harness/adapter-contract.md).
+  Each binding records its per-call hook failure behavior; a hook that
+  does not run can leave guard-only checks unenforced.
   The first bindings are [OpenCode](agent-harness/opencode.md),
   [Claude Code](agent-harness/claude-code.md), and
   [Codex](agent-harness/codex.md).
@@ -204,12 +209,20 @@ MCP.
   performs the expected-state transition during contract refresh.
 - **To `ears-manager`:** Reads and writes every registered specification
   artifact, including Vision/Architecture prose and external interface
-  IDLs. The Drafting Table never edits spec files directly.
+  IDLs. The Drafting Table is not meant to edit spec files directly;
+  the guard refuses such edits on the calls it checks, and what a call
+  without a guard decision can still do is stated in
+  [What the harness layer
+  stops](agent-harness/adapter-contract.md#what-the-harness-layer-stops).
 - **To Source Control Manager (via MCP):** Reads repository state,
   commits, pushes, and opens PRs containing artifacts produced through
   `ears-manager`, through the SCM's Drafting Table face
   ([Source Control Manager](source-control-manager.md)). The Drafting
-  Table runs no Git or Git host command itself. Branch naming, commit
+  Table is given no Git or Git host command of its own; the guard
+  refuses them on the calls it checks, and what still blocks them on a
+  call without a guard decision is stated per binding in
+  [Permitted Git operations](git-integration.md#permitted-git-operations).
+  Branch naming, commit
   content, PR preparation, and the permitted Git operations are
   defined in
   [Git and Project-Repository Integration](git-integration.md).
