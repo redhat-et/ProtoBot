@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import copy
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 import validate
 import yaml
@@ -122,18 +125,36 @@ class FixtureContractTests(unittest.TestCase):
 
         # 1. job_site.pass cannot be true with holdout failures
         broken_holdout = copy.deepcopy(job_base)
-        broken_holdout["scores"]["job_site"]["holdout_checks"]["failed"] = 1
+        broken_holdout["scores"]["job_site"]["holdout_checks"].update(
+            passed=0, failed=1, total=1
+        )
         broken_holdout["scores"]["job_site"]["pass"] = True
         errs = validate._check_result_semantics(broken_holdout, fixtures)
-        self.assertTrue(any("holdout_checks" in e for e in errs), errs)
+        self.assertIn(
+            "job_site.pass cannot be true when holdout_checks has failures",
+            errs,
+        )
 
         # 2. Stage pass cannot be true when critical_failures are present
         broken_crit = copy.deepcopy(req_base)
         broken_crit["critical_failures"] = [
-            {"kind": "violation", "summary": "critical error", "evidence": "bad"}
+            {
+                "category": "execution-failure",
+                "detail": "critical error",
+                "evidence": "failure logged",
+            }
         ]
+        self.assertEqual(
+            validate._iter_errors(
+                validate._validator("result.schema.json"), broken_crit
+            ),
+            [],
+        )
         errs = validate._check_result_semantics(broken_crit, fixtures)
-        self.assertTrue(any("critical_failures" in e for e in errs), errs)
+        self.assertIn(
+            "requirements.pass cannot be true when critical_failures is non-empty",
+            errs,
+        )
 
         # 3. Check counts must satisfy passed + failed == total
         broken_counts = copy.deepcopy(job_base)
@@ -206,6 +227,37 @@ class FixtureContractTests(unittest.TestCase):
         empty_req = copy.deepcopy(job_site)
         empty_req["visible"]["requirements"] = [{}]
         self.assertTrue(validate._iter_errors(validator, empty_req))
+
+    def test_holdout_symlink_and_containment_enforced(self) -> None:
+        fixture = validate._load_yaml(CLI_FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_fixture_dir = Path(tmp_dir) / "cli-sync"
+            shutil.copytree(CLI_FIXTURE.parent, tmp_fixture_dir)
+            outside_file = Path(tmp_dir) / "secret.yaml"
+            outside_file.write_text("secret: true\n", encoding="utf-8")
+
+            # Symlink pointing outside fixture tree is rejected
+            symlink_outside = tmp_fixture_dir / "holdout" / "outside.yaml"
+            symlink_outside.symlink_to(outside_file)
+            broken_symlink = copy.deepcopy(fixture)
+            broken_symlink["holdout"]["assets"][0]["path"] = "holdout/outside.yaml"
+            errs = validate._check_refs(broken_symlink, tmp_fixture_dir)
+            self.assertTrue(any("path is a symlink" in e for e in errs), errs)
+            self.assertTrue(any("escapes holdout directory" in e for e in errs), errs)
+
+            # Projections skip reading symlinked outside file
+            proj_errs = validate._check_projections(broken_symlink, tmp_fixture_dir)
+            self.assertEqual(proj_errs, [])
+
+            # Symlink pointing inside holdout is rejected
+            symlink_inside = tmp_fixture_dir / "holdout" / "inside.yaml"
+            symlink_inside.symlink_to(tmp_fixture_dir / "holdout" / "checks.yaml")
+            broken_inside = copy.deepcopy(fixture)
+            broken_inside["holdout"]["assets"][0]["path"] = "holdout/inside.yaml"
+            errs_inside = validate._check_refs(broken_inside, tmp_fixture_dir)
+            self.assertTrue(
+                any("path is a symlink" in e for e in errs_inside), errs_inside
+            )
 
 
 if __name__ == "__main__":

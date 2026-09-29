@@ -11,7 +11,9 @@ import argparse
 import copy
 import hashlib
 import json
+import shutil
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -195,6 +197,20 @@ def _check_refs(fixture: dict[str, Any], fixture_dir: Path) -> list[str]:
         if not asset_path.is_file():
             errors.append(f"{asset['id']} missing file {path}")
             continue
+        is_symlink = asset_path.is_symlink()
+        if is_symlink:
+            errors.append(f"{asset['id']} path is a symlink: {path}")
+        holdout_dir = (fixture_dir / "holdout").resolve()
+        escaped = False
+        try:
+            if not asset_path.resolve().is_relative_to(holdout_dir):
+                escaped = True
+                errors.append(f"{asset['id']} path escapes holdout directory: {path}")
+        except ValueError:
+            escaped = True
+            errors.append(f"{asset['id']} path escapes holdout directory: {path}")
+        if is_symlink or escaped:
+            continue
         digest = _sha256(asset_path)
         if digest != asset["digest"]:
             errors.append(
@@ -245,9 +261,15 @@ def _check_projections(fixture: dict[str, Any], fixture_dir: Path) -> list[str]:
     for req in fixture["visible"]["requirements"]:
         if req["text"] in elicitation_dump:
             errors.append(f"elicitation-input leaked golden text of {req['id']}")
+    holdout_dir = (fixture_dir / "holdout").resolve()
     for asset in fixture["holdout"]["assets"]:
         asset_path = fixture_dir / asset["path"]
-        if not asset_path.is_file():
+        if not asset_path.is_file() or asset_path.is_symlink():
+            continue
+        try:
+            if not asset_path.resolve().is_relative_to(holdout_dir):
+                continue
+        except ValueError:
             continue
         holdout_text = asset_path.read_text(encoding="utf-8")
         if HOLDOUT_TOKEN in job_site_dump or HOLDOUT_TOKEN in elicitation_dump:
@@ -426,6 +448,14 @@ def _negative_cases(valid: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]
         "holdout-escape",
         _failing_copy(
             valid,
+            lambda doc: doc["holdout"]["assets"][0].update(path="holdout/symlink.yaml"),
+        ),
+        "symlink",
+    )
+    yield (
+        "holdout-relative-path",
+        _failing_copy(
+            valid,
             lambda doc: doc["holdout"]["assets"][0].update(path="../secret.yaml"),
         ),
         "holdout/",
@@ -504,8 +534,8 @@ def _negative_results(
             lambda doc: doc.update(
                 critical_failures=[
                     {
-                        "kind": "evaluation-harness-fault",
-                        "summary": "critical error",
+                        "category": "execution-failure",
+                        "detail": "critical error",
                         "evidence": "failure logged",
                     }
                 ]
@@ -518,11 +548,13 @@ def _negative_results(
         _failing_copy(
             job_valid,
             lambda doc: (
-                doc["scores"]["job_site"]["holdout_checks"].update(failed=1),
+                doc["scores"]["job_site"]["holdout_checks"].update(
+                    passed=0, failed=1, total=1
+                ),
                 doc["scores"]["job_site"].update({"pass": True}),
             ),
         ),
-        "holdout_checks",
+        "pass cannot be true when holdout_checks has failures",
     )
     yield (
         "check-counts-inconsistent",
@@ -539,13 +571,27 @@ def run_negative_checks() -> list[str]:
     errors: list[str] = []
     fixture = _load_yaml(EXAMPLES_DIR / "cli-sync" / "fixture.yaml")
     fixture_schema = _validator("fixture.schema.json")
-    for name, doc, needle in _negative_cases(fixture):
-        found = _iter_errors(fixture_schema, doc)
-        if name in ("holdout-escape", "dropped-runtime-binding"):
-            extra = _check_refs(doc, EXAMPLES_DIR / "cli-sync")
-            found.extend(extra)
-        if not any(needle in item for item in found):
-            errors.append(f"negative fixture {name} did not fail on {needle}: {found}")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_fixture_dir = Path(tmp_dir) / "cli-sync"
+        shutil.copytree(EXAMPLES_DIR / "cli-sync", tmp_fixture_dir)
+        outside_file = Path(tmp_dir) / "secret.yaml"
+        outside_file.write_text("secret: true\n", encoding="utf-8")
+        symlink_file = tmp_fixture_dir / "holdout" / "symlink.yaml"
+        symlink_file.symlink_to(outside_file)
+
+        for name, doc, needle in _negative_cases(fixture):
+            found = _iter_errors(fixture_schema, doc)
+            if name in (
+                "holdout-escape",
+                "holdout-relative-path",
+                "dropped-runtime-binding",
+            ):
+                extra = _check_refs(doc, tmp_fixture_dir)
+                found.extend(extra)
+            if not any(needle in item for item in found):
+                errors.append(
+                    f"negative fixture {name} did not fail on {needle}: {found}"
+                )
 
     req_result = _load_yaml(EXAMPLES_DIR / "results" / "requirements-cli-sync.yaml")
     job_result = _load_yaml(EXAMPLES_DIR / "results" / "job-site-cli-sync.yaml")
