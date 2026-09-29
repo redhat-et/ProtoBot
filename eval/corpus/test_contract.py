@@ -259,6 +259,65 @@ class FixtureContractTests(unittest.TestCase):
                 any("path is a symlink" in e for e in errs_inside), errs_inside
             )
 
+    def test_holdout_check_field_matching(self) -> None:
+        fixture = validate._load_yaml(CLI_FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_fixture_dir = Path(tmp_dir) / "cli-sync"
+            shutil.copytree(CLI_FIXTURE.parent, tmp_fixture_dir)
+
+            # Interface mismatch between asset and holdout check
+            mismatched_iface = copy.deepcopy(fixture)
+            mismatched_iface["visible"]["architecture"]["external_interfaces"].append(
+                {"id": "cli-admin", "name": "CLI Admin", "type": "cli"}
+            )
+            extra_runtime = copy.deepcopy(
+                mismatched_iface["visible"]["interface_runtime"][0]
+            )
+            extra_runtime.update(interface_id="cli-admin")
+            mismatched_iface["visible"]["interface_runtime"].append(extra_runtime)
+            mismatched_iface["holdout"]["assets"][0]["interface_id"] = "cli-admin"
+            errs = validate._check_refs(mismatched_iface, tmp_fixture_dir)
+            self.assertTrue(any("interface_id mismatch" in e for e in errs), errs)
+
+            # Requirement mismatch between asset and holdout check
+            mismatched_req = copy.deepcopy(fixture)
+            extra_req = copy.deepcopy(mismatched_req["visible"]["requirements"][0])
+            extra_req.update(id="REQ-CLI-00002")
+            mismatched_req["visible"]["requirements"].append(extra_req)
+            mismatched_req["holdout"]["assets"][0]["requirement_ids"] = [
+                "REQ-CLI-00001",
+                "REQ-CLI-00002",
+            ]
+            errs = validate._check_refs(mismatched_req, tmp_fixture_dir)
+            self.assertTrue(any("requirement_ids mismatch" in e for e in errs), errs)
+
+    def test_worker_visible_isolation_and_leak_detection(self) -> None:
+        fixture = validate._load_yaml(CLI_FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_fixture_dir = Path(tmp_dir) / "cli-sync"
+            shutil.copytree(CLI_FIXTURE.parent, tmp_fixture_dir)
+
+            # Worker-visible symlink pointing into holdout is rejected as symlink and target leak
+            symlink_alias = tmp_fixture_dir / "alias.yaml"
+            symlink_alias.symlink_to(tmp_fixture_dir / "holdout" / "checks.yaml")
+            errs = validate._check_projections(fixture, tmp_fixture_dir)
+            self.assertTrue(
+                any("Worker-visible path is a symlink" in e for e in errs), errs
+            )
+            self.assertTrue(
+                any("Worker-visible path resolves to holdout" in e for e in errs), errs
+            )
+            symlink_alias.unlink()
+
+            # Worker-visible file containing HOLDOUT_TOKEN is rejected
+            leak_file = tmp_fixture_dir / "notes.yaml"
+            leak_file.write_text(f"data: {validate.HOLDOUT_TOKEN}\n", encoding="utf-8")
+            errs = validate._check_projections(fixture, tmp_fixture_dir)
+            self.assertTrue(
+                any(f"contains {validate.HOLDOUT_TOKEN}" in e for e in errs), errs
+            )
+            leak_file.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

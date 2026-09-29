@@ -100,7 +100,7 @@ def worker_visible_files(fixture_dir: Path) -> list[Path]:
     """Return files a Worker projection may mount from a fixture directory."""
     visible: list[Path] = []
     for path in sorted(fixture_dir.rglob("*")):
-        if not path.is_file():
+        if not (path.is_file() or path.is_symlink()):
             continue
         parts = set(path.relative_to(fixture_dir).parts)
         if parts & WORKER_FORBIDDEN_PARTS:
@@ -225,9 +225,40 @@ def _check_refs(fixture: dict[str, Any], fixture_dir: Path) -> list[str]:
         if isinstance(holdout_doc, dict):
             if holdout_doc.get("fixture_id") != fixture["fixture_id"]:
                 errors.append(f"{asset['id']} fixture_id does not match the fixture")
-            check_ids = {item["id"] for item in holdout_doc.get("checks", [])}
-            if asset["id"] not in check_ids:
+            checks = holdout_doc.get("checks", [])
+            matching_checks = [
+                item
+                for item in checks
+                if isinstance(item, dict) and item.get("id") == asset["id"]
+            ]
+            if not matching_checks:
                 errors.append(f"{asset['id']} is not present in {path}")
+            else:
+                target_check = matching_checks[0]
+                if target_check.get("interface_id") != asset["interface_id"]:
+                    errors.append(
+                        f"{asset['id']} interface_id mismatch: asset has "
+                        f"'{asset['interface_id']}', check in {path} has "
+                        f"'{target_check.get('interface_id')}'"
+                    )
+                if set(target_check.get("requirement_ids", [])) != set(
+                    asset["requirement_ids"]
+                ):
+                    errors.append(
+                        f"{asset['id']} requirement_ids mismatch: asset has "
+                        f"{sorted(asset['requirement_ids'])}, check in {path} has "
+                        f"{sorted(target_check.get('requirement_ids', []))}"
+                    )
+            fixture_asset_ids = {a["id"] for a in fixture["holdout"]["assets"]}
+            for check_item in checks:
+                if (
+                    isinstance(check_item, dict)
+                    and "id" in check_item
+                    and check_item["id"] not in fixture_asset_ids
+                ):
+                    errors.append(
+                        f"{check_item['id']} in {path} is not declared in fixture holdout.assets"
+                    )
     return errors
 
 
@@ -279,17 +310,28 @@ def _check_projections(fixture: dict[str, Any], fixture_dir: Path) -> list[str]:
                 f"{asset['id']} is missing an {HOLDOUT_TOKEN} isolation token"
             )
 
-    worker_files = {path.name for path in worker_visible_files(fixture_dir)}
+    visible_files = worker_visible_files(fixture_dir)
+    worker_files = {path.name for path in visible_files}
     holdout_names = {Path(asset["path"]).name for asset in fixture["holdout"]["assets"]}
     leaked = sorted(worker_files & holdout_names)
     if leaked:
         errors.append(f"Worker-visible files include holdout assets: {leaked}")
-    for path in fixture_dir.rglob("*"):
-        if not path.is_file():
-            continue
+    for path in visible_files:
         rel = path.relative_to(fixture_dir)
-        if "holdout" in rel.parts and path in worker_visible_files(fixture_dir):
-            errors.append(f"Worker projection mounted holdout path {rel}")
+        if path.is_symlink():
+            errors.append(f"Worker-visible path is a symlink: {rel}")
+        try:
+            if path.resolve().is_relative_to(holdout_dir):
+                errors.append(f"Worker-visible path resolves to holdout: {rel}")
+        except (ValueError, OSError):
+            pass
+        try:
+            if path.is_file():
+                content = path.read_text(encoding="utf-8", errors="replace")
+                if HOLDOUT_TOKEN in content:
+                    errors.append(f"Worker-visible file {rel} contains {HOLDOUT_TOKEN}")
+        except OSError:
+            pass
     return errors
 
 
@@ -450,7 +492,17 @@ def _negative_cases(valid: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]
             valid,
             lambda doc: doc["holdout"]["assets"][0].update(path="holdout/symlink.yaml"),
         ),
-        "symlink",
+        "escapes holdout directory",
+    )
+    yield (
+        "holdout-symlink-inside",
+        _failing_copy(
+            valid,
+            lambda doc: doc["holdout"]["assets"][0].update(
+                path="holdout/symlink_inside.yaml"
+            ),
+        ),
+        "path is a symlink",
     )
     yield (
         "holdout-relative-path",
@@ -465,10 +517,70 @@ def _negative_cases(valid: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]
         _failing_copy(
             valid,
             lambda doc: doc["visible"]["architecture"]["external_interfaces"].append(
-                {"id": "daemon", "type": "network-service", "description": "unbound"}
+                {
+                    "id": "daemon",
+                    "name": "Daemon Interface",
+                    "type": "network-service",
+                    "description": "unbound",
+                }
             ),
         ),
-        "interface_runtime",
+        "missing binding for daemon",
+    )
+    yield (
+        "duplicate-runtime-binding",
+        _failing_copy(
+            valid,
+            lambda doc: doc["visible"]["interface_runtime"].append(
+                copy.deepcopy(doc["visible"]["interface_runtime"][0])
+            ),
+        ),
+        "visible.interface_runtime ids are not unique",
+    )
+    yield (
+        "mismatched-runtime-type",
+        _failing_copy(
+            valid,
+            lambda doc: doc["visible"]["interface_runtime"][0].update(
+                type="network-service"
+            ),
+        ),
+        "does not match interface type",
+    )
+    extra_runtime = copy.deepcopy(valid["visible"]["interface_runtime"][0])
+    extra_runtime.update(interface_id="cli-admin")
+    yield (
+        "holdout-asset-interface-mismatch",
+        _failing_copy(
+            valid,
+            lambda doc: (
+                doc["visible"]["architecture"]["external_interfaces"].append(
+                    {
+                        "id": "cli-admin",
+                        "name": "CLI Admin",
+                        "type": "cli",
+                    }
+                ),
+                doc["visible"]["interface_runtime"].append(extra_runtime),
+                doc["holdout"]["assets"][0].update(interface_id="cli-admin"),
+            ),
+        ),
+        "interface_id mismatch",
+    )
+    extra_req = copy.deepcopy(valid["visible"]["requirements"][0])
+    extra_req.update(id="REQ-CLI-00002")
+    yield (
+        "holdout-asset-requirement-mismatch",
+        _failing_copy(
+            valid,
+            lambda doc: (
+                doc["visible"]["requirements"].append(extra_req),
+                doc["holdout"]["assets"][0].update(
+                    requirement_ids=["REQ-CLI-00001", "REQ-CLI-00002"]
+                ),
+            ),
+        ),
+        "requirement_ids mismatch",
     )
 
 
@@ -578,20 +690,44 @@ def run_negative_checks() -> list[str]:
         outside_file.write_text("secret: true\n", encoding="utf-8")
         symlink_file = tmp_fixture_dir / "holdout" / "symlink.yaml"
         symlink_file.symlink_to(outside_file)
+        symlink_inside = tmp_fixture_dir / "holdout" / "symlink_inside.yaml"
+        symlink_inside.symlink_to(tmp_fixture_dir / "holdout" / "checks.yaml")
 
         for name, doc, needle in _negative_cases(fixture):
             found = _iter_errors(fixture_schema, doc)
-            if name in (
-                "holdout-escape",
-                "holdout-relative-path",
-                "dropped-runtime-binding",
-            ):
-                extra = _check_refs(doc, tmp_fixture_dir)
-                found.extend(extra)
+            if not found:
+                found = _check_refs(doc, tmp_fixture_dir)
+                found.extend(_check_projections(doc, tmp_fixture_dir))
             if not any(needle in item for item in found):
                 errors.append(
                     f"negative fixture {name} did not fail on {needle}: {found}"
                 )
+
+        leak_symlink = tmp_fixture_dir / "worker_symlink.yaml"
+        try:
+            leak_symlink.symlink_to(tmp_fixture_dir / "holdout" / "checks.yaml")
+            leak_errs = _check_projections(fixture, tmp_fixture_dir)
+            if not any("Worker-visible path is a symlink" in e for e in leak_errs):
+                errors.append(f"worker-visible symlink did not fail: {leak_errs}")
+            if not any(
+                "Worker-visible path resolves to holdout" in e for e in leak_errs
+            ):
+                errors.append(
+                    f"worker-visible holdout target did not fail: {leak_errs}"
+                )
+        finally:
+            if leak_symlink.is_symlink() or leak_symlink.exists():
+                leak_symlink.unlink()
+
+        leak_content = tmp_fixture_dir / "notes.yaml"
+        try:
+            leak_content.write_text(f"leaked: {HOLDOUT_TOKEN}\n", encoding="utf-8")
+            content_errs = _check_projections(fixture, tmp_fixture_dir)
+            if not any(f"contains {HOLDOUT_TOKEN}" in e for e in content_errs):
+                errors.append(f"worker-visible token leak did not fail: {content_errs}")
+        finally:
+            if leak_content.exists():
+                leak_content.unlink()
 
     req_result = _load_yaml(EXAMPLES_DIR / "results" / "requirements-cli-sync.yaml")
     job_result = _load_yaml(EXAMPLES_DIR / "results" / "job-site-cli-sync.yaml")
