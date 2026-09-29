@@ -1,0 +1,116 @@
+---
+schema_version: 1
+fixture_id: web-status
+corpus_revision: v1
+archetype: web-gui
+title: Local service-status web GUI
+project_description: >-
+  I need a small web page that shows whether a local status source is
+  reachable. The page should always show the current known state of
+  that source. When I ask it to refresh, it should query the source
+  again. While the source is disconnected, the page should show that
+  the service is unavailable instead of showing a stale healthy state.
+visible:
+  vision:
+    purpose: >-
+      Give an operator a local web GUI that reports whether a status
+      source is reachable.
+    intended_users:
+      - Operators watching a local prototype service
+    desired_outcomes:
+      - The page shows the current known reachability
+      - A refresh re-queries the status source
+      - A disconnected source is shown as unavailable
+  architecture:
+    external_interfaces:
+      - id: status-page
+        name: Service status page
+        type: web-gui
+        spec_approach: prose
+        description: >-
+          Local web GUI that displays reachability of a status source.
+    persistent_state:
+      - Last observed reachability for the status source
+    environmental_constraints:
+      - Served as a local web page
+      - Requires no external service credentials
+      - Requires no hosted cluster
+  requirements:
+    - id: REQ-WEB-00001
+      type: ubiquitous
+      text: >-
+        The status page shall display the current known reachability of
+        the status source.
+      applies_to:
+        interfaces:
+          - status-page
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+    - id: REQ-WEB-00002
+      type: event-driven
+      text: >-
+        When an operator requests a refresh, the status page shall
+        query the status source again and display the resulting
+        reachability.
+      applies_to:
+        interfaces:
+          - status-page
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+    - id: REQ-WEB-00003
+      type: state-driven
+      text: >-
+        While the status source is disconnected, the status page shall
+        display that the service is unavailable.
+      applies_to:
+        interfaces:
+          - status-page
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+  interface_runtime:
+    - interface_id: status-page
+      type: web-gui
+      runtime: local-web
+      entry: status-page
+      credentials: none
+      hosted_cluster: false
+  reference_behavior_checks:
+    - id: VIS-WEB-00001
+      visibility: worker-visible
+      requirement_ids:
+        - REQ-WEB-00001
+        - REQ-WEB-00003
+      interface_id: status-page
+      description: >-
+        With the status source disconnected, the page shows unavailable
+        rather than healthy.
+      setup: >-
+        Local web GUI whose status source is not listening.
+      evidence: >-
+        The page contains an unavailable indicator and does not claim
+        the service is healthy.
+holdout:
+  assets:
+    - id: HO-WEB-00001
+      kind: behavior-check
+      path: holdout/checks.yaml
+      digest: "sha256:09238a47e402fb8a26e9c655cad9006b592d16539e705680094c44cc9dca0cad"
+      requirement_ids:
+        - REQ-WEB-00002
+      interface_id: status-page
+provenance:
+  status: illustrative
+  authors:
+    - protobot-eval-corpus
+  reviewers: []
+  rationale: >-
+    Illustrative web-gui archetype for schema validation. Reviewed
+    golden fixtures are out of scope for this contract revision.
+  known_ambiguities:
+    - Visual layout of the unavailable banner is unspecified.

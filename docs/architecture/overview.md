@@ -96,6 +96,8 @@ also the correct one.
 Every agentic component must be independently evaluable. If you
 can't feed it a known input and measure its output, you can't
 improve it. This is an architectural constraint, not a nice-to-have.
+Project-level requirements and Job Site evaluation use the
+[evaluation corpus contract](evaluation-corpus.md).
 
 ---
 
@@ -341,5 +343,8 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
   questions across all areas.
 - [Related Work](related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned.
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed
+  results.
 - [Architecture Decisions](../decisions/) — Resolved design
   decisions with full rationale.

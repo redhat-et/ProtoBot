@@ -1,0 +1,79 @@
+{
+  "$id": "protobot://eval/corpus/schema/job-site-input/v1",
+  "title": "ProtoBot Job Site Worker-visible projection",
+  "description": "Worker-visible Job Site input. Holdout assets and the elicitation project description are absent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_id",
+    "corpus_revision",
+    "archetype",
+    "title",
+    "visible"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "fixture_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "corpus_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "archetype": {
+      "type": "string",
+      "enum": ["cli", "network-service", "web-gui"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "visible": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vision",
+        "architecture",
+        "requirements",
+        "interface_runtime",
+        "reference_behavior_checks"
+      ],
+      "properties": {
+        "vision": {
+          "type": "object"
+        },
+        "architecture": {
+          "type": "object"
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1
+        },
+        "interface_runtime": {
+          "type": "array",
+          "minItems": 1
+        },
+        "reference_behavior_checks": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "not": {
+        "required": ["holdout"]
+      }
+    },
+    {
+      "not": {
+        "required": ["project_description"]
+      }
+    }
+  ]
+}

@@ -292,3 +292,6 @@ the affected design areas will need revisiting:
   unresolved decisions across all areas
 - [Related work](architecture/related-work.md) — internal and
   external projects informing the design
+- [Evaluation corpus schema and result contract](architecture/evaluation-corpus.md)
+  — versioned fixtures, holdout isolation, and stage-attributed
+  results

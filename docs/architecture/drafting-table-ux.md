@@ -977,6 +977,9 @@ OAuth tokens, hosted session manager, or live cloud services.
   second harness binding
 - [Codex Harness Binding](agent-harness/codex.md) — The third harness
   binding
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed
+  results
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas
 - [Related Work](related-work.md) — Red Hat internal projects,

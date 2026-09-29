@@ -1,0 +1,21 @@
+---
+schema_version: 1
+fixture_id: api-registry
+checks:
+  - id: HO-API-00001
+    visibility: evaluator-only
+    requirement_ids:
+      - REQ-API-00003
+    interface_id: registry-http
+    description: >-
+      EVAL-HOLDOUT-API-00001 rejects a read of a record ID that uses path
+      traversal.
+    setup: >-
+      Local HTTP server with one stored record named demo. Request GET
+      /records/../EVAL-HOLDOUT-API-SECRET.
+    expected:
+      status: 400
+      body_forbidden:
+        - EVAL-HOLDOUT-API-SECRET
+      body_contains:
+        - invalid record id

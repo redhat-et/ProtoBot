@@ -796,6 +796,8 @@ decisions.
 - [Source Control Manager](source-control-manager.md) — Reuses this
   contract's authorization context for Git, with a proposed
   `change_set_id`.
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed results.
 - [Open Design Questions](open-questions.md) — Cross-cutting questions about
   interactive, autonomous, compliance, and interface concerns.
 - [ADR-0001](../decisions/0001-requirements-storage-format.md) — Physical

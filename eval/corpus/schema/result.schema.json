@@ -1,0 +1,500 @@
+{
+  "$id": "protobot://eval/corpus/schema/result/v1",
+  "title": "ProtoBot evaluation corpus result",
+  "description": "Version 1 result record for requirements, Job Site, and end-to-end runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result_id",
+    "fixture_id",
+    "corpus_revision",
+    "run_id",
+    "recorded_at",
+    "stage",
+    "reproducibility",
+    "scores",
+    "failures",
+    "critical_failures"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "result_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "fixture_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "corpus_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recorded_at": {
+      "$ref": "#/$defs/iso8601"
+    },
+    "stage": {
+      "type": "string",
+      "enum": ["requirements", "job-site", "end-to-end"]
+    },
+    "reproducibility": {
+      "$ref": "#/$defs/reproducibility"
+    },
+    "scores": {
+      "$ref": "#/$defs/scores"
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/failure"
+      }
+    },
+    "critical_failures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/failure"
+      }
+    },
+    "traces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trace"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "const": "requirements"
+          }
+        },
+        "required": ["stage"]
+      },
+      "then": {
+        "properties": {
+          "scores": {
+            "required": ["requirements"],
+            "allOf": [
+              {
+                "not": {
+                  "required": ["job_site"]
+                }
+              },
+              {
+                "not": {
+                  "required": ["end_to_end"]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "const": "job-site"
+          }
+        },
+        "required": ["stage"]
+      },
+      "then": {
+        "properties": {
+          "scores": {
+            "required": ["job_site"],
+            "allOf": [
+              {
+                "not": {
+                  "required": ["requirements"]
+                }
+              },
+              {
+                "not": {
+                  "required": ["end_to_end"]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "const": "end-to-end"
+          }
+        },
+        "required": ["stage"]
+      },
+      "then": {
+        "properties": {
+          "scores": {
+            "required": ["requirements", "job_site", "end_to_end"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "iso8601": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "sha256_digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs", "environment"],
+      "properties": {
+        "inputs": {
+          "$ref": "#/$defs/inputs"
+        },
+        "environment": {
+          "$ref": "#/$defs/environment"
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fixture_id",
+        "corpus_revision",
+        "fixture_digest",
+        "projection"
+      ],
+      "properties": {
+        "fixture_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "corpus_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fixture_digest": {
+          "$ref": "#/$defs/sha256_digest"
+        },
+        "projection": {
+          "type": "string",
+          "enum": ["elicitation-input", "job-site-input", "end-to-end"]
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "hosted_cluster",
+        "external_service_credentials",
+        "models",
+        "components"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["local", "hosted"]
+        },
+        "hosted_cluster": {
+          "type": "boolean"
+        },
+        "external_service_credentials": {
+          "type": "boolean"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/model"
+          }
+        },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/component"
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "name"],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "elicitation",
+            "worker-a",
+            "worker-b",
+            "inspector",
+            "judge"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean", "null"]
+          }
+        }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "revision"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "drafting-table",
+            "specification-toolkit",
+            "kits",
+            "ears-manager",
+            "wms-adapter",
+            "source-control-manager",
+            "validation-rules",
+            "job-site",
+            "eval-runner"
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirements": {
+          "$ref": "#/$defs/requirements_scores"
+        },
+        "job_site": {
+          "$ref": "#/$defs/job_site_scores"
+        },
+        "end_to_end": {
+          "$ref": "#/$defs/end_to_end_scores"
+        }
+      }
+    },
+    "requirements_scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "summary", "metrics", "per_requirement"],
+      "properties": {
+        "pass": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coverage",
+            "applicability",
+            "implementability"
+          ],
+          "properties": {
+            "coverage": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "applicability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "implementability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "per_requirement": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "outcome", "evidence"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^REQ-[A-Z0-9]+-[0-9]{5}$"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "covered",
+                  "missing",
+                  "unsupported-addition",
+                  "false-readiness",
+                  "implementation-leakage"
+                ]
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "job_site_scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass",
+        "summary",
+        "visible_checks",
+        "holdout_checks"
+      ],
+      "properties": {
+        "pass": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "visible_checks": {
+          "$ref": "#/$defs/check_counts"
+        },
+        "holdout_checks": {
+          "$ref": "#/$defs/check_counts"
+        }
+      }
+    },
+    "check_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "total"],
+      "properties": {
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "end_to_end_scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "summary", "attribution"],
+      "properties": {
+        "pass": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requirements", "job_site"],
+          "properties": {
+            "requirements": {
+              "type": "boolean"
+            },
+            "job_site": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "detail", "evidence"],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "missing-requirements",
+            "unsupported-additions",
+            "false-readiness",
+            "implementation-leakage",
+            "visible-check-failure",
+            "holdout-check-failure",
+            "execution-failure"
+          ]
+        },
+        "stage": {
+          "type": "string",
+          "enum": ["requirements", "job-site", "end-to-end"]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "elicitation",
+            "job-site",
+            "end-to-end",
+            "judge"
+          ]
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256_digest"
+        }
+      }
+    }
+  }
+}

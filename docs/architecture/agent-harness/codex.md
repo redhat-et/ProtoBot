@@ -784,6 +784,9 @@ met:
   details, sequence diagrams, and change types.
 - [Drafting Table UX](../drafting-table-ux.md) — Stable interaction
   contract for the first local Drafting Table.
+- [Evaluation Corpus Schema and Result Contract](../evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed
+  results.
 - [Open Design Questions](../open-questions.md) — Unresolved design
   questions across all areas.
 - [Related Work](../related-work.md) — Internal and external

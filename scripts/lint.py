@@ -506,6 +506,14 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "pass_filenames": False,
                 "default_files": r"^(AGENTS\.md|\.fullsend/harness/review\.yaml)$",
             },
+            "eval-corpus-schema": {
+                "cmd": "python3",
+                "fixed_args": ["eval/corpus/validate.py"],
+                "pass_filenames": False,
+                "default_files": (
+                    r"^(eval/corpus/|docs/architecture/evaluation-corpus\.md)$"
+                ),
+            },
         },
     },
 }

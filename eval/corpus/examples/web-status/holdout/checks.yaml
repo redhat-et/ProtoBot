@@ -1,0 +1,21 @@
+---
+schema_version: 1
+fixture_id: web-status
+checks:
+  - id: HO-WEB-00001
+    visibility: evaluator-only
+    requirement_ids:
+      - REQ-WEB-00002
+    interface_id: status-page
+    description: >-
+      EVAL-HOLDOUT-WEB-00001 keeps the disconnected banner visible after a
+      failed refresh and does not render EVAL-HOLDOUT-WEB-SECRET as a
+      service name.
+    setup: >-
+      Local web GUI with the status source unreachable. Trigger refresh.
+    expected:
+      banner: unavailable
+      rendered_forbidden:
+        - EVAL-HOLDOUT-WEB-SECRET
+      live_region_contains:
+        - status source unreachable
