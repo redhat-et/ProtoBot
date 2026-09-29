@@ -217,7 +217,7 @@ Holdout isolation is structural:
 A later Job Site sandbox must enforce the same path isolation the
 validator checks. Prompting a Worker not to read holdouts is not
 sufficient ([Overview — enforce constraints
-structurally](overview.md#enforce-constraints-structurally)).
+structurally](overview.md#enforce-constraints-structurally-not-through-trust)).
 
 ## Result contract
 

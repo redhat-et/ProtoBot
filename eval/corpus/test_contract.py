@@ -114,6 +114,99 @@ class FixtureContractTests(unittest.TestCase):
     def test_negative_cases_fail_deterministically(self) -> None:
         self.assertEqual(validate.run_negative_checks(), [])
 
+    def test_result_invariants_and_identities_enforced(self) -> None:
+        fixtures, results = validate.discover_examples(validate.CORPUS_ROOT)
+        by_name = {path.name: path for path in results}
+        job_base = validate._load_yaml(by_name["job-site-cli-sync.yaml"])
+        req_base = validate._load_yaml(by_name["requirements-cli-sync.yaml"])
+
+        # 1. job_site.pass cannot be true with holdout failures
+        broken_holdout = copy.deepcopy(job_base)
+        broken_holdout["scores"]["job_site"]["holdout_checks"]["failed"] = 1
+        broken_holdout["scores"]["job_site"]["pass"] = True
+        errs = validate._check_result_semantics(broken_holdout, fixtures)
+        self.assertTrue(any("holdout_checks" in e for e in errs), errs)
+
+        # 2. Stage pass cannot be true when critical_failures are present
+        broken_crit = copy.deepcopy(req_base)
+        broken_crit["critical_failures"] = [
+            {"kind": "violation", "summary": "critical error", "evidence": "bad"}
+        ]
+        errs = validate._check_result_semantics(broken_crit, fixtures)
+        self.assertTrue(any("critical_failures" in e for e in errs), errs)
+
+        # 3. Check counts must satisfy passed + failed == total
+        broken_counts = copy.deepcopy(job_base)
+        broken_counts["scores"]["job_site"]["visible_checks"]["passed"] = 5
+        errs = validate._check_result_semantics(broken_counts, fixtures)
+        self.assertTrue(any("check counts" in e for e in errs), errs)
+
+        # 4. Result fixture_id and corpus_revision must match inputs
+        split_fid = copy.deepcopy(req_base)
+        split_fid["reproducibility"]["inputs"]["fixture_id"] = "api-registry"
+        errs = validate._check_result_semantics(split_fid, fixtures)
+        self.assertTrue(any("fixture_id" in e for e in errs), errs)
+
+        split_rev = copy.deepcopy(req_base)
+        split_rev["reproducibility"]["inputs"]["corpus_revision"] = "v2"
+        errs = validate._check_result_semantics(split_rev, fixtures)
+        self.assertTrue(any("corpus_revision" in e for e in errs), errs)
+
+        # 5. inputs.fixture_id must follow the hyphenated id pattern
+        invalid_fid_schema = copy.deepcopy(req_base)
+        invalid_fid_schema["reproducibility"]["inputs"]["fixture_id"] = "Invalid_ID!"
+        schema_errs = validate._iter_errors(
+            validate._validator("result.schema.json"), invalid_fid_schema
+        )
+        self.assertTrue(any("fixture_id" in e for e in schema_errs), schema_errs)
+
+    def test_interface_runtime_bindings_and_type_matching(self) -> None:
+        fixture = validate._load_yaml(CLI_FIXTURE)
+
+        # Missing runtime binding for an interface
+        unbound = copy.deepcopy(fixture)
+        unbound["visible"]["architecture"]["external_interfaces"].append(
+            {"id": "extra-api", "type": "network-service", "description": "extra"}
+        )
+        errs = validate._check_refs(unbound, CLI_FIXTURE.parent)
+        self.assertTrue(any("missing binding" in e for e in errs), errs)
+
+        # Duplicate interface_runtime entries
+        dup_runtime = copy.deepcopy(fixture)
+        dup_runtime["visible"]["interface_runtime"].append(
+            copy.deepcopy(dup_runtime["visible"]["interface_runtime"][0])
+        )
+        errs = validate._check_refs(dup_runtime, CLI_FIXTURE.parent)
+        self.assertTrue(any("unique" in e for e in errs), errs)
+
+        # Runtime type mismatch with architecture interface type
+        mismatched_type = copy.deepcopy(fixture)
+        mismatched_type["visible"]["interface_runtime"][0]["type"] = "network-service"
+        errs = validate._check_refs(mismatched_type, CLI_FIXTURE.parent)
+        self.assertTrue(any("does not match" in e for e in errs), errs)
+
+    def test_job_site_input_schema_strictness(self) -> None:
+        fixture = validate._load_yaml(CLI_FIXTURE)
+        job_site = validate.project_job_site_input(fixture)
+        validator = validate._validator("job-site-input.schema.json")
+
+        self.assertEqual(validate._iter_errors(validator, job_site), [])
+
+        # Empty vision must fail schema validation
+        empty_vision = copy.deepcopy(job_site)
+        empty_vision["visible"]["vision"] = {}
+        self.assertTrue(validate._iter_errors(validator, empty_vision))
+
+        # Empty architecture must fail schema validation
+        empty_arch = copy.deepcopy(job_site)
+        empty_arch["visible"]["architecture"] = {}
+        self.assertTrue(validate._iter_errors(validator, empty_arch))
+
+        # Unconstrained requirement must fail schema validation
+        empty_req = copy.deepcopy(job_site)
+        empty_req["visible"]["requirements"] = [{}]
+        self.assertTrue(validate._iter_errors(validator, empty_req))
+
 
 if __name__ == "__main__":
     unittest.main()

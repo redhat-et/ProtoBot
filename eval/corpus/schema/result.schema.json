@@ -181,7 +181,7 @@
       "properties": {
         "fixture_id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
         },
         "corpus_revision": {
           "type": "string",

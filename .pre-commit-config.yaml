@@ -132,4 +132,4 @@ repos:
         entry: python3 eval/corpus/validate.py
         language: system
         pass_filenames: false
-        files: ^(eval/corpus/|docs/architecture/evaluation-corpus\.md)$
+        files: ^(eval/corpus/.+|docs/architecture/evaluation-corpus\.md)$

@@ -511,7 +511,7 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "fixed_args": ["eval/corpus/validate.py"],
                 "pass_filenames": False,
                 "default_files": (
-                    r"^(eval/corpus/|docs/architecture/evaluation-corpus\.md)$"
+                    r"^(eval/corpus/.+|docs/architecture/evaluation-corpus\.md)$"
                 ),
             },
         },

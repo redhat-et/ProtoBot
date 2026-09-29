@@ -135,15 +135,36 @@ def _check_refs(fixture: dict[str, Any], fixture_dir: Path) -> list[str]:
                     f"{req['id']} applies_to unknown interface {interface_id}"
                 )
 
+    interface_types = {
+        item["id"]: item.get("type")
+        for item in fixture["visible"]["architecture"]["external_interfaces"]
+    }
+
+    runtime_interfaces = [
+        item["interface_id"] for item in fixture["visible"]["interface_runtime"]
+    ]
+    if len(runtime_interfaces) != len(set(runtime_interfaces)):
+        errors.append("visible.interface_runtime ids are not unique")
+
+    runtime_set = set(runtime_interfaces)
+    for missing_id in sorted(interfaces - runtime_set):
+        errors.append(f"visible.interface_runtime missing binding for {missing_id}")
+    for extra_id in sorted(runtime_set - interfaces):
+        errors.append(f"interface_runtime names unknown interface {extra_id}")
+
     for runtime in fixture["visible"]["interface_runtime"]:
-        if runtime["interface_id"] not in interfaces:
-            errors.append(
-                f"interface_runtime names unknown interface {runtime['interface_id']}"
-            )
+        iid = runtime["interface_id"]
+        if iid in interface_types:
+            expected_type = interface_types[iid]
+            if runtime.get("type") != expected_type:
+                errors.append(
+                    f"interface_runtime {iid} type {runtime.get('type')} "
+                    f"does not match interface type {expected_type}"
+                )
         if runtime["hosted_cluster"]:
-            errors.append(f"{runtime['interface_id']} requires a hosted cluster")
+            errors.append(f"{iid} requires a hosted cluster")
         if runtime["credentials"] != "none":
-            errors.append(f"{runtime['interface_id']} requires external credentials")
+            errors.append(f"{iid} requires external credentials")
 
     seen_checks: set[str] = set()
     for check in fixture["visible"]["reference_behavior_checks"]:
@@ -298,7 +319,42 @@ def _check_result_semantics(
             errors.append("end-to-end attribution.requirements disagrees")
         if attribution["job_site"] != scores["job_site"]["pass"]:
             errors.append("end-to-end attribution.job_site disagrees")
-    fixture_path = examples.get(inputs["fixture_id"])
+    if result["fixture_id"] != inputs["fixture_id"]:
+        errors.append(
+            f"result fixture_id {result['fixture_id']} does not match "
+            f"inputs.fixture_id {inputs['fixture_id']}"
+        )
+    if result["corpus_revision"] != inputs["corpus_revision"]:
+        errors.append(
+            f"result corpus_revision {result['corpus_revision']} does not match "
+            f"inputs.corpus_revision {inputs['corpus_revision']}"
+        )
+
+    critical_failures = result.get("critical_failures", [])
+    if critical_failures:
+        for stage_key in ("requirements", "job_site", "end_to_end"):
+            stage_score = scores.get(stage_key)
+            if stage_score and stage_score.get("pass") is True:
+                errors.append(
+                    f"{stage_key}.pass cannot be true when critical_failures is non-empty"
+                )
+
+    if "job_site" in scores:
+        js = scores["job_site"]
+        holdout = js.get("holdout_checks", {})
+        if js.get("pass") is True and holdout.get("failed", 0) > 0:
+            errors.append(
+                "job_site.pass cannot be true when holdout_checks has failures"
+            )
+        for check_type in ("visible_checks", "holdout_checks"):
+            counts = js.get(check_type)
+            if counts and counts["passed"] + counts["failed"] != counts["total"]:
+                errors.append(
+                    f"job_site {check_type} check counts inconsistent: "
+                    f"passed ({counts['passed']}) + failed ({counts['failed']}) != total ({counts['total']})"
+                )
+
+    fixture_path = examples.get(result["fixture_id"])
     if fixture_path is not None:
         digest = _sha256(fixture_path)
         if digest != inputs["fixture_digest"]:
@@ -307,7 +363,7 @@ def _check_result_semantics(
                 f"{fixture_path}: recorded {inputs['fixture_digest']}, "
                 f"computed {digest}"
             )
-        if inputs["corpus_revision"] != _load_yaml(fixture_path)["corpus_revision"]:
+        if result["corpus_revision"] != _load_yaml(fixture_path)["corpus_revision"]:
             errors.append("result corpus_revision does not match the fixture")
     return errors
 
@@ -374,15 +430,28 @@ def _negative_cases(valid: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]
         ),
         "holdout/",
     )
+    yield (
+        "dropped-runtime-binding",
+        _failing_copy(
+            valid,
+            lambda doc: doc["visible"]["architecture"]["external_interfaces"].append(
+                {"id": "daemon", "type": "network-service", "description": "unbound"}
+            ),
+        ),
+        "interface_runtime",
+    )
 
 
 def _negative_results(
-    valid: dict[str, Any],
+    req_valid: dict[str, Any],
+    job_valid: dict[str, Any] | None = None,
 ) -> Iterator[tuple[str, dict[str, Any], str]]:
+    if job_valid is None:
+        job_valid = _load_yaml(EXAMPLES_DIR / "results" / "job-site-cli-sync.yaml")
     yield (
         "requirements-with-job-site-scores",
         _failing_copy(
-            valid,
+            req_valid,
             lambda doc: doc["scores"].update(
                 job_site={
                     "pass": True,
@@ -396,19 +465,72 @@ def _negative_results(
     )
     yield (
         "missing-environment",
-        _failing_copy(valid, lambda doc: doc["reproducibility"].pop("environment")),
+        _failing_copy(req_valid, lambda doc: doc["reproducibility"].pop("environment")),
         "environment",
     )
     yield (
         "end-to-end-without-attribution",
         _failing_copy(
-            valid,
+            req_valid,
             lambda doc: (
                 doc.update(stage="end-to-end"),
                 doc["reproducibility"]["inputs"].update(projection="end-to-end"),
             ),
         ),
         "end_to_end",
+    )
+    yield (
+        "split-fixture-id",
+        _failing_copy(
+            req_valid,
+            lambda doc: doc["reproducibility"]["inputs"].update(
+                fixture_id="api-registry"
+            ),
+        ),
+        "fixture_id",
+    )
+    yield (
+        "split-corpus-revision",
+        _failing_copy(
+            req_valid,
+            lambda doc: doc["reproducibility"]["inputs"].update(corpus_revision="v2"),
+        ),
+        "corpus_revision",
+    )
+    yield (
+        "critical-failure-with-pass",
+        _failing_copy(
+            req_valid,
+            lambda doc: doc.update(
+                critical_failures=[
+                    {
+                        "kind": "evaluation-harness-fault",
+                        "summary": "critical error",
+                        "evidence": "failure logged",
+                    }
+                ]
+            ),
+        ),
+        "critical_failures",
+    )
+    yield (
+        "job-site-pass-with-holdout-failure",
+        _failing_copy(
+            job_valid,
+            lambda doc: (
+                doc["scores"]["job_site"]["holdout_checks"].update(failed=1),
+                doc["scores"]["job_site"].update({"pass": True}),
+            ),
+        ),
+        "holdout_checks",
+    )
+    yield (
+        "check-counts-inconsistent",
+        _failing_copy(
+            job_valid,
+            lambda doc: doc["scores"]["job_site"]["visible_checks"].update(passed=2),
+        ),
+        "check counts",
     )
 
 
@@ -419,16 +541,20 @@ def run_negative_checks() -> list[str]:
     fixture_schema = _validator("fixture.schema.json")
     for name, doc, needle in _negative_cases(fixture):
         found = _iter_errors(fixture_schema, doc)
-        if name == "holdout-escape":
+        if name in ("holdout-escape", "dropped-runtime-binding"):
             extra = _check_refs(doc, EXAMPLES_DIR / "cli-sync")
             found.extend(extra)
         if not any(needle in item for item in found):
             errors.append(f"negative fixture {name} did not fail on {needle}: {found}")
 
-    result = _load_yaml(EXAMPLES_DIR / "results" / "requirements-cli-sync.yaml")
+    req_result = _load_yaml(EXAMPLES_DIR / "results" / "requirements-cli-sync.yaml")
+    job_result = _load_yaml(EXAMPLES_DIR / "results" / "job-site-cli-sync.yaml")
+    fixtures = {"cli-sync": EXAMPLES_DIR / "cli-sync" / "fixture.yaml"}
     result_schema = _validator("result.schema.json")
-    for name, doc, needle in _negative_results(result):
+    for name, doc, needle in _negative_results(req_result, job_result):
         found = _iter_errors(result_schema, doc)
+        if not found:
+            found = _check_result_semantics(doc, fixtures)
         if not any(needle in item for item in found):
             errors.append(f"negative result {name} did not fail on {needle}: {found}")
     return errors
