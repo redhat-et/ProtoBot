@@ -11,11 +11,17 @@ wms/jira/
 Implementations may use Go, Python, TypeScript, Rust, or another appropriate
 language and own their build and test configuration.
 
-The Go module in this directory contains two backend-neutral components:
+The Go module in this directory contains:
 
+- `adapter/` — backend-neutral wire types (`CallRequest` / `Result`) and
+  operation surfaces shared by translators;
 - `validation/` — the pure `validation-rules/v1` lifecycle evaluator;
 - `memory/` — the in-memory fake adapter used by the lifecycle and
-  Drafting Table conformance and fixture tests.
+  Drafting Table conformance and fixture tests;
+- `github/` — the first backend translator over GitHub Issues (issue #68).
+  Lifecycle rules stay in `validation/`; GitHub code only persists ProtoBot
+  JSON in issue bodies and uses an in-process claim coordinator for
+  compare-and-swap. Tests use a fake GitHub client (no live credentials).
 
 Run the Go checks from this directory with `go test ./...` and `go vet ./...`.
 
