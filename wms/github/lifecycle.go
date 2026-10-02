@@ -212,7 +212,8 @@ func (a *Adapter) applyLifecycleRequest(
 	result := resultFromDecision(operation, decision)
 	switch decision.Outcome {
 	case validation.OutcomeAllowed:
-		if request.Operation == validation.OperationMaterialize {
+		switch request.Operation {
+		case validation.OperationMaterialize:
 			item := cloneWorkItem(validation.CanonicalMaterializationSource(*request.Payload.WorkItem, request.Payload.ChangeType))
 			item.State = decision.After.State
 			item.ContractVersion = decision.After.ContractVersion
@@ -246,7 +247,7 @@ func (a *Adapter) applyLifecycleRequest(
 				result:      cloneResult(result),
 				issueNumber: issue.Number,
 			}
-		} else if request.Operation == validation.OperationClaim {
+		case validation.OperationClaim:
 			updated := cloneWorkItem(*current)
 			// CAS: expected version already enforced by Evaluate; coordinator lock
 			// serializes concurrent claims against the same GitHub-backed item.
