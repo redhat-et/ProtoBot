@@ -174,6 +174,46 @@ func TestTransientGetRetriesThenSucceeds(t *testing.T) {
 	}
 }
 
+func TestCreateExhaustedTransientReturnsUnknownMutation(t *testing.T) {
+	fake := NewFakeClient()
+	client := &RetryingClient{
+		Inner:       fake,
+		MaxAttempts: 3,
+		Backoff:     time.Nanosecond,
+		Sleep:       func(time.Duration) {},
+	}
+	wms := newTestAdapterWithClient(t, client)
+
+	fake.InjectTransient("create", 3)
+	result := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-unknown-mutation",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Unknown Mutation Request",
+			"rationale": "exhaust retries on create",
+		}),
+	})
+	if result.OK {
+		t.Fatalf("create = %#v, want rejection", result)
+	}
+	if result.Mutation != adapter.MutationUnknown {
+		t.Fatalf("mutation = %q, want %q", result.Mutation, adapter.MutationUnknown)
+	}
+	if result.Error == nil || result.Error.Code != adapter.CodeUnknownMutation {
+		t.Fatalf("error = %#v, want %s", result.Error, adapter.CodeUnknownMutation)
+	}
+	if result.Error.Retry != validation.RetryReconcile {
+		t.Fatalf("retry = %q, want %q", result.Error.Retry, validation.RetryReconcile)
+	}
+	if fake.CallCount("create") != 3 {
+		t.Fatalf("create calls = %d, want 3", fake.CallCount("create"))
+	}
+	if fake.IssueCount() != 0 {
+		t.Fatalf("issues = %d, want 0 after exhausted create", fake.IssueCount())
+	}
+}
+
 func TestUnauthorizedMaterializeRejected(t *testing.T) {
 	fake := NewFakeClient()
 	wms := newTestAdapter(t, fake)
