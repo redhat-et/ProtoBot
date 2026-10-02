@@ -13,7 +13,7 @@ env:
         # cross-document consistency checks during review.
         # Must match the "Specification document hierarchy" list in
         # AGENTS.md 1:1. Enforced by the spec-hierarchy-sync hook.
-        REVIEW_SPEC_HIERARCHY: "docs/vision.md,docs/architecture.md,docs/architecture/overview.md,docs/architecture/components.md,docs/architecture/git-integration.md,docs/architecture/validation-rules.md,docs/architecture/drafting-table-wms.md,docs/architecture/user-interaction-flow.md,docs/architecture/drafting-table-ux.md,docs/architecture/agent-harness/,docs/architecture/related-work.md,docs/architecture/open-questions.md,docs/decisions/"
+        REVIEW_SPEC_HIERARCHY: "docs/vision.md,docs/architecture.md,docs/architecture/overview.md,docs/architecture/components.md,docs/architecture/git-integration.md,docs/architecture/validation-rules.md,docs/architecture/drafting-table-wms.md,docs/architecture/user-interaction-flow.md,docs/architecture/drafting-table-ux.md,docs/architecture/agent-harness/,docs/architecture/related-work.md,docs/architecture/evaluation-corpus.md,docs/architecture/open-questions.md,docs/decisions/"
         # Restate the upstream default plus .fullsend/. env keys replace
         # wholesale under base: composition, so listing only the addition
         # would drop the default prefixes (harness/, .github/, ...).

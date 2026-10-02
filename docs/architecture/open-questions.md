@@ -287,6 +287,9 @@ relationships, eval coverage) stay open above.
   second harness binding
 - [Codex Harness Binding](agent-harness/codex.md) — The third harness
   binding
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed
+  results
 - [Related Work](related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned
 

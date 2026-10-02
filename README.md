@@ -121,6 +121,7 @@ comparisons remain separate follow-on work.
 - [Related work](docs/architecture/related-work.md)
 - [Open design questions](docs/architecture/open-questions.md)
 - [Architecture decisions](docs/decisions/)
+- [Evaluation corpus schema and result contract](docs/architecture/evaluation-corpus.md)
 
 ProtoBot is under active design and implementation. The architecture documents
 describe the current direction and identify decisions that remain open.

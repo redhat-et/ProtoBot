@@ -1,0 +1,55 @@
+---
+schema_version: 1
+result_id: requirements-cli-sync-local
+fixture_id: cli-sync
+corpus_revision: v1
+run_id: local-schema-example
+recorded_at: "2026-09-29T00:00:00Z"
+stage: requirements
+reproducibility:
+  inputs:
+    fixture_id: cli-sync
+    corpus_revision: v1
+    fixture_digest: "sha256:b532e659c6314c51e099f8d30fbe8fc9dfdef7b5866099e99c4879358f5b53ab"
+    projection: elicitation-input
+  environment:
+    mode: local
+    hosted_cluster: false
+    external_service_credentials: false
+    models:
+      - role: elicitation
+        name: local-unrun
+        settings:
+          temperature: 0
+    components:
+      - name: specification-toolkit
+        revision: unrun
+      - name: ears-manager
+        revision: unrun
+      - name: eval-runner
+        revision: schema-v1
+scores:
+  requirements:
+    pass: true
+    summary: >-
+      Illustrative requirements-quality result for schema validation.
+      No live elicitation was run.
+    metrics:
+      coverage: 1.0
+      applicability: 1.0
+      implementability: 1.0
+    per_requirement:
+      - id: REQ-CLI-00001
+        outcome: covered
+        evidence: Golden requirement retained as the comparison target.
+      - id: REQ-CLI-00002
+        outcome: covered
+        evidence: Golden requirement retained as the comparison target.
+      - id: REQ-CLI-00003
+        outcome: covered
+        evidence: Golden requirement retained as the comparison target.
+failures: []
+critical_failures: []
+traces:
+  - kind: elicitation
+    uri: file://eval/corpus/examples/results/requirements-cli-sync.yaml

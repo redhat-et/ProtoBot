@@ -1303,6 +1303,8 @@ new design track.
   commits, pull requests, and approved state
 - [Source Control Manager](source-control-manager.md) — The caller that
   stages, commits, and publishes what `ears-manager` writes
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed results
 - [Open Design Questions](open-questions.md) — Remaining unresolved design
   questions
 - [ADR-0001](../decisions/0001-requirements-storage-format.md) — Physical

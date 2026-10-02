@@ -1,0 +1,21 @@
+---
+schema_version: 1
+fixture_id: cli-sync
+checks:
+  - id: HO-CLI-00001
+    visibility: evaluator-only
+    requirement_ids:
+      - REQ-CLI-00001
+    interface_id: cli-sync
+    description: >-
+      EVAL-HOLDOUT-CLI-00001 refuses a destination path that escapes the
+      project root through a symlink.
+    setup: >-
+      Working tree with a symlink named dest that points outside the
+      project.
+    expected:
+      exit_code: 2
+      stdout_forbidden:
+        - EVAL-HOLDOUT-CLI-SECRET
+      stderr_contains:
+        - destination is outside the project

@@ -575,5 +575,7 @@ backend.
   commit, PR, and approval registration behavior.
 - [Source Control Manager](source-control-manager.md) — The component that
   performs the Git and Git host operations.
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed results.
 - [WMS Implementations](../../wms/README.md) — Backend implementation
   placement, without changing this contract.

@@ -316,6 +316,13 @@ from scratch. The Agent Eval Harness's closed-loop remediation
 regressions) is directly relevant to ProtoBot's self-improvement
 loop concept.
 
+The [evaluation corpus contract](evaluation-corpus.md) is independent
+of Eval Hub hosting. Schema validation and example records run
+locally with no Eval Hub, Agent Eval Harness, hosted cluster, or
+external service credentials. A later live runner may still use
+those platforms; it is not required to score or evolve the fixture
+schema.
+
 ---
 
 ## External "Factory" Projects
@@ -592,5 +599,8 @@ implementations) succeed at much higher rates than those without.
   second harness binding
 - [Codex Harness Binding](agent-harness/codex.md) — The third harness
   binding
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed
+  results
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas

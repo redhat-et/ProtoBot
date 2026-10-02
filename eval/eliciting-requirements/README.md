@@ -3,6 +3,11 @@
 This directory contains the Agent Eval Harness configuration for
 `.agents/skills/eliciting-requirements/SKILL.md`.
 
+It is not the project-level evaluation corpus defined by
+[`docs/architecture/evaluation-corpus.md`](../../docs/architecture/evaluation-corpus.md).
+That corpus measures Sketch, Schematic, and Job Site outcomes and
+lives under `eval/corpus/`.
+
 ## Corpus
 
 - `dataset/cases/` contains visible development cases. Each case has an
