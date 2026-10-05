@@ -114,7 +114,7 @@ repos:
         args: ["--config", ".zizmor.yml"]
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: aeea3a1903dc2cccff77a888ec1135f5fac4c879  # frozen: 44.97.4
+    rev: 45ebaf1cf90ba3ffd8777d42d2b0c309e9f0d360  # frozen: 44.115.2
     hooks:
       - id: renovate-config-validator
 
