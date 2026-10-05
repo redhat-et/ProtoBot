@@ -96,10 +96,24 @@ func (a *Adapter) executeRequestLocked(call adapter.CallRequest, authorization v
 	default:
 		result = rejectedResult(call.Operation, unauthorizedRejection(call.Operation, call.WorkItemID, authorization.PolicyVersion))
 	}
-	if mutating {
+	if mutating && shouldRememberIdempotency(result) {
 		a.rememberIdempotencyLocked(call.IdempotencyKey, fingerprint, result)
 	}
 	return result
+}
+
+// shouldRememberIdempotency reports whether a mutating request result may be
+// frozen under its idempotency key. UNKNOWN_MUTATION and WMS_UNAVAILABLE must
+// not be recorded so a lost-response retry can reconcile and reuse the same
+// key. Applied results and determinate rejections remain replayable.
+func shouldRememberIdempotency(result adapter.Result) bool {
+	if result.Mutation == adapter.MutationUnknown {
+		return false
+	}
+	if result.Error != nil && result.Error.Code == adapter.CodeWMSUnavailable {
+		return false
+	}
+	return true
 }
 
 func isRequestMutation(operation validation.Operation) bool {

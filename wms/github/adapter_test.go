@@ -1,7 +1,9 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -212,6 +214,101 @@ func TestCreateExhaustedTransientReturnsUnknownMutation(t *testing.T) {
 	if fake.IssueCount() != 0 {
 		t.Fatalf("issues = %d, want 0 after exhausted create", fake.IssueCount())
 	}
+
+	// UNKNOWN_MUTATION must not freeze the key: the same key may retry after reconcile.
+	retry := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-unknown-mutation",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Unknown Mutation Request",
+			"rationale": "exhaust retries on create",
+		}),
+	})
+	if !retry.OK || retry.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after UNKNOWN_MUTATION = %#v, want applied", retry)
+	}
+	if retry.Idempotency == adapter.IdempotencyReplayed {
+		t.Fatal("retry after UNKNOWN_MUTATION must not replay the frozen failure")
+	}
+	if fake.CallCount("create") != 4 {
+		t.Fatalf("create calls after retry = %d, want 4", fake.CallCount("create"))
+	}
+	if fake.IssueCount() != 1 {
+		t.Fatalf("issues after retry = %d, want 1", fake.IssueCount())
+	}
+}
+
+func TestRequestCreateWMSUnavailableDoesNotFreezeIdempotencyKey(t *testing.T) {
+	fake := NewFakeClient()
+	client := &hardFailCreateClient{inner: fake, remaining: 1}
+	wms := newTestAdapterWithClient(t, client)
+
+	call := adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-wms-unavailable",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Unavailable Request",
+			"rationale": "non-transient create failure",
+		}),
+	}
+	first := wms.Execute(call)
+	if first.OK || first.Error == nil || first.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("first create = %#v, want WMS_UNAVAILABLE", first)
+	}
+
+	second := wms.Execute(call)
+	if !second.OK || second.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after WMS_UNAVAILABLE = %#v, want applied", second)
+	}
+	if second.Idempotency == adapter.IdempotencyReplayed {
+		t.Fatal("retry after WMS_UNAVAILABLE must not replay the frozen failure")
+	}
+}
+
+func TestShouldRememberIdempotency(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		result adapter.Result
+		want   bool
+	}{
+		{
+			name:   "applied",
+			result: adapter.Result{OK: true, Outcome: adapter.OutcomeApplied, Mutation: adapter.MutationApplied},
+			want:   true,
+		},
+		{
+			name: "not-found",
+			result: rejectedResult(string(validation.OperationRequestRefine), validationNotFound("request")),
+			want: true,
+		},
+		{
+			name: "invalid-request",
+			result: rejectedResult(string(validation.OperationRequestCreate), invalidRequest("payload", "bad")),
+			want: true,
+		},
+		{
+			name:   "unknown-mutation",
+			result: unknownMutationResult(string(validation.OperationRequestCreate), "ambiguous"),
+			want:   false,
+		},
+		{
+			name: "wms-unavailable",
+			result: rejectedResult(string(validation.OperationRequestCreate), wmsRejection(
+				adapter.CodeWMSUnavailable, "backend down", map[string]any{}, validation.RetryRefresh,
+			)),
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRememberIdempotency(tc.result); got != tc.want {
+				t.Fatalf("shouldRememberIdempotency() = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestUnauthorizedMaterializeRejected(t *testing.T) {
@@ -263,6 +360,33 @@ func TestWorkItemAndBlockedQueries(t *testing.T) {
 func newTestAdapter(t *testing.T, client Client) *Adapter {
 	t.Helper()
 	return newTestAdapterWithClient(t, client)
+}
+
+// hardFailCreateClient fails the first N CreateIssue calls with a non-transient
+// error so the adapter surfaces WMS_UNAVAILABLE, then delegates.
+type hardFailCreateClient struct {
+	inner     Client
+	remaining int
+}
+
+func (c *hardFailCreateClient) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue, error) {
+	if c.remaining > 0 {
+		c.remaining--
+		return Issue{}, errors.New("github create permanently unavailable")
+	}
+	return c.inner.CreateIssue(ctx, input)
+}
+
+func (c *hardFailCreateClient) GetIssue(ctx context.Context, number int) (Issue, error) {
+	return c.inner.GetIssue(ctx, number)
+}
+
+func (c *hardFailCreateClient) UpdateIssue(ctx context.Context, number int, input UpdateIssueInput) (Issue, error) {
+	return c.inner.UpdateIssue(ctx, number, input)
+}
+
+func (c *hardFailCreateClient) ListIssues(ctx context.Context, filter ListIssuesFilter) ([]Issue, error) {
+	return c.inner.ListIssues(ctx, filter)
 }
 
 func newTestAdapterWithClient(t *testing.T, client Client) *Adapter {
