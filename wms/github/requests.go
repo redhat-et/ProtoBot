@@ -217,7 +217,7 @@ func (a *Adapter) persistNewRequestLocked(
 func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
 	request, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
-		return rejectedResult(call.Operation, validationNotFound("request"))
+		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
 	if rejection := validateRequestRevision(call, request); rejection != nil {
 		return rejectedResult(call.Operation, rejection)
@@ -335,7 +335,7 @@ func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization va
 func (a *Adapter) updatePriorityLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
 	request, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
-		return rejectedResult(call.Operation, validationNotFound("request"))
+		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
 	if rejection := validateRequestRevision(call, request); rejection != nil {
 		return rejectedResult(call.Operation, rejection)
@@ -360,7 +360,7 @@ func (a *Adapter) updatePriorityLocked(call adapter.CallRequest, authorization v
 	if request.BuildWorkItemID != "" {
 		item, issueNumber, loadErr := a.loadWorkItem(request.BuildWorkItemID)
 		if loadErr != nil {
-			return rejectedResult(call.Operation, validationNotFound("work-item"))
+			return rejectedResult(call.Operation, backendLoadRejection("work-item", loadErr))
 		}
 		item.Priority = payload.BusinessPriority
 		if err := a.updateWorkItemIssue(issueNumber, item, request.ID, request.ChangeSetID, payload.BusinessPriority); err != nil {
@@ -395,7 +395,7 @@ func (a *Adapter) updatePriorityLocked(call adapter.CallRequest, authorization v
 func (a *Adapter) linkChangeSetLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
 	request, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
-		return rejectedResult(call.Operation, validationNotFound("request"))
+		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
 	if rejection := validateRequestRevision(call, request); rejection != nil {
 		return rejectedResult(call.Operation, rejection)
@@ -438,7 +438,7 @@ func (a *Adapter) linkChangeSetLocked(call adapter.CallRequest, authorization va
 func (a *Adapter) linkWorkItemLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
 	request, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
-		return rejectedResult(call.Operation, validationNotFound("request"))
+		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
 	if rejection := validateRequestRevision(call, request); rejection != nil {
 		return rejectedResult(call.Operation, rejection)
@@ -449,7 +449,7 @@ func (a *Adapter) linkWorkItemLocked(call adapter.CallRequest, authorization val
 	}
 	item, issueNumber, err := a.loadWorkItem(payload.BuildWorkItemID)
 	if err != nil {
-		return rejectedResult(call.Operation, validationNotFound("work-item"))
+		return rejectedResult(call.Operation, backendLoadRejection("work-item", err))
 	}
 	request.BuildWorkItemID = item.ID
 	if request.BusinessPriority != "" {
@@ -489,7 +489,7 @@ func (a *Adapter) linkWorkItemLocked(call adapter.CallRequest, authorization val
 func (a *Adapter) getRequestLocked(call adapter.CallRequest) adapter.Result {
 	request, _, err := a.loadRequest(call.RequestID)
 	if err != nil {
-		return rejectedResult(call.Operation, validationNotFound("request"))
+		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
 	result := newResult(call.Operation)
 	result.Resource = cloneRequest(request)
@@ -507,7 +507,10 @@ func (a *Adapter) queryRequestsLocked(call adapter.CallRequest) adapter.Result {
 	for id := range a.idx.requestIssue {
 		request, _, err := a.loadRequest(id)
 		if err != nil {
-			continue
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 		}
 		if query.RefinementState != "" && request.RefinementState != query.RefinementState {
 			continue

@@ -111,6 +111,19 @@ func validationNotFound(targetType string) *validation.Rejection {
 	)
 }
 
+// backendLoadRejection classifies a load failure. ErrNotFound is a
+// visibility-safe NOT_FOUND; any other error (a transient GitHub failure, or a
+// corrupt/undecodable document) must not be reported as NOT_FOUND, since that
+// would be remembered as a determinate outcome under a mutation's idempotency
+// key even after the record becomes readable again. It is reported as
+// WMS_UNAVAILABLE instead, which shouldRememberIdempotency never freezes.
+func backendLoadRejection(targetType string, err error) *validation.Rejection {
+	if errors.Is(err, ErrNotFound) {
+		return validationNotFound(targetType)
+	}
+	return wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)
+}
+
 func decodePayload(data []byte, target any) error {
 	if len(data) == 0 {
 		data = []byte("{}")

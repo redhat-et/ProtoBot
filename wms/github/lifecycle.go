@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"time"
 
 	"github.com/redhat-et/protobot/wms/adapter"
@@ -22,6 +23,9 @@ func (a *Adapter) executeLifecycleLocked(call adapter.CallRequest, authorization
 
 	var current *validation.WorkItem
 	item, existsErr := a.tryLoadWorkItem(request.WorkItemID)
+	if existsErr != nil && !errors.Is(existsErr, ErrNotFound) {
+		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, existsErr.Error(), map[string]any{}, validation.RetryRefresh))
+	}
 	exists := existsErr == nil
 	if request.Operation == validation.OperationMaterialize {
 		if exists {
@@ -49,7 +53,9 @@ func (a *Adapter) executeLifecycleLocked(call adapter.CallRequest, authorization
 					return result
 				}
 				result := resultFromDecision(call.Operation, validation.Evaluate(request, nil, evaluation))
-				a.rememberIdempotencyLocked(request.IdempotencyKey, fingerprint, result)
+				if shouldRememberIdempotency(result) {
+					a.rememberIdempotencyLocked(request.IdempotencyKey, fingerprint, result)
+				}
 				return result
 			}
 			return resultFromDecision(call.Operation, validation.Evaluate(request, nil, evaluation))
@@ -308,7 +314,9 @@ func (a *Adapter) applyLifecycleRequest(
 			}
 		}
 	}
-	a.rememberIdempotencyLocked(request.IdempotencyKey, fingerprint, result)
+	if shouldRememberIdempotency(result) {
+		a.rememberIdempotencyLocked(request.IdempotencyKey, fingerprint, result)
+	}
 	return result
 }
 

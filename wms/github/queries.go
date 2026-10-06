@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -18,7 +19,7 @@ type workItemQueryPayload struct {
 func (a *Adapter) getWorkItemLocked(call adapter.CallRequest) adapter.Result {
 	item, doc, _, err := a.loadWorkItemDocument(call.WorkItemID)
 	if err != nil {
-		return rejectedResult(call.Operation, validationNotFound("work-item"))
+		return rejectedResult(call.Operation, backendLoadRejection("work-item", err))
 	}
 	result := newResult(call.Operation)
 	result.WorkItemID = item.ID
@@ -37,7 +38,10 @@ func (a *Adapter) queryWorkItemsLocked(call adapter.CallRequest) adapter.Result 
 	for id := range a.idx.workItemIssue {
 		item, doc, _, err := a.loadWorkItemDocument(id)
 		if err != nil {
-			continue
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 		}
 		if query.State != "" && item.State != query.State {
 			continue
@@ -64,7 +68,13 @@ func (a *Adapter) queryBlockedWorkLocked(call adapter.CallRequest) adapter.Resul
 	items := make([]adapter.WorkItemProjection, 0)
 	for id := range a.idx.workItemIssue {
 		item, doc, _, err := a.loadWorkItemDocument(id)
-		if err != nil || item.State != validation.StateBlocked {
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
+		}
+		if item.State != validation.StateBlocked {
 			continue
 		}
 		projection := projectWorkItem(item, doc)

@@ -617,6 +617,478 @@ func TestWorkItemAndBlockedQueries(t *testing.T) {
 	}
 }
 
+// toggledFailClient fails exactly one GetIssue call for a specific issue
+// number once armed, then passes through. It lets tests target a transient
+// backend failure at one specific load site without disturbing unrelated
+// GetIssue calls made earlier in the same operation.
+type toggledFailClient struct {
+	inner      Client
+	failNumber int
+	armed      bool
+}
+
+func (c *toggledFailClient) arm(number int) {
+	c.failNumber = number
+	c.armed = true
+}
+
+func (c *toggledFailClient) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue, error) {
+	return c.inner.CreateIssue(ctx, input)
+}
+
+func (c *toggledFailClient) GetIssue(ctx context.Context, number int) (Issue, error) {
+	if c.armed && number == c.failNumber {
+		c.armed = false
+		return Issue{}, fmt.Errorf("%w: injected failure for issue %d", ErrTransient, number)
+	}
+	return c.inner.GetIssue(ctx, number)
+}
+
+func (c *toggledFailClient) UpdateIssue(ctx context.Context, number int, input UpdateIssueInput) (Issue, error) {
+	return c.inner.UpdateIssue(ctx, number, input)
+}
+
+func (c *toggledFailClient) ListIssues(ctx context.Context, filter ListIssuesFilter) ([]Issue, error) {
+	return c.inner.ListIssues(ctx, filter)
+}
+
+func TestRefineRequestTransientLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	created := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-refine-transient",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Refine Transient Request",
+			"rationale": "refine transient coverage",
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("create = %#v", created)
+	}
+	request := created.Resource.(adapter.RequestRecord)
+	number, ok := wms.RequestIssueNumber(request.ID)
+	if !ok {
+		t.Fatal("missing request issue number")
+	}
+
+	revision := request.Revision
+	call := adapter.CallRequest{
+		Operation:               string(validation.OperationRequestRefine),
+		ActorContextRef:         "drafting-table",
+		RequestID:               request.ID,
+		ExpectedRequestRevision: &revision,
+		IdempotencyKey:          "refine-key-1",
+		Payload: jsonPayload(t, map[string]any{
+			"refinement_state": "refining",
+			"classification":   "undefined",
+		}),
+	}
+
+	client.arm(number)
+	result := wms.Execute(call)
+	if result.OK || result.Error == nil {
+		t.Fatalf("refine with transient load = %#v, want rejection", result)
+	}
+	if result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("error code = %q, want %q (transient load must not collapse to NOT_FOUND)", result.Error.Code, adapter.CodeWMSUnavailable)
+	}
+
+	retry := wms.Execute(call)
+	if retry.Idempotency == adapter.IdempotencyReplayed {
+		t.Fatal("retry after WMS_UNAVAILABLE must not replay a frozen result")
+	}
+	if retry.OK || retry.Error == nil || retry.Error.Code == validation.CodeNotFound {
+		t.Fatalf("retry after transient load = %#v, want a fresh non-NOT_FOUND evaluation", retry)
+	}
+}
+
+func TestUpdatePriorityTransientRequestLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	created := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-priority-transient",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Priority Transient Request",
+			"rationale": "priority transient coverage",
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("create = %#v", created)
+	}
+	request := created.Resource.(adapter.RequestRecord)
+	number, ok := wms.RequestIssueNumber(request.ID)
+	if !ok {
+		t.Fatal("missing request issue number")
+	}
+
+	revision := request.Revision
+	call := adapter.CallRequest{
+		Operation:               string(validation.OperationRequestUpdatePriority),
+		ActorContextRef:         "human-maintainer",
+		RequestID:               request.ID,
+		ExpectedRequestRevision: &revision,
+		IdempotencyKey:          "priority-key-1",
+		Payload:                 jsonPayload(t, map[string]any{"business_priority": "high"}),
+	}
+
+	client.arm(number)
+	result := wms.Execute(call)
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("update-priority with transient request load = %#v, want WMS_UNAVAILABLE", result)
+	}
+
+	retry := wms.Execute(call)
+	if !retry.OK || retry.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after WMS_UNAVAILABLE = %#v, want applied (key must not be frozen)", retry)
+	}
+}
+
+func TestUpdatePriorityTransientWorkItemLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	created := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-wi-priority-transient",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Linked Priority Request",
+			"rationale": "linked priority transient coverage",
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("create = %#v", created)
+	}
+	request := created.Resource.(adapter.RequestRecord)
+
+	candidate := testWorkItem("wi-priority-transient", validation.StateInitial, 0)
+	if result := wms.Execute(materializeCall(candidate, "mat-priority-transient", "mat-priority-transient-key")); !result.OK {
+		t.Fatalf("materialize = %#v", result)
+	}
+
+	linkRevision := request.Revision
+	link := wms.Execute(adapter.CallRequest{
+		Operation:               string(validation.OperationRequestLinkBuildWorkItem),
+		ActorContextRef:         "drafting-table",
+		RequestID:               request.ID,
+		ExpectedRequestRevision: &linkRevision,
+		IdempotencyKey:          "link-key-1",
+		Payload:                 jsonPayload(t, map[string]any{"build_work_item_id": candidate.ID}),
+	})
+	if !link.OK {
+		t.Fatalf("link = %#v", link)
+	}
+	linkedRequest := link.Resource.(adapter.RequestRecord)
+
+	workItemNumber, ok := wms.WorkItemIssueNumber(candidate.ID)
+	if !ok {
+		t.Fatal("missing work item issue number")
+	}
+
+	priorityRevision := linkedRequest.Revision
+	call := adapter.CallRequest{
+		Operation:               string(validation.OperationRequestUpdatePriority),
+		ActorContextRef:         "human-maintainer",
+		RequestID:               linkedRequest.ID,
+		ExpectedRequestRevision: &priorityRevision,
+		IdempotencyKey:          "priority-key-2",
+		Payload:                 jsonPayload(t, map[string]any{"business_priority": "urgent"}),
+	}
+
+	client.arm(workItemNumber)
+	result := wms.Execute(call)
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("update-priority with transient work-item load = %#v, want WMS_UNAVAILABLE", result)
+	}
+
+	retry := wms.Execute(call)
+	if !retry.OK || retry.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after WMS_UNAVAILABLE = %#v, want applied (key must not be frozen)", retry)
+	}
+}
+
+func TestLinkChangeSetTransientRequestLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	if err := wms.SeedChangeSet(adapter.ChangeSet{ID: "cs-transient", Revision: "r1", BusinessPriority: "normal"}); err != nil {
+		t.Fatalf("seed change set: %v", err)
+	}
+
+	created := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-link-cs-transient",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Link Change Set Transient Request",
+			"rationale": "link change-set transient coverage",
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("create = %#v", created)
+	}
+	request := created.Resource.(adapter.RequestRecord)
+	number, ok := wms.RequestIssueNumber(request.ID)
+	if !ok {
+		t.Fatal("missing request issue number")
+	}
+
+	revision := request.Revision
+	call := adapter.CallRequest{
+		Operation:               string(validation.OperationRequestLinkChangeSet),
+		ActorContextRef:         "drafting-table",
+		RequestID:               request.ID,
+		ExpectedRequestRevision: &revision,
+		IdempotencyKey:          "link-cs-key-1",
+		Payload:                 jsonPayload(t, map[string]any{"change_set_id": "cs-transient"}),
+	}
+
+	client.arm(number)
+	result := wms.Execute(call)
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("link-change-set with transient request load = %#v, want WMS_UNAVAILABLE", result)
+	}
+
+	retry := wms.Execute(call)
+	if !retry.OK || retry.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after WMS_UNAVAILABLE = %#v, want applied (key must not be frozen)", retry)
+	}
+}
+
+func TestLinkWorkItemTransientRequestLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	created := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-link-wi-transient",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Link Work Item Transient Request",
+			"rationale": "link work-item transient coverage",
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("create = %#v", created)
+	}
+	request := created.Resource.(adapter.RequestRecord)
+	number, ok := wms.RequestIssueNumber(request.ID)
+	if !ok {
+		t.Fatal("missing request issue number")
+	}
+
+	candidate := testWorkItem("wi-link-req-transient", validation.StateInitial, 0)
+	if result := wms.Execute(materializeCall(candidate, "mat-link-req-transient", "mat-link-req-transient-key")); !result.OK {
+		t.Fatalf("materialize = %#v", result)
+	}
+
+	revision := request.Revision
+	call := adapter.CallRequest{
+		Operation:               string(validation.OperationRequestLinkBuildWorkItem),
+		ActorContextRef:         "drafting-table",
+		RequestID:               request.ID,
+		ExpectedRequestRevision: &revision,
+		IdempotencyKey:          "link-wi-key-1",
+		Payload:                 jsonPayload(t, map[string]any{"build_work_item_id": candidate.ID}),
+	}
+
+	client.arm(number)
+	result := wms.Execute(call)
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("link-work-item with transient request load = %#v, want WMS_UNAVAILABLE", result)
+	}
+
+	retry := wms.Execute(call)
+	if !retry.OK || retry.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after WMS_UNAVAILABLE = %#v, want applied (key must not be frozen)", retry)
+	}
+}
+
+func TestLinkWorkItemTransientWorkItemLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	created := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-link-wi-load-transient",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Link Work Item Load Transient Request",
+			"rationale": "link work-item load transient coverage",
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("create = %#v", created)
+	}
+	request := created.Resource.(adapter.RequestRecord)
+
+	candidate := testWorkItem("wi-link-load-transient", validation.StateInitial, 0)
+	if result := wms.Execute(materializeCall(candidate, "mat-link-load-transient", "mat-link-load-transient-key")); !result.OK {
+		t.Fatalf("materialize = %#v", result)
+	}
+	workItemNumber, ok := wms.WorkItemIssueNumber(candidate.ID)
+	if !ok {
+		t.Fatal("missing work item issue number")
+	}
+
+	revision := request.Revision
+	call := adapter.CallRequest{
+		Operation:               string(validation.OperationRequestLinkBuildWorkItem),
+		ActorContextRef:         "drafting-table",
+		RequestID:               request.ID,
+		ExpectedRequestRevision: &revision,
+		IdempotencyKey:          "link-wi-key-2",
+		Payload:                 jsonPayload(t, map[string]any{"build_work_item_id": candidate.ID}),
+	}
+
+	client.arm(workItemNumber)
+	result := wms.Execute(call)
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("link-work-item with transient work-item load = %#v, want WMS_UNAVAILABLE", result)
+	}
+
+	retry := wms.Execute(call)
+	if !retry.OK || retry.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after WMS_UNAVAILABLE = %#v, want applied (key must not be frozen)", retry)
+	}
+}
+
+func TestClaimTransientWorkItemLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	candidate := testWorkItem("wi-claim-transient", validation.StateInitial, 0)
+	if result := wms.Execute(materializeCall(candidate, "mat-claim-transient", "mat-claim-transient-key")); !result.OK {
+		t.Fatalf("materialize = %#v", result)
+	}
+	item, ok := wms.LoadWorkItemForTest(candidate.ID)
+	if !ok {
+		t.Fatal("missing work item")
+	}
+	number, ok := wms.WorkItemIssueNumber(candidate.ID)
+	if !ok {
+		t.Fatal("missing work item issue number")
+	}
+
+	version := item.ContractVersion
+	call := adapter.CallRequest{
+		Operation:               string(validation.OperationClaim),
+		ActorContextRef:         "job-site",
+		WorkItemID:              item.ID,
+		ExpectedState:           item.State,
+		ExpectedContractVersion: &version,
+		IdempotencyKey:          "claim-transient",
+	}
+
+	client.arm(number)
+	result := wms.Execute(call)
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("claim with transient work-item load = %#v, want WMS_UNAVAILABLE (not treated as missing target)", result)
+	}
+
+	retry := wms.Execute(call)
+	if !retry.OK || retry.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("retry after WMS_UNAVAILABLE = %#v, want applied (key must not be frozen)", retry)
+	}
+}
+
+func TestRequestQueryTransientLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	created := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-query-transient",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Query Transient Request",
+			"rationale": "query transient coverage",
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("create = %#v", created)
+	}
+	request := created.Resource.(adapter.RequestRecord)
+	number, ok := wms.RequestIssueNumber(request.ID)
+	if !ok {
+		t.Fatal("missing request issue number")
+	}
+
+	client.arm(number)
+	result := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationRequestQuery),
+		ActorContextRef: "drafting-table",
+		Payload:         jsonPayload(t, map[string]any{}),
+	})
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("request query with transient load = %#v, want WMS_UNAVAILABLE (not a silently partial list)", result)
+	}
+}
+
+func TestWorkItemQueryTransientLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	candidate := testWorkItem("wi-query-transient", validation.StateInitial, 0)
+	if result := wms.Execute(materializeCall(candidate, "mat-query-transient", "mat-query-transient-key")); !result.OK {
+		t.Fatalf("materialize = %#v", result)
+	}
+	number, ok := wms.WorkItemIssueNumber(candidate.ID)
+	if !ok {
+		t.Fatal("missing work item issue number")
+	}
+
+	client.arm(number)
+	result := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationWorkItemQuery),
+		ActorContextRef: "drafting-table",
+		Payload:         jsonPayload(t, map[string]any{}),
+	})
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("work-item query with transient load = %#v, want WMS_UNAVAILABLE (not a silently partial list)", result)
+	}
+}
+
+func TestBlockedWorkQueryTransientLoadReturnsWMSUnavailable(t *testing.T) {
+	fake := NewFakeClient()
+	client := &toggledFailClient{inner: fake}
+	wms := newTestAdapterWithClient(t, client)
+
+	candidate := testWorkItem("wi-blocked-transient", validation.StateInitial, 0)
+	candidate.Readiness.ImpactDispositioned = false
+	if result := wms.Execute(materializeCall(candidate, "mat-blocked-transient", "mat-blocked-transient-key")); !result.OK {
+		t.Fatalf("materialize = %#v", result)
+	}
+	number, ok := wms.WorkItemIssueNumber(candidate.ID)
+	if !ok {
+		t.Fatal("missing work item issue number")
+	}
+
+	client.arm(number)
+	result := wms.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationBlockedWorkQuery),
+		ActorContextRef: "drafting-table",
+	})
+	if result.OK || result.Error == nil || result.Error.Code != adapter.CodeWMSUnavailable {
+		t.Fatalf("blocked-work query with transient load = %#v, want WMS_UNAVAILABLE (not a silently partial list)", result)
+	}
+}
+
 func newTestAdapter(t *testing.T, client Client) *Adapter {
 	t.Helper()
 	return newTestAdapterWithClient(t, client)
