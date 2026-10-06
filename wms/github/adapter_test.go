@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -186,7 +187,8 @@ func TestCreateExhaustedTransientReturnsUnknownMutation(t *testing.T) {
 	}
 	wms := newTestAdapterWithClient(t, client)
 
-	fake.InjectTransient("create", 3)
+	// CreateIssue must not be retried: one ambiguous failure surfaces UNKNOWN_MUTATION.
+	fake.InjectTransient("create", 1)
 	result := wms.Execute(adapter.CallRequest{
 		Operation:       string(validation.OperationRequestCreate),
 		ActorContextRef: "drafting-table",
@@ -208,11 +210,11 @@ func TestCreateExhaustedTransientReturnsUnknownMutation(t *testing.T) {
 	if result.Error.Retry != validation.RetryReconcile {
 		t.Fatalf("retry = %q, want %q", result.Error.Retry, validation.RetryReconcile)
 	}
-	if fake.CallCount("create") != 3 {
-		t.Fatalf("create calls = %d, want 3", fake.CallCount("create"))
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls = %d, want 1 (no CreateIssue retries)", fake.CallCount("create"))
 	}
 	if fake.IssueCount() != 0 {
-		t.Fatalf("issues = %d, want 0 after exhausted create", fake.IssueCount())
+		t.Fatalf("issues = %d, want 0 after failed create", fake.IssueCount())
 	}
 
 	// UNKNOWN_MUTATION must not freeze the key: the same key may retry after reconcile.
@@ -231,11 +233,269 @@ func TestCreateExhaustedTransientReturnsUnknownMutation(t *testing.T) {
 	if retry.Idempotency == adapter.IdempotencyReplayed {
 		t.Fatal("retry after UNKNOWN_MUTATION must not replay the frozen failure")
 	}
-	if fake.CallCount("create") != 4 {
-		t.Fatalf("create calls after retry = %d, want 4", fake.CallCount("create"))
+	if fake.CallCount("create") != 2 {
+		t.Fatalf("create calls after retry = %d, want 2", fake.CallCount("create"))
 	}
 	if fake.IssueCount() != 1 {
 		t.Fatalf("issues after retry = %d, want 1", fake.IssueCount())
+	}
+}
+
+func TestRetryingClientCreateIssueDoesNotRetry(t *testing.T) {
+	fake := NewFakeClient()
+	client := &RetryingClient{
+		Inner:       fake,
+		MaxAttempts: 5,
+		Backoff:     time.Nanosecond,
+		Sleep:       func(time.Duration) {},
+	}
+	fake.InjectTransient("create", 3)
+	_, err := client.CreateIssue(context.Background(), CreateIssueInput{Title: "t", Body: "b"})
+	if !errors.Is(err, ErrTransient) {
+		t.Fatalf("err = %v, want ErrTransient", err)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls = %d, want 1", fake.CallCount("create"))
+	}
+}
+
+func TestMaterializeLostCreateResponseRebindsWithoutSecondIssue(t *testing.T) {
+	fake := NewFakeClient()
+	wms := newTestAdapter(t, fake)
+	candidate := testWorkItem("wi-lost", validation.StateInitial, 0)
+	fake.InjectCreateSucceedThenTransient(1)
+
+	first := wms.Execute(materializeCall(candidate, "lost-1", "mat-lost-1"))
+	if !first.OK || first.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("materialize after lost response = %#v, want applied via reconcile", first)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls = %d, want 1", fake.CallCount("create"))
+	}
+	if fake.IssueCount() != 1 {
+		t.Fatalf("issues = %d, want 1", fake.IssueCount())
+	}
+	if fake.CallCount("list") < 1 {
+		t.Fatal("expected ListIssues reconcile after lost create response")
+	}
+
+	number, ok := wms.WorkItemIssueNumber("wi-lost")
+	if !ok {
+		t.Fatal("expected rebound work-item index")
+	}
+	issue, ok := fake.GetIssueRaw(number)
+	if !ok {
+		t.Fatal("missing github issue")
+	}
+	doc, err := decodeBody(issue.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.MaterializationKey != "mat-lost-1" {
+		t.Fatalf("materialization_key = %q", doc.MaterializationKey)
+	}
+	if doc.SourceFingerprint == "" {
+		t.Fatal("expected persisted source_fingerprint")
+	}
+
+	second := wms.Execute(materializeCall(candidate, "lost-2", "mat-lost-1"))
+	if second.Outcome != adapter.OutcomeReplayed || second.Mutation != adapter.MutationNone {
+		t.Fatalf("replay = %#v", second)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls after replay = %d, want 1", fake.CallCount("create"))
+	}
+	if fake.IssueCount() != 1 {
+		t.Fatalf("issues after replay = %d, want 1", fake.IssueCount())
+	}
+}
+
+func TestMaterializeColdStartRebindsFromDurableFingerprint(t *testing.T) {
+	fake := NewFakeClient()
+	first := newTestAdapter(t, fake)
+	candidate := testWorkItem("wi-cold", validation.StateInitial, 0)
+	created := first.Execute(materializeCall(candidate, "cold-1", "mat-cold-1"))
+	if !created.OK {
+		t.Fatalf("first materialize = %#v", created)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls = %d, want 1", fake.CallCount("create"))
+	}
+
+	// New adapter process: empty in-process indexes, same durable GitHub issues.
+	second := newTestAdapter(t, fake)
+	replay := second.Execute(materializeCall(candidate, "cold-2", "mat-cold-1"))
+	if replay.Outcome != adapter.OutcomeReplayed || replay.Mutation != adapter.MutationNone {
+		t.Fatalf("cold-start replay = %#v", replay)
+	}
+	item, ok := replay.Resource.(validation.WorkItem)
+	if !ok || item.ID != "wi-cold" {
+		t.Fatalf("replay resource = %#v", replay.Resource)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls after cold start = %d, want 1", fake.CallCount("create"))
+	}
+	if fake.IssueCount() != 1 {
+		t.Fatalf("issues = %d, want 1", fake.IssueCount())
+	}
+
+	changed := candidate
+	changed.Readiness.PolicyCompatible = false
+	conflict := second.Execute(materializeCall(changed, "cold-3", "mat-cold-1"))
+	if conflict.OK || conflict.Error == nil || conflict.Error.Code != validation.CodeIdempotencyConflict {
+		t.Fatalf("cold-start conflict = %#v", conflict)
+	}
+}
+
+func TestRequestCreateLostResponseRebindsByRequestID(t *testing.T) {
+	fake := NewFakeClient()
+	wms := newTestAdapter(t, fake)
+	fake.InjectCreateSucceedThenTransient(1)
+
+	call := adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-lost-1",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Lost Response Request",
+			"rationale": "create applied but response lost",
+		}),
+	}
+	first := wms.Execute(call)
+	if !first.OK || first.Outcome != adapter.OutcomeApplied {
+		t.Fatalf("create after lost response = %#v, want applied via reconcile", first)
+	}
+	request, ok := first.Resource.(adapter.RequestRecord)
+	if !ok || request.ID == "" {
+		t.Fatalf("resource = %#v", first.Resource)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls = %d, want 1", fake.CallCount("create"))
+	}
+	if fake.IssueCount() != 1 {
+		t.Fatalf("issues = %d, want 1", fake.IssueCount())
+	}
+
+	// Same idempotency key must not create a second issue.
+	retry := wms.Execute(call)
+	if retry.Outcome != adapter.OutcomeReplayed {
+		t.Fatalf("idempotent retry = %#v, want replayed", retry)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls after retry = %d, want 1", fake.CallCount("create"))
+	}
+	if fake.IssueCount() != 1 {
+		t.Fatalf("issues after retry = %d, want 1", fake.IssueCount())
+	}
+}
+
+// listBudgetClient lets the first N ListIssues calls through and then fails
+// every later list with ErrTransient, so a create reconcile cannot complete.
+type listBudgetClient struct {
+	inner     Client
+	remaining int
+}
+
+func (c *listBudgetClient) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue, error) {
+	return c.inner.CreateIssue(ctx, input)
+}
+
+func (c *listBudgetClient) GetIssue(ctx context.Context, number int) (Issue, error) {
+	return c.inner.GetIssue(ctx, number)
+}
+
+func (c *listBudgetClient) UpdateIssue(ctx context.Context, number int, input UpdateIssueInput) (Issue, error) {
+	return c.inner.UpdateIssue(ctx, number, input)
+}
+
+func (c *listBudgetClient) ListIssues(ctx context.Context, filter ListIssuesFilter) ([]Issue, error) {
+	if c.remaining <= 0 {
+		return nil, fmt.Errorf("%w: list budget exhausted", ErrTransient)
+	}
+	c.remaining--
+	return c.inner.ListIssues(ctx, filter)
+}
+
+func TestRequestCreateRestartAfterUnknownMutationDoesNotDuplicate(t *testing.T) {
+	fake := NewFakeClient()
+	fake.InjectCreateSucceedThenTransient(1)
+	first := newTestAdapterWithClient(t, &listBudgetClient{inner: fake, remaining: 1})
+
+	call := adapter.CallRequest{
+		Operation:       string(validation.OperationRequestCreate),
+		ActorContextRef: "drafting-table",
+		IdempotencyKey:  "req-restart-1",
+		Payload: jsonPayload(t, map[string]any{
+			"intent":    "Restart Request",
+			"rationale": "process dies before reconcile",
+		}),
+	}
+	unknown := first.Execute(call)
+	if unknown.Mutation != adapter.MutationUnknown {
+		t.Fatalf("first create = %#v, want UNKNOWN_MUTATION", unknown)
+	}
+	if fake.IssueCount() != 1 {
+		t.Fatalf("issues after lost response = %d, want 1", fake.IssueCount())
+	}
+
+	// New adapter process: no pendingRequestCreate, no request sequence.
+	second := newTestAdapter(t, fake)
+	replay := second.Execute(call)
+	if !replay.OK || replay.Outcome != adapter.OutcomeReplayed {
+		t.Fatalf("retry after restart = %#v, want replayed", replay)
+	}
+	if fake.CallCount("create") != 1 || fake.IssueCount() != 1 {
+		t.Fatalf("creates=%d issues=%d, want 1 and 1", fake.CallCount("create"), fake.IssueCount())
+	}
+	replayed, ok := replay.Resource.(adapter.RequestRecord)
+	if !ok || replayed.ID != "REQ-00001" {
+		t.Fatalf("replayed resource = %#v", replay.Resource)
+	}
+
+	reused := call
+	reused.Payload = jsonPayload(t, map[string]any{
+		"intent":    "Different Request",
+		"rationale": "same key, different payload",
+	})
+	conflict := newTestAdapter(t, fake).Execute(reused)
+	if conflict.OK || conflict.Error == nil || conflict.Error.Code != validation.CodeIdempotencyConflict {
+		t.Fatalf("key reuse after restart = %#v, want IDEMPOTENCY_CONFLICT", conflict)
+	}
+}
+
+func TestRequestCreateAfterRestartGetsFreshIDAndKeepsSemanticDedup(t *testing.T) {
+	fake := NewFakeClient()
+	first := newTestAdapter(t, fake)
+	create := func(w *Adapter, key, intent string) adapter.Result {
+		return w.Execute(adapter.CallRequest{
+			Operation:       string(validation.OperationRequestCreate),
+			ActorContextRef: "drafting-table",
+			IdempotencyKey:  key,
+			Payload: jsonPayload(t, map[string]any{
+				"intent":    intent,
+				"rationale": "restart coverage",
+			}),
+		})
+	}
+	if res := create(first, "k1", "Alpha"); !res.OK {
+		t.Fatalf("first create = %#v", res)
+	}
+
+	restarted := newTestAdapter(t, fake)
+	dup := create(restarted, "k2", "alpha")
+	if dup.OK || dup.Error == nil || dup.Error.Code != adapter.CodeDuplicateRequest {
+		t.Fatalf("semantic duplicate after restart = %#v, want DUPLICATE_REQUEST", dup)
+	}
+	next := create(restarted, "k3", "Beta")
+	if !next.OK {
+		t.Fatalf("second request = %#v", next)
+	}
+	request, ok := next.Resource.(adapter.RequestRecord)
+	if !ok || request.ID != "REQ-00002" {
+		t.Fatalf("request after restart = %#v, want REQ-00002", next.Resource)
+	}
+	if fake.IssueCount() != 2 {
+		t.Fatalf("issues = %d, want 2", fake.IssueCount())
 	}
 }
 
@@ -280,14 +540,14 @@ func TestShouldRememberIdempotency(t *testing.T) {
 			want:   true,
 		},
 		{
-			name: "not-found",
+			name:   "not-found",
 			result: rejectedResult(string(validation.OperationRequestRefine), validationNotFound("request")),
-			want: true,
+			want:   true,
 		},
 		{
-			name: "invalid-request",
+			name:   "invalid-request",
 			result: rejectedResult(string(validation.OperationRequestCreate), invalidRequest("payload", "bad")),
-			want: true,
+			want:   true,
 		},
 		{
 			name:   "unknown-mutation",

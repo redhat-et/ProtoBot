@@ -136,6 +136,16 @@ func (a *Adapter) createRequestLocked(call adapter.CallRequest, authorization va
 		return rejectedResult(call.Operation, invalidRequest("intent/rationale", "intent and rationale are required"))
 	}
 	semanticKey := requestSemanticKey(payload)
+	docs, err := a.hydrateRequestsLocked()
+	if err != nil {
+		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
+	}
+	if result, handled := a.replayDurableRequestCreate(call, authorization, docs); handled {
+		return result
+	}
+	if result, handled := a.reconcilePendingRequestCreate(call, semanticKey); handled {
+		return result
+	}
 	if existing, exists := a.idx.semanticRequests[semanticKey]; exists {
 		return rejectedResult(call.Operation, wmsRejection(
 			adapter.CodeDuplicateRequest,
@@ -144,8 +154,40 @@ func (a *Adapter) createRequestLocked(call adapter.CallRequest, authorization va
 			validation.RetryQuery,
 		))
 	}
+	return a.persistNewRequestLocked(call, authorization, payload, semanticKey)
+}
+
+// reconcilePendingRequestCreate looks up a request_id reserved after a prior
+// UNKNOWN_MUTATION for this idempotency key before creating again.
+func (a *Adapter) reconcilePendingRequestCreate(call adapter.CallRequest, semanticKey string) (adapter.Result, bool) {
+	pendingID, ok := a.idx.pendingRequestCreate[call.IdempotencyKey]
+	if !ok {
+		return adapter.Result{}, false
+	}
+	existing, number, err := a.findRequestByID(pendingID)
+	if err == nil {
+		delete(a.idx.pendingRequestCreate, call.IdempotencyKey)
+		a.bindRequestLocked(existing, number, semanticKey)
+		return requestCreateAppliedResult(call.Operation, existing), true
+	}
+	if errorsIsTransient(err) {
+		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)), true
+	}
+	return adapter.Result{}, false
+}
+
+func (a *Adapter) persistNewRequestLocked(
+	call adapter.CallRequest,
+	authorization validation.AuthorizationContext,
+	payload createRequestPayload,
+	semanticKey string,
+) adapter.Result {
+	requestID := a.idx.pendingRequestCreate[call.IdempotencyKey]
+	if requestID == "" {
+		requestID = a.nextRequestIDLocked()
+	}
 	request := adapter.RequestRecord{
-		ID:                 a.nextRequestIDLocked(),
+		ID:                 requestID,
 		Intent:             strings.TrimSpace(payload.Intent),
 		Rationale:          strings.TrimSpace(payload.Rationale),
 		CreatedBy:          authorization.Subject,
@@ -154,24 +196,22 @@ func (a *Adapter) createRequestLocked(call adapter.CallRequest, authorization va
 		RefinementState:    "unrefined",
 		Revision:           1,
 	}
-	issue, err := a.persistRequestIssue(request)
+	issue, err := a.persistRequestIssue(request, call.IdempotencyKey, requestFingerprint(call, authorization))
 	if err != nil {
-		if errorsIsTransient(err) {
-			return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
+		if !errorsIsTransient(err) {
+			return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 		}
-		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
+		a.idx.pendingRequestCreate[call.IdempotencyKey] = request.ID
+		if existing, number, findErr := a.findRequestByID(request.ID); findErr == nil {
+			delete(a.idx.pendingRequestCreate, call.IdempotencyKey)
+			a.bindRequestLocked(existing, number, semanticKey)
+			return requestCreateAppliedResult(call.Operation, existing)
+		}
+		return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 	}
-	a.idx.requestIssue[request.ID] = issue.Number
-	a.idx.semanticRequests[semanticKey] = request.ID
-
-	result := newResult(call.Operation)
-	result.Outcome = adapter.OutcomeApplied
-	result.Mutation = adapter.MutationApplied
-	result.Idempotency = adapter.IdempotencyNew
-	result.Resource = cloneRequest(request)
-	result.RequestID = request.ID
-	result.RequestRevision = request.Revision
-	return result
+	delete(a.idx.pendingRequestCreate, call.IdempotencyKey)
+	a.bindRequestLocked(request, issue.Number, semanticKey)
+	return requestCreateAppliedResult(call.Operation, request)
 }
 
 func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
@@ -496,11 +536,13 @@ func (a *Adapter) queryRequestsLocked(call adapter.CallRequest) adapter.Result {
 	return result
 }
 
-func (a *Adapter) persistRequestIssue(request adapter.RequestRecord) (Issue, error) {
+func (a *Adapter) persistRequestIssue(request adapter.RequestRecord, idempotencyKey, fingerprint string) (Issue, error) {
 	body, err := encodeBody("ProtoBot request backlog record.", storedDocument{
-		Kind:      kindRequest,
-		ProjectID: a.projectID,
-		Request:   &request,
+		Kind:                 kindRequest,
+		ProjectID:            a.projectID,
+		Request:              &request,
+		CreateIdempotencyKey: idempotencyKey,
+		CreateFingerprint:    fingerprint,
 	})
 	if err != nil {
 		return Issue{}, err
@@ -513,10 +555,20 @@ func (a *Adapter) persistRequestIssue(request adapter.RequestRecord) (Issue, err
 }
 
 func (a *Adapter) updateRequestIssue(number int, request adapter.RequestRecord) error {
+	current, err := a.client.GetIssue(a.ctx, number)
+	if err != nil {
+		return err
+	}
+	prior, err := decodeBody(current.Body)
+	if err != nil {
+		return err
+	}
 	body, err := encodeBody("ProtoBot request backlog record.", storedDocument{
-		Kind:      kindRequest,
-		ProjectID: a.projectID,
-		Request:   &request,
+		Kind:                 kindRequest,
+		ProjectID:            a.projectID,
+		Request:              &request,
+		CreateIdempotencyKey: prior.CreateIdempotencyKey,
+		CreateFingerprint:    prior.CreateFingerprint,
 	})
 	if err != nil {
 		return err

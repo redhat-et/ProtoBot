@@ -26,6 +26,10 @@ type storedDocument struct {
 	LinkedRequestID    string                 `json:"linked_request_id,omitempty"`
 	LinkedChangeSetID  string                 `json:"linked_change_set_id,omitempty"`
 	LinkedPriority     string                 `json:"linked_priority,omitempty"`
+	// CreateIdempotencyKey and CreateFingerprint bind a request issue to the
+	// request.create call that produced it so a restarted adapter can replay it.
+	CreateIdempotencyKey string `json:"create_idempotency_key,omitempty"`
+	CreateFingerprint    string `json:"create_fingerprint,omitempty"`
 }
 
 const (

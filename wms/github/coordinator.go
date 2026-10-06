@@ -37,25 +37,27 @@ type materializationEntry struct {
 }
 
 type indexes struct {
-	requestIssue       map[string]int // request id -> issue number
-	workItemIssue      map[string]int // work item id -> issue number
-	materializationKey map[string]materializationEntry
-	idempotency        map[string]idempotencyEntry
-	semanticRequests   map[string]string
-	changeSets         map[string]adapter.ChangeSet
-	approvals          map[string]validation.ApprovalRecord
-	nextRequestSeq     uint64
-	nextFenceSeq       uint64
+	requestIssue         map[string]int // request id -> issue number
+	workItemIssue        map[string]int // work item id -> issue number
+	materializationKey   map[string]materializationEntry
+	idempotency          map[string]idempotencyEntry
+	semanticRequests     map[string]string
+	pendingRequestCreate map[string]string // idempotency key -> request id after UNKNOWN_MUTATION
+	changeSets           map[string]adapter.ChangeSet
+	approvals            map[string]validation.ApprovalRecord
+	nextRequestSeq       uint64
+	nextFenceSeq         uint64
 }
 
 func newIndexes() *indexes {
 	return &indexes{
-		requestIssue:       make(map[string]int),
-		workItemIssue:      make(map[string]int),
-		materializationKey: make(map[string]materializationEntry),
-		idempotency:        make(map[string]idempotencyEntry),
-		semanticRequests:   make(map[string]string),
-		changeSets:         make(map[string]adapter.ChangeSet),
-		approvals:          make(map[string]validation.ApprovalRecord),
+		requestIssue:         make(map[string]int),
+		workItemIssue:        make(map[string]int),
+		materializationKey:   make(map[string]materializationEntry),
+		idempotency:          make(map[string]idempotencyEntry),
+		semanticRequests:     make(map[string]string),
+		pendingRequestCreate: make(map[string]string),
+		changeSets:           make(map[string]adapter.ChangeSet),
+		approvals:            make(map[string]validation.ApprovalRecord),
 	}
 }

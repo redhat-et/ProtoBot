@@ -110,11 +110,20 @@ func (a *Adapter) updateWorkItemIssue(number int, item validation.WorkItem, requ
 	if priority != "" {
 		item.Priority = priority
 	}
+	sourceFingerprint := ""
+	if entry, ok := a.idx.materializationKey[item.MaterializationKey]; ok {
+		sourceFingerprint = entry.fingerprint
+	} else if issue, err := a.client.GetIssue(a.ctx, number); err == nil {
+		if doc, err := decodeBody(issue.Body); err == nil {
+			sourceFingerprint = storedSourceFingerprint(doc)
+		}
+	}
 	body, err := encodeBody("ProtoBot build work-item record.", storedDocument{
 		Kind:               kindWorkItem,
 		ProjectID:          a.projectID,
 		WorkItem:           &item,
 		MaterializationKey: item.MaterializationKey,
+		SourceFingerprint:  sourceFingerprint,
 		LinkedRequestID:    requestID,
 		LinkedChangeSetID:  changeSetID,
 		LinkedPriority:     item.Priority,

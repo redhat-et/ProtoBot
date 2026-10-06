@@ -9,11 +9,12 @@ import (
 
 // FakeClient is an in-memory GitHub Issues API used by adapter tests.
 type FakeClient struct {
-	mu            sync.Mutex
-	nextNumber    int
-	issues        map[int]Issue
-	transientLeft map[string]int // op -> remaining transient failures
-	callCounts    map[string]int
+	mu                        sync.Mutex
+	nextNumber                int
+	issues                    map[int]Issue
+	transientLeft             map[string]int // op -> remaining transient failures
+	callCounts                map[string]int
+	createSucceedThenFailLeft int // create stores the issue, then returns ErrTransient
 }
 
 // NewFakeClient constructs an empty fake GitHub Issues API.
@@ -32,6 +33,14 @@ func (f *FakeClient) InjectTransient(op string, n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.transientLeft[op] = n
+}
+
+// InjectCreateSucceedThenTransient queues n CreateIssue calls that persist the
+// issue and then return ErrTransient (lost response after apply).
+func (f *FakeClient) InjectCreateSucceedThenTransient(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createSucceedThenFailLeft = n
 }
 
 // CallCount returns how many times op was invoked.
@@ -57,11 +66,13 @@ func (f *FakeClient) GetIssueRaw(number int) (Issue, bool) {
 }
 
 func (f *FakeClient) CreateIssue(_ context.Context, input CreateIssueInput) (Issue, error) {
-	if err := f.bump("create"); err != nil {
-		return Issue{}, err
-	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.callCounts["create"]++
+	if f.transientLeft["create"] > 0 {
+		f.transientLeft["create"]--
+		f.mu.Unlock()
+		return Issue{}, fmt.Errorf("%w: injected 429", ErrTransient)
+	}
 	number := f.nextNumber
 	f.nextNumber++
 	issue := Issue{
@@ -72,6 +83,14 @@ func (f *FakeClient) CreateIssue(_ context.Context, input CreateIssueInput) (Iss
 		State:  "open",
 	}
 	f.issues[number] = issue
+	lostResponse := f.createSucceedThenFailLeft > 0
+	if lostResponse {
+		f.createSucceedThenFailLeft--
+	}
+	f.mu.Unlock()
+	if lostResponse {
+		return Issue{}, fmt.Errorf("%w: lost response after create", ErrTransient)
+	}
 	return cloneIssue(issue), nil
 }
 

@@ -171,8 +171,11 @@ func (a *Adapter) checkMaterializationLocked(request validation.Request) (*adapt
 	if request.Payload.WorkItem == nil {
 		return nil, nil
 	}
-	entry, exists := a.idx.materializationKey[request.MaterializationKey]
-	if !exists {
+	entry, rejection := a.loadMaterializationEntryLocked(request.MaterializationKey)
+	if rejection != nil {
+		return nil, rejection
+	}
+	if entry == nil {
 		return nil, nil
 	}
 	if rejection := validation.MaterializationTargetRejection(request, request.Payload.WorkItem); rejection != nil {
@@ -198,6 +201,26 @@ func (a *Adapter) checkMaterializationLocked(request validation.Request) (*adapt
 	}
 	result := markReplayed(cloneResult(entry.result))
 	return &result, nil
+}
+
+// loadMaterializationEntryLocked returns the in-process binding, or rebinds from
+// a durable GitHub scan when the process-local index has no entry.
+func (a *Adapter) loadMaterializationEntryLocked(key string) (*materializationEntry, *validation.Rejection) {
+	if entry, ok := a.idx.materializationKey[key]; ok {
+		copied := entry
+		return &copied, nil
+	}
+	item, doc, number, err := a.findWorkItemByMaterializationKey(key)
+	if err != nil {
+		if errorsIsTransient(err) {
+			return nil, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)
+		}
+		return nil, nil
+	}
+	replay := materializationReplayResult(item)
+	a.bindWorkItemLocked(item, doc, number, replay)
+	entry := a.idx.materializationKey[key]
+	return &entry, nil
 }
 
 func (a *Adapter) applyLifecycleRequest(
@@ -230,23 +253,31 @@ func (a *Adapter) applyLifecycleRequest(
 			if item.State == validation.StateBlocked {
 				item.BlockReason = validation.ReadinessFailure(item.Readiness)
 			}
-			issue, err := a.persistWorkItemIssue(item)
+			sourceFingerprint := ""
+			if decision.MaterializationReservation != nil {
+				sourceFingerprint = decision.MaterializationReservation.SourceFingerprint
+			}
+			issue, err := a.persistWorkItemIssue(item, sourceFingerprint)
 			if err != nil {
 				if errorsIsTransient(err) {
-					return unknownMutationResult(operation, "GitHub write result could not be established.")
+					if !a.rebindMaterializationAfterUnknown(request.MaterializationKey, sourceFingerprint, &result) {
+						return unknownMutationResult(operation, "GitHub write result could not be established.")
+					}
+					break
 				}
 				return rejectedResult(operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 			}
-			a.idx.workItemIssue[item.ID] = issue.Number
 			result.WorkItemID = item.ID
 			result.WorkItemState = item.State
 			result.ContractVersion = item.ContractVersion
 			result.Resource = cloneWorkItem(item)
-			a.idx.materializationKey[request.MaterializationKey] = materializationEntry{
-				fingerprint: decision.MaterializationReservation.SourceFingerprint,
-				result:      cloneResult(result),
-				issueNumber: issue.Number,
-			}
+			a.bindWorkItemLocked(item, storedDocument{
+				Kind:               kindWorkItem,
+				ProjectID:          a.projectID,
+				WorkItem:           &item,
+				MaterializationKey: request.MaterializationKey,
+				SourceFingerprint:  sourceFingerprint,
+			}, issue.Number, result)
 		case validation.OperationClaim:
 			updated := cloneWorkItem(*current)
 			// CAS: expected version already enforced by Evaluate; coordinator lock
@@ -281,12 +312,13 @@ func (a *Adapter) applyLifecycleRequest(
 	return result
 }
 
-func (a *Adapter) persistWorkItemIssue(item validation.WorkItem) (Issue, error) {
+func (a *Adapter) persistWorkItemIssue(item validation.WorkItem, sourceFingerprint string) (Issue, error) {
 	body, err := encodeBody("ProtoBot build work-item record.", storedDocument{
 		Kind:               kindWorkItem,
 		ProjectID:          a.projectID,
 		WorkItem:           &item,
 		MaterializationKey: item.MaterializationKey,
+		SourceFingerprint:  sourceFingerprint,
 	})
 	if err != nil {
 		return Issue{}, err
@@ -296,6 +328,27 @@ func (a *Adapter) persistWorkItemIssue(item validation.WorkItem) (Issue, error) 
 		Body:   body,
 		Labels: []string{LabelWorkItem},
 	})
+}
+
+// rebindMaterializationAfterUnknown scans for a durable issue that may have been
+// created despite a transient CreateIssue failure. On match with the expected
+// source fingerprint it binds indexes and fills result; returns false when no
+// matching reservation is found.
+func (a *Adapter) rebindMaterializationAfterUnknown(key, wantFingerprint string, result *adapter.Result) bool {
+	item, doc, number, err := a.findWorkItemByMaterializationKey(key)
+	if err != nil {
+		return false
+	}
+	stored := storedSourceFingerprint(doc)
+	if wantFingerprint != "" && stored != "" && wantFingerprint != stored {
+		return false
+	}
+	result.WorkItemID = item.ID
+	result.WorkItemState = item.State
+	result.ContractVersion = item.ContractVersion
+	result.Resource = cloneWorkItem(item)
+	a.bindWorkItemLocked(item, doc, number, *result)
+	return true
 }
 
 func (a *Adapter) tryLoadWorkItem(id string) (validation.WorkItem, error) {

@@ -76,9 +76,12 @@ type RetryingClient struct {
 	Sleep       func(time.Duration)
 }
 
-// CreateIssue retries transient failures.
+// CreateIssue does not retry. Create is not idempotent: an ambiguous
+// transient failure may mean GitHub already applied the write, so a blind
+// retry would orphan a second issue. The adapter surfaces UNKNOWN_MUTATION
+// and reconciles via ListIssues before creating again.
 func (c *RetryingClient) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue, error) {
-	return retryCall(c, func() (Issue, error) { return c.Inner.CreateIssue(ctx, input) })
+	return c.Inner.CreateIssue(ctx, input)
 }
 
 // GetIssue retries transient failures.
