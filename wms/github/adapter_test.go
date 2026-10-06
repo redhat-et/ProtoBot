@@ -1154,6 +1154,7 @@ func newTestAdapterWithClient(t *testing.T, client Client) *Adapter {
 		ProjectID:           "fixture-project",
 		Gate:                gate,
 		Client:              client,
+		Coordinator:         &InProcessCoordinator{},
 		Now:                 func() time.Time { return testTime },
 		LeaseDuration:       15 * time.Minute,
 		MaterializerSubject: "materializer-1",
@@ -1162,6 +1163,25 @@ func newTestAdapterWithClient(t *testing.T, client Client) *Adapter {
 		t.Fatal(err)
 	}
 	return wms
+}
+
+// TestNewRequiresExplicitCoordinator guards against silently reintroducing
+// an in-process mutex as a default Coordinator: that default is only safe
+// for a single active adapter instance, and a caller that forgets to say so
+// should get a startup error, not an adapter that looks coordinated but
+// isn't once a second process (or replica) targets the same project.
+func TestNewRequiresExplicitCoordinator(t *testing.T) {
+	gate := adapter.StaticGate{
+		"job-site": testAuthorization("job-site", validation.RoleJobSite, validation.OperationClaim),
+	}
+	_, err := New(Config{
+		ProjectID: "fixture-project",
+		Gate:      gate,
+		Client:    NewFakeClient(),
+	})
+	if err == nil {
+		t.Fatal("New with a nil Coordinator = nil error, want an error")
+	}
 }
 
 func testAuthorization(subject string, role validation.Role, operations ...validation.Operation) validation.AuthorizationContext {

@@ -12,9 +12,18 @@ import (
 
 // Config supplies project identity, Gate, GitHub client, and lease policy.
 type Config struct {
-	ProjectID           string
-	Gate                adapter.Gate
-	Client              Client
+	ProjectID string
+	Gate      adapter.Gate
+	Client    Client
+	// Coordinator serializes claims and other authoritative mutations
+	// against the GitHub backend, which has no native conditional-update
+	// primitive of its own (see Client.UpdateIssue). There is no safe
+	// default: pass &InProcessCoordinator{} only when this Adapter is the
+	// sole active instance for ProjectID (single-player mode); a
+	// multi-player or web deployment must supply a Coordinator backed by a
+	// shared durable store instead (docs/architecture.md, "Claim
+	// coordinator"). New returns an error when Coordinator is nil rather
+	// than silently choosing one.
 	Coordinator         Coordinator
 	Now                 func() time.Time
 	LeaseDuration       time.Duration
@@ -47,7 +56,7 @@ func New(config Config) (*Adapter, error) {
 		return nil, errors.New("github client must not be nil")
 	}
 	if config.Coordinator == nil {
-		config.Coordinator = &InProcessCoordinator{}
+		return nil, errors.New("coordinator must not be nil: pass &InProcessCoordinator{} only when this is the sole active adapter instance for the project, or a shared durable coordinator for multi-player/web deployments")
 	}
 	if config.Now == nil {
 		config.Now = time.Now

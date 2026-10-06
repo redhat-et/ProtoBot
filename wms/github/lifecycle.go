@@ -286,8 +286,15 @@ func (a *Adapter) applyLifecycleRequest(
 			}, issue.Number, result)
 		case validation.OperationClaim:
 			updated := cloneWorkItem(*current)
-			// CAS: expected version already enforced by Evaluate; coordinator lock
-			// serializes concurrent claims against the same GitHub-backed item.
+			// Evaluate already enforced the expected state/contract version
+			// against the snapshot read at the top of executeLifecycleLocked,
+			// and the Coordinator lock held for that whole call serializes this
+			// read-evaluate-write sequence against every other claim that
+			// shares the same Coordinator. GitHub Issues has no conditional-
+			// update primitive of its own (UpdateIssueInput carries no
+			// precondition), so this guarantee holds only across Adapter
+			// instances that share one Coordinator (see Config.Coordinator) and
+			// does not detect an issue edited outside the adapter.
 			updated.State = decision.After.State
 			updated.ContractVersion = decision.After.ContractVersion
 			updated.Reconciliation = validation.ReconciliationEvidence{}
