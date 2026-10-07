@@ -299,6 +299,11 @@ def _has_per_case_semantic_scores(results: Mapping[str, Any] | None) -> bool:
     return False
 
 
+def _is_populated_mapping(value: Any) -> bool:
+    """Return True if value is a non-empty Mapping."""
+    return isinstance(value, Mapping) and bool(value)
+
+
 def calibration_complete(
     sample: Mapping[str, Any],
     artifact: Mapping[str, Any],
@@ -319,11 +324,10 @@ def calibration_complete(
         return False
     if check_agreement_payload(scores, agreement):
         return False
-    if agreement.get("reviewer_deterministic_judges") is None:
+    if not _is_populated_mapping(agreement.get("reviewer_deterministic_judges")):
         return False
-    if (
-        _has_per_case_semantic_scores(results)
-        and agreement.get("reviewer_semantic_judges") is None
+    if _has_per_case_semantic_scores(results) and not _is_populated_mapping(
+        agreement.get("reviewer_semantic_judges")
     ):
         return False
     return not check_adjudication_notes(agreement, adjudication)
@@ -491,17 +495,25 @@ def check_trusted_gate(
         case_ids = [case["id"] for case in _as_list(sample.get("cases"))]
         if scores_complete(scores, case_ids):
             errors.extend(check_agreement_payload(scores, agreement))
-            if agreement.get("reviewer_deterministic_judges") is None:
+            det_judges = agreement.get("reviewer_deterministic_judges")
+            if det_judges is None:
                 errors.append(
                     "agreement.yaml must record non-null reviewer_deterministic_judges"
                 )
-            if (
-                _has_per_case_semantic_scores(results)
-                and agreement.get("reviewer_semantic_judges") is None
-            ):
+            elif not _is_populated_mapping(det_judges):
                 errors.append(
-                    "agreement.yaml must record non-null reviewer_semantic_judges"
+                    "agreement.yaml reviewer_deterministic_judges must be a non-empty mapping"
                 )
+            if _has_per_case_semantic_scores(results):
+                sem_judges = agreement.get("reviewer_semantic_judges")
+                if sem_judges is None:
+                    errors.append(
+                        "agreement.yaml must record non-null reviewer_semantic_judges"
+                    )
+                elif not _is_populated_mapping(sem_judges):
+                    errors.append(
+                        "agreement.yaml reviewer_semantic_judges must be a non-empty mapping"
+                    )
             errors.extend(check_adjudication_notes(agreement, adjudication))
     calibration = results.get("calibration")
     if isinstance(calibration, Mapping):
@@ -629,7 +641,19 @@ def main(argv: list[str] | None = None) -> int:
         for error in errors:
             print(f"  - {error}")
         return 1
-    print("calibration check passed: sample recorded, baseline not trusted")
+    cal_dir = calibration_dir(args.root)
+    artifact = load_yaml(cal_dir / "artifact.yaml")
+    sample = load_yaml(cal_dir / "sample.yaml")
+    scores = load_yaml(cal_dir / "scores.yaml")
+    agreement = load_yaml(cal_dir / "agreement.yaml")
+    adjudication = load_yaml(cal_dir / "adjudication.yaml")
+    results = load_yaml(baseline_dir(args.root) / "results.yaml")
+    if artifact.get("trusted") is True and calibration_complete(
+        sample, artifact, scores, agreement, adjudication, results
+    ):
+        print("calibration check passed: calibration complete, baseline trusted")
+    else:
+        print("calibration check passed: sample recorded, baseline not trusted")
     return 0
 
 

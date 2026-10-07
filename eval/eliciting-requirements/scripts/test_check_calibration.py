@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import io
 import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -319,6 +321,62 @@ class TrustedGateTests(unittest.TestCase):
             )
         )
 
+    def test_trusted_with_placeholder_deterministic_judges_fails(self) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+            ]
+        }
+        for placeholder in (False, [], {}, "placeholder"):
+            agreement = {
+                "status": "complete",
+                "reviewer_reviewer": cc.agreement_from_scores(scores),
+                "reviewer_deterministic_judges": placeholder,
+                "reviewer_semantic_judges": None,
+            }
+            self.assertFalse(
+                cc.calibration_complete(
+                    sample,
+                    artifact,
+                    scores,
+                    agreement,
+                    {"status": "complete", "notes": []},
+                    {"calibration": {"status": "complete"}},
+                )
+            )
+            errors = cc.check_trusted_gate(
+                artifact,
+                sample,
+                scores,
+                agreement,
+                {"status": "complete", "notes": []},
+                {"calibration": {"status": "complete"}},
+                {"status": "trusted", "run": {"human_calibration": "trusted"}},
+            )
+            self.assertTrue(any("trusted: true" in error for error in errors))
+            self.assertTrue(
+                any(
+                    "agreement.yaml reviewer_deterministic_judges must be a non-empty mapping"
+                    in error
+                    for error in errors
+                ),
+                f"Failed for placeholder {placeholder!r}: {errors}",
+            )
+
     def test_trusted_with_complete_status_and_semantic_scores_but_null_semantic_judges_fails(
         self,
     ) -> None:
@@ -363,6 +421,68 @@ class TrustedGateTests(unittest.TestCase):
                 for error in errors
             )
         )
+
+    def test_trusted_with_placeholder_semantic_judges_fails(self) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+            ]
+        }
+        for placeholder in (False, [], {}, "placeholder"):
+            agreement = {
+                "status": "complete",
+                "reviewer_reviewer": cc.agreement_from_scores(scores),
+                "reviewer_deterministic_judges": {"pass_rate": 1.0},
+                "reviewer_semantic_judges": placeholder,
+            }
+            self.assertFalse(
+                cc.calibration_complete(
+                    sample,
+                    artifact,
+                    scores,
+                    agreement,
+                    {"status": "complete", "notes": []},
+                    {
+                        "calibration": {"status": "complete"},
+                        "per_case_semantic_scores": True,
+                    },
+                )
+            )
+            errors = cc.check_trusted_gate(
+                artifact,
+                sample,
+                scores,
+                agreement,
+                {"status": "complete", "notes": []},
+                {
+                    "calibration": {"status": "complete"},
+                    "per_case_semantic_scores": True,
+                },
+                {"status": "trusted", "run": {"human_calibration": "trusted"}},
+            )
+            self.assertTrue(any("trusted: true" in error for error in errors))
+            self.assertTrue(
+                any(
+                    "agreement.yaml reviewer_semantic_judges must be a non-empty mapping"
+                    in error
+                    for error in errors
+                ),
+                f"Failed for placeholder {placeholder!r}: {errors}",
+            )
 
     def test_trusted_with_disagreements_and_empty_adjudication_notes_fails(
         self,
@@ -603,6 +723,79 @@ class SampleMutationTests(unittest.TestCase):
             any("baselines/v1/manifest.yaml is missing" in e for e in errors),
             errors,
         )
+
+
+class MainTests(unittest.TestCase):
+    def test_main_live_passes_and_reports_untrusted(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cc.main(["--root", str(EVAL_ROOT)])
+        self.assertEqual(code, 0)
+        self.assertIn(
+            "calibration check passed: sample recorded, baseline not trusted",
+            buf.getvalue(),
+        )
+
+    def test_main_complete_and_trusted_reports_trusted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            shutil.copytree(EVAL_ROOT, tmp_root, dirs_exist_ok=True)
+            cal_dir = cc.calibration_dir(tmp_root)
+            sample = cc.load_yaml(cal_dir / "sample.yaml")
+            case_ids = [c["id"] for c in sample["cases"]]
+            scores = {
+                "reviewers": [
+                    {
+                        "id": "reviewer-a",
+                        "identity": "reviewer-1",
+                        "cases": [_filled_score(cid, 4, 4) for cid in case_ids],
+                    },
+                    {
+                        "id": "reviewer-b",
+                        "identity": "reviewer-2",
+                        "cases": [_filled_score(cid, 4, 4) for cid in case_ids],
+                    },
+                ]
+            }
+            _dump(cal_dir / "scores.yaml", scores)
+            agreement = {
+                "status": "complete",
+                "reviewer_reviewer": cc.agreement_from_scores(scores),
+                "reviewer_deterministic_judges": {"pass_rate": 1.0},
+                "reviewer_semantic_judges": None,
+            }
+            _dump(cal_dir / "agreement.yaml", agreement)
+            adjudication = {"status": "complete", "notes": []}
+            _dump(cal_dir / "adjudication.yaml", adjudication)
+            artifact = cc.load_yaml(cal_dir / "artifact.yaml")
+            artifact["status"] = "complete"
+            artifact["trusted"] = True
+            _dump(cal_dir / "artifact.yaml", artifact)
+            results = cc.load_yaml(cc.baseline_dir(tmp_root) / "results.yaml")
+            results["calibration"] = {"status": "complete"}
+            _dump(cc.baseline_dir(tmp_root) / "results.yaml", results)
+            manifest = cc.load_yaml(cc.baseline_dir(tmp_root) / "manifest.yaml")
+            manifest["status"] = "trusted"
+            manifest["run"]["human_calibration"] = "trusted"
+            _dump(cc.baseline_dir(tmp_root) / "manifest.yaml", manifest)
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = cc.main(["--root", str(tmp_root)])
+            self.assertEqual(code, 0)
+            self.assertIn(
+                "calibration check passed: calibration complete, baseline trusted",
+                buf.getvalue(),
+            )
+
+    def test_main_with_errors_prints_failures_and_exits_one(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = cc.main(["--root", str(tmp_root)])
+            self.assertEqual(code, 1)
+            self.assertIn("calibration check failed:", buf.getvalue())
 
 
 if __name__ == "__main__":
