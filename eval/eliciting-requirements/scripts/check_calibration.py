@@ -226,12 +226,86 @@ def check_agreement_payload(
     return errors
 
 
+def _note_matches_case(note: Any, case_id: str) -> bool:
+    if isinstance(note, Mapping):
+        return bool(
+            note.get("id") == case_id
+            or note.get("case_id") == case_id
+            or note.get("case") == case_id
+            or case_id in str(note)
+        )
+    if isinstance(note, str) and case_id in note:
+        return True
+    return case_id in str(note)
+
+
+def check_adjudication_notes(
+    agreement: Mapping[str, Any], adjudication: Mapping[str, Any]
+) -> list[str]:
+    """Ensure critical-failure disagreements are addressed in adjudication."""
+    errors: list[str] = []
+    rev_rev = agreement.get("reviewer_reviewer")
+    if not isinstance(rev_rev, Mapping):
+        return errors
+    crit = rev_rev.get("critical_failure")
+    if not isinstance(crit, Mapping):
+        return errors
+    disagreements = _as_list(crit.get("disagreements"))
+    if not disagreements:
+        return errors
+    notes = _as_list(adjudication.get("notes"))
+    if not notes:
+        errors.append(
+            "adjudication.yaml must record notes for critical failure disagreements"
+        )
+        return errors
+    for item in disagreements:
+        case_id = item.get("id") if isinstance(item, Mapping) else str(item)
+        if not case_id:
+            continue
+        if not any(_note_matches_case(note, case_id) for note in notes):
+            errors.append(
+                f"adjudication.yaml notes must address disagreement for {case_id}"
+            )
+    return errors
+
+
+def _has_per_case_semantic_scores(results: Mapping[str, Any] | None) -> bool:
+    """Return True if results include per-case semantic judge scores."""
+    if not isinstance(results, Mapping):
+        return False
+    if results.get("per_case_semantic_scores") or results.get("semantic_scores"):
+        return True
+    case_outputs = results.get("case_outputs")
+    if isinstance(case_outputs, Mapping) and (
+        case_outputs.get("per_case_semantic_scores")
+        or case_outputs.get("semantic_scores")
+    ):
+        return True
+    for key in ("development", "regression"):
+        part = results.get(key)
+        if isinstance(part, Mapping):
+            if part.get("per_case_semantic_scores") or part.get("semantic_scores"):
+                return True
+            sem = part.get("semantic_quality")
+            if isinstance(sem, Mapping) and sem.get("per_case"):
+                return True
+            per_case = part.get("per_case")
+            if isinstance(per_case, Mapping) and any(
+                isinstance(v, Mapping) and "semantic_quality" in v
+                for v in per_case.values()
+            ):
+                return True
+    return False
+
+
 def calibration_complete(
     sample: Mapping[str, Any],
     artifact: Mapping[str, Any],
     scores: Mapping[str, Any],
     agreement: Mapping[str, Any],
     adjudication: Mapping[str, Any],
+    results: Mapping[str, Any] | None = None,
 ) -> bool:
     """Return True when human scoring and adjudication have finished."""
     if artifact.get("status") != "complete":
@@ -243,7 +317,16 @@ def calibration_complete(
     case_ids = [case["id"] for case in _as_list(sample.get("cases"))]
     if not scores_complete(scores, case_ids):
         return False
-    return not check_agreement_payload(scores, agreement)
+    if check_agreement_payload(scores, agreement):
+        return False
+    if agreement.get("reviewer_deterministic_judges") is None:
+        return False
+    if (
+        _has_per_case_semantic_scores(results)
+        and agreement.get("reviewer_semantic_judges") is None
+    ):
+        return False
+    return not check_adjudication_notes(agreement, adjudication)
 
 
 def cohens_kappa(left: list[int], right: list[int]) -> float:
@@ -398,7 +481,9 @@ def check_trusted_gate(
 ) -> list[str]:
     """Forbid marking the baseline trusted before calibration completes."""
     errors: list[str] = []
-    complete = calibration_complete(sample, artifact, scores, agreement, adjudication)
+    complete = calibration_complete(
+        sample, artifact, scores, agreement, adjudication, results
+    )
     if artifact.get("trusted") is True and not complete:
         errors.append(
             "artifact.yaml sets trusted: true before scoring and adjudication complete"
@@ -406,6 +491,18 @@ def check_trusted_gate(
         case_ids = [case["id"] for case in _as_list(sample.get("cases"))]
         if scores_complete(scores, case_ids):
             errors.extend(check_agreement_payload(scores, agreement))
+            if agreement.get("reviewer_deterministic_judges") is None:
+                errors.append(
+                    "agreement.yaml must record non-null reviewer_deterministic_judges"
+                )
+            if (
+                _has_per_case_semantic_scores(results)
+                and agreement.get("reviewer_semantic_judges") is None
+            ):
+                errors.append(
+                    "agreement.yaml must record non-null reviewer_semantic_judges"
+                )
+            errors.extend(check_adjudication_notes(agreement, adjudication))
     calibration = results.get("calibration")
     if isinstance(calibration, Mapping):
         status = str(calibration.get("status", "pending"))
@@ -465,7 +562,7 @@ def check_score_sheet(
         for item in _as_list(reviewer.get("cases")):
             false_ready = item.get("false_ready")
             critical = item.get("critical_failure")
-            if false_ready is True and critical is False:
+            if false_ready is True and critical is not True:
                 errors.append(
                     f"{reviewer_id} {item.get('id')} sets false_ready without "
                     "critical_failure"

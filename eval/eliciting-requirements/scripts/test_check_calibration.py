@@ -273,6 +273,186 @@ class TrustedGateTests(unittest.TestCase):
             any("does not match computed agreement" in error for error in errors)
         )
 
+    def test_trusted_with_complete_status_but_null_deterministic_judges_fails(
+        self,
+    ) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+            ]
+        }
+        agreement = {
+            "status": "complete",
+            "reviewer_reviewer": cc.agreement_from_scores(scores),
+            "reviewer_deterministic_judges": None,
+            "reviewer_semantic_judges": None,
+        }
+        errors = cc.check_trusted_gate(
+            artifact,
+            sample,
+            scores,
+            agreement,
+            {"status": "complete", "notes": []},
+            {"calibration": {"status": "complete"}},
+            {"status": "trusted", "run": {"human_calibration": "trusted"}},
+        )
+        self.assertTrue(any("trusted: true" in error for error in errors))
+        self.assertTrue(
+            any(
+                "agreement.yaml must record non-null reviewer_deterministic_judges"
+                in error
+                for error in errors
+            )
+        )
+
+    def test_trusted_with_complete_status_and_semantic_scores_but_null_semantic_judges_fails(
+        self,
+    ) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+            ]
+        }
+        agreement = {
+            "status": "complete",
+            "reviewer_reviewer": cc.agreement_from_scores(scores),
+            "reviewer_deterministic_judges": {"pass_rate": 1.0},
+            "reviewer_semantic_judges": None,
+        }
+        errors = cc.check_trusted_gate(
+            artifact,
+            sample,
+            scores,
+            agreement,
+            {"status": "complete", "notes": []},
+            {"calibration": {"status": "complete"}, "per_case_semantic_scores": True},
+            {"status": "trusted", "run": {"human_calibration": "trusted"}},
+        )
+        self.assertTrue(any("trusted: true" in error for error in errors))
+        self.assertTrue(
+            any(
+                "agreement.yaml must record non-null reviewer_semantic_judges" in error
+                for error in errors
+            )
+        )
+
+    def test_trusted_with_disagreements_and_empty_adjudication_notes_fails(
+        self,
+    ) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4, false_ready=True)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4, false_ready=False)],
+                },
+            ]
+        }
+        agreement = {
+            "status": "complete",
+            "reviewer_reviewer": cc.agreement_from_scores(scores),
+            "reviewer_deterministic_judges": {"pass_rate": 1.0},
+            "reviewer_semantic_judges": None,
+        }
+        errors = cc.check_trusted_gate(
+            artifact,
+            sample,
+            scores,
+            agreement,
+            {"status": "complete", "notes": []},
+            {"calibration": {"status": "complete"}},
+            {"status": "trusted", "run": {"human_calibration": "trusted"}},
+        )
+        self.assertTrue(any("trusted: true" in error for error in errors))
+        self.assertTrue(
+            any(
+                "adjudication.yaml must record notes for critical failure disagreements"
+                in error
+                for error in errors
+            )
+        )
+
+    def test_trusted_with_complete_status_and_addressed_disagreements_passes(
+        self,
+    ) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4, false_ready=True)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4, false_ready=False)],
+                },
+            ]
+        }
+        agreement = {
+            "status": "complete",
+            "reviewer_reviewer": cc.agreement_from_scores(scores),
+            "reviewer_deterministic_judges": {"pass_rate": 1.0},
+            "reviewer_semantic_judges": None,
+        }
+        adjudication = {
+            "status": "complete",
+            "notes": ["c1: reviewer-a false_ready flag adjudicated as valid defect"],
+        }
+        errors = cc.check_trusted_gate(
+            artifact,
+            sample,
+            scores,
+            agreement,
+            adjudication,
+            {"calibration": {"status": "complete"}},
+            {"status": "trusted", "run": {"human_calibration": "trusted"}},
+        )
+        self.assertEqual(errors, [])
+
     def test_human_calibration_not_trusted_does_not_error(self) -> None:
         sample = {
             "cases": [{"id": "c1"}],
@@ -362,6 +542,18 @@ class SampleMutationTests(unittest.TestCase):
         scores = cc.load_yaml(scores_path)
         scores["reviewers"][0]["cases"][0]["false_ready"] = True
         scores["reviewers"][0]["cases"][0]["critical_failure"] = False
+        _dump(scores_path, scores)
+        errors = cc.collect_errors(self.tmpdir)
+        self.assertTrue(
+            any("false_ready without critical_failure" in error for error in errors),
+            errors,
+        )
+
+    def test_score_sheet_false_ready_with_null_critical_is_error(self) -> None:
+        scores_path = cc.calibration_dir(self.tmpdir) / "scores.yaml"
+        scores = cc.load_yaml(scores_path)
+        scores["reviewers"][0]["cases"][0]["false_ready"] = True
+        scores["reviewers"][0]["cases"][0]["critical_failure"] = None
         _dump(scores_path, scores)
         errors = cc.collect_errors(self.tmpdir)
         self.assertTrue(
