@@ -53,10 +53,11 @@ true.
 
 ## After both reviewers score
 
-1. Run
-   `python3 eval/eliciting-requirements/scripts/check_calibration.py`.
-2. Store reviewer-reviewer agreement in `agreement.yaml`. Compare
+1. Store reviewer-reviewer agreement in `agreement.yaml`. Compare
    critical-failure flags separately from the 1-5 scores.
+2. Run
+   `python3 eval/eliciting-requirements/scripts/check_calibration.py`
+   to verify scores and computed agreement.
 3. Compare each reviewer with the deterministic judges and, when
    per-case semantic scores are available from the harness run, with
    the semantic judges.

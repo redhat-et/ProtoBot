@@ -54,6 +54,8 @@ scores_path: calibration/v1/scores.yaml
 agreement_path: calibration/v1/agreement.yaml
 adjudication_path: calibration/v1/adjudication.yaml
 protocol_path: calibration/v1/protocol.md
+# Interim: confirmed failures route to dataset/regression/ until a runner
+# executes this partition.
 held_out_path: dataset/held-out
 note: >-
   This artifact records sample selection, reviewer slots, and the v1

@@ -262,6 +262,7 @@ def cohens_kappa(left: list[int], right: list[int]) -> float:
 
 
 def percent_agreement(left: list[Any], right: list[Any]) -> float:
+    """Return the proportion of matching elements between two equal-length lists."""
     if len(left) != len(right) or not left:
         raise ValueError("percent agreement requires two non-empty equal-length lists")
     return sum(a == b for a, b in zip(left, right, strict=True)) / len(left)
