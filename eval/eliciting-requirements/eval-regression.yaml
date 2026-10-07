@@ -4,7 +4,8 @@ description: >
   Known regression evaluation for the eliciting-requirements skill. Run this
   configuration separately from the visible development corpus. The
   independent held-out corpus lives in dataset/held-out/ and stays empty
-  until calibration confirms a failure.
+  until a harness config executes that partition; confirmed calibration
+  failures are added to dataset/regression/ until then.
 
 execution:
   mode: case

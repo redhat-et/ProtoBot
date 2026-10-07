@@ -415,8 +415,8 @@ def check_trusted_gate(
             errors.append(
                 "results.yaml marks calibration complete before scoring finishes"
             )
-    human = str(manifest.get("run", {}).get("human_calibration", "")).lower()
-    if "trusted" in human and not complete:
+    human = str(manifest.get("run", {}).get("human_calibration", "")).strip().lower()
+    if human == "trusted" and not complete:
         errors.append("baselines/v1 manifest claims trusted calibration too early")
     if manifest.get("status") == "trusted" and not complete:
         errors.append("baselines/v1 status is trusted before calibration completes")

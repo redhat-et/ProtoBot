@@ -9,9 +9,9 @@ This directory contains the Agent Eval Harness configuration for
   `input.yaml`, `annotations.yaml`, and property-based `reference.md`.
 - `dataset/regression/` contains known regression cases. Run them with
   `eval-regression.yaml`; do not use them to tune the visible corpus.
-- `dataset/held-out/` is the independently curated held-out corpus. It is
-  empty until calibration confirms a failure. Confirmed failures route to
-  `dataset/regression/` until a harness config executes this partition.
+- `dataset/held-out/` is the independently curated held-out corpus. The
+  partition stays empty until a harness runner executes it, and confirmed
+  calibration failures are added to `dataset/regression/` until then.
 - `calibration/v1/` records the human-calibration sample and reviewer slots
   before scoring. Independent scoring, agreement, and adjudication remain
   pending; the v1 baseline is not trusted until that work completes.

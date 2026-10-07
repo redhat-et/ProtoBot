@@ -273,6 +273,56 @@ class TrustedGateTests(unittest.TestCase):
             any("does not match computed agreement" in error for error in errors)
         )
 
+    def test_human_calibration_not_trusted_does_not_error(self) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": False, "status": "pending-human-scoring"}
+        scores = {
+            "reviewers": [
+                {"id": "reviewer-a", "identity": cc.PENDING_IDENTITY, "cases": []},
+                {"id": "reviewer-b", "identity": cc.PENDING_IDENTITY, "cases": []},
+            ]
+        }
+        for value in (
+            "not trusted",
+            "not trusted; sample recorded in calibration/v1/",
+            "untrusted",
+        ):
+            errors = cc.check_trusted_gate(
+                artifact,
+                sample,
+                scores,
+                {"status": "pending-scores"},
+                {"status": "pending-scores"},
+                {"calibration": {"status": "pending"}},
+                {
+                    "status": "live-evaluation-snapshot",
+                    "run": {"human_calibration": value},
+                },
+            )
+            self.assertEqual(errors, [])
+
+        errors_trusted = cc.check_trusted_gate(
+            artifact,
+            sample,
+            scores,
+            {"status": "pending-scores"},
+            {"status": "pending-scores"},
+            {"calibration": {"status": "pending"}},
+            {
+                "status": "live-evaluation-snapshot",
+                "run": {"human_calibration": "trusted"},
+            },
+        )
+        self.assertTrue(
+            any(
+                "claims trusted calibration too early" in error
+                for error in errors_trusted
+            )
+        )
+
 
 class SampleMutationTests(unittest.TestCase):
     def setUp(self) -> None:
