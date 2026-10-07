@@ -62,12 +62,15 @@ true.
    the semantic judges.
 4. Record adjudication notes in `adjudication.yaml`. Identify rubric,
    judge, skill, or corpus corrections.
-5. Add confirmed failures to `dataset/held-out/` before changing the
+5. Run
+   `python3 eval/eliciting-requirements/scripts/check_calibration.py`
+   to verify scores, agreement, and adjudication artifacts.
+6. Add confirmed failures to `dataset/regression/` before changing the
    skill or promoting a new baseline.
-6. Keep `baselines/v1/` unchanged as the prior snapshot. A later
+7. Keep `baselines/v1/` unchanged as the prior snapshot. A later
    trusted baseline is a new directory.
 
-Do not set `trusted: true` until steps 1-5 are complete.
+Do not set `trusted: true` until steps 1-6 are complete.
 
 ## Sample coverage
 

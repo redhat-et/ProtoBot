@@ -39,7 +39,7 @@ reviewers:
     identity: pending-maintainer-assignment
     assigned_at: null
 prior_baseline:
-  path: eval/eliciting-requirements/baselines/v1
+  path: baselines/v1
   retained: true
   status: live-evaluation-snapshot
 per_case_evidence:

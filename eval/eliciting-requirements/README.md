@@ -10,8 +10,8 @@ This directory contains the Agent Eval Harness configuration for
 - `dataset/regression/` contains known regression cases. Run them with
   `eval-regression.yaml`; do not use them to tune the visible corpus.
 - `dataset/held-out/` is the independently curated held-out corpus. It is
-  empty until calibration confirms a failure. Confirmed failures are added
-  there before the skill changes or a new baseline is promoted.
+  empty until calibration confirms a failure. Confirmed failures route to
+  `dataset/regression/` until a harness config executes this partition.
 - `calibration/v1/` records the human-calibration sample and reviewer slots
   before scoring. Independent scoring, agreement, and adjudication remain
   pending; the v1 baseline is not trusted until that work completes.
@@ -43,9 +43,7 @@ From the repository root, install or load Agent Eval Harness and run:
 ```
 
 Use `/eval-dataset` only to add reviewed cases. A confirmed failure becomes a
-new case in `dataset/held-out/` before a skill change is accepted. Known
-repeats of already-recorded defects continue to land in
-`dataset/regression/`.
+new case in `dataset/regression/` before a skill change is accepted.
 
 ## Baselines
 

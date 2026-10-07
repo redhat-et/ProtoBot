@@ -155,6 +155,124 @@ class TrustedGateTests(unittest.TestCase):
         )
         self.assertTrue(any("trusted: true" in error for error in errors))
 
+    def test_scores_complete_rejects_bool_and_out_of_range(self) -> None:
+        case_ids = ["c1"]
+
+        def _make_scores(
+            sem: Any, disc: Any, id_a: str = "rev-a", id_b: str = "rev-b"
+        ) -> dict[str, Any]:
+            return {
+                "reviewers": [
+                    {
+                        "id": "reviewer-a",
+                        "identity": id_a,
+                        "cases": [_filled_score("c1", sem, disc)],
+                    },
+                    {
+                        "id": "reviewer-b",
+                        "identity": id_b,
+                        "cases": [_filled_score("c1", sem, disc)],
+                    },
+                ]
+            }
+
+        # Valid scores 1-5 with distinct identities pass
+        self.assertTrue(cc.scores_complete(_make_scores(3, 4), case_ids))
+
+        # Bool values rejected
+        self.assertFalse(cc.scores_complete(_make_scores(True, 4), case_ids))
+        self.assertFalse(cc.scores_complete(_make_scores(3, False), case_ids))
+
+        # Out-of-range integer scores rejected
+        self.assertFalse(cc.scores_complete(_make_scores(0, 3), case_ids))
+        self.assertFalse(cc.scores_complete(_make_scores(6, 3), case_ids))
+        self.assertFalse(cc.scores_complete(_make_scores(3, 0), case_ids))
+        self.assertFalse(cc.scores_complete(_make_scores(3, 99), case_ids))
+
+        # Identical reviewer identities rejected
+        self.assertFalse(
+            cc.scores_complete(_make_scores(3, 3, id_a="same", id_b="same"), case_ids)
+        )
+
+    def test_trusted_with_complete_status_but_null_agreement_fails(self) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+            ]
+        }
+        errors = cc.check_trusted_gate(
+            artifact,
+            sample,
+            scores,
+            {"status": "complete", "reviewer_reviewer": None},
+            {"status": "complete"},
+            {"calibration": {"status": "complete"}},
+            {"status": "trusted", "run": {"human_calibration": "trusted"}},
+        )
+        self.assertTrue(any("trusted: true" in error for error in errors))
+        self.assertTrue(
+            any(
+                "agreement.yaml must record non-null reviewer_reviewer" in error
+                for error in errors
+            )
+        )
+
+    def test_trusted_with_disagreeing_agreement_payload_fails(self) -> None:
+        sample = {
+            "cases": [{"id": "c1"}],
+            "reviewers": [{"id": "reviewer-a"}, {"id": "reviewer-b"}],
+        }
+        artifact = {"trusted": True, "status": "complete"}
+        scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score("c1", 4, 4)],
+                },
+            ]
+        }
+        bogus_agreement = {
+            "status": "complete",
+            "reviewer_reviewer": {
+                "cases": ["c1"],
+                "semantic_quality": {"percent_agreement": 0.0, "cohens_kappa": 0.0},
+                "review_discipline": {"percent_agreement": 0.0, "cohens_kappa": 0.0},
+                "critical_failure": {"percent_agreement": 0.0, "disagreements": []},
+            },
+        }
+        errors = cc.check_trusted_gate(
+            artifact,
+            sample,
+            scores,
+            bogus_agreement,
+            {"status": "complete"},
+            {"calibration": {"status": "complete"}},
+            {"status": "trusted", "run": {"human_calibration": "trusted"}},
+        )
+        self.assertTrue(
+            any("does not match computed agreement" in error for error in errors)
+        )
+
 
 class SampleMutationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -198,6 +316,49 @@ class SampleMutationTests(unittest.TestCase):
         errors = cc.collect_errors(self.tmpdir)
         self.assertTrue(
             any("false_ready without critical_failure" in error for error in errors),
+            errors,
+        )
+
+    def test_collect_errors_invokes_agreement_computation_on_filled_sheet(self) -> None:
+        sample = cc.load_yaml(cc.calibration_dir(self.tmpdir) / "sample.yaml")
+        case_ids = [case["id"] for case in sample["cases"]]
+        filled_scores = {
+            "reviewers": [
+                {
+                    "id": "reviewer-a",
+                    "identity": "reviewer-1",
+                    "cases": [_filled_score(cid, 4, 4) for cid in case_ids],
+                },
+                {
+                    "id": "reviewer-b",
+                    "identity": "reviewer-2",
+                    "cases": [_filled_score(cid, 4, 4) for cid in case_ids],
+                },
+            ]
+        }
+        _dump(cc.calibration_dir(self.tmpdir) / "scores.yaml", filled_scores)
+        errors = cc.collect_errors(self.tmpdir)
+        self.assertTrue(
+            any(
+                "agreement.yaml must record non-null reviewer_reviewer" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+        agreement_path = cc.calibration_dir(self.tmpdir) / "agreement.yaml"
+        agreement = cc.load_yaml(agreement_path)
+        agreement["reviewer_reviewer"] = cc.agreement_from_scores(filled_scores)
+        _dump(agreement_path, agreement)
+        errors = cc.collect_errors(self.tmpdir)
+        self.assertEqual(errors, [])
+
+    def test_missing_baseline_files_reports_error_without_crash(self) -> None:
+        manifest_path = cc.baseline_dir(self.tmpdir) / "manifest.yaml"
+        manifest_path.unlink()
+        errors = cc.collect_errors(self.tmpdir)
+        self.assertTrue(
+            any("baselines/v1/manifest.yaml is missing" in e for e in errors),
             errors,
         )
 

@@ -137,24 +137,93 @@ def _reviewer_block(scores: Mapping[str, Any], reviewer_id: str) -> Mapping[str,
 def scores_complete(scores: Mapping[str, Any], case_ids: Iterable[str]) -> bool:
     """Return True when both reviewers have a full per-case score sheet."""
     wanted = list(case_ids)
+    identities: list[str] = []
     for reviewer_id in ("reviewer-a", "reviewer-b"):
         block = _reviewer_block(scores, reviewer_id)
-        if str(block.get("identity", PENDING_IDENTITY)) == PENDING_IDENTITY:
+        identity = str(block.get("identity", PENDING_IDENTITY)).strip()
+        if not identity or identity == PENDING_IDENTITY:
             return False
+        identities.append(identity)
         by_id = {item.get("id"): item for item in _as_list(block.get("cases"))}
         for case_id in wanted:
             row = by_id.get(case_id)
             if not isinstance(row, Mapping):
                 return False
-            if not isinstance(row.get("semantic_quality"), int):
+            sem = row.get("semantic_quality")
+            if (
+                isinstance(sem, bool)
+                or not isinstance(sem, int)
+                or sem not in range(1, 6)
+            ):
                 return False
-            if not isinstance(row.get("review_discipline"), int):
+            disc = row.get("review_discipline")
+            if (
+                isinstance(disc, bool)
+                or not isinstance(disc, int)
+                or disc not in range(1, 6)
+            ):
                 return False
             if not isinstance(row.get("critical_failure"), bool):
                 return False
             if not isinstance(row.get("false_ready"), bool):
                 return False
-    return True
+            if (
+                row.get("false_ready") is True
+                and row.get("critical_failure") is not True
+            ):
+                return False
+    return len(set(identities)) >= 2
+
+
+def _payloads_match(actual: Any, expected: Any) -> bool:
+    """Recursively compare agreement payloads allowing floating-point tolerance."""
+    if isinstance(actual, Mapping) and isinstance(expected, Mapping):
+        if set(actual.keys()) != set(expected.keys()):
+            return False
+        return all(_payloads_match(actual[k], expected[k]) for k in actual)
+    if isinstance(actual, list) and isinstance(expected, list):
+        if len(actual) != len(expected):
+            return False
+        return all(_payloads_match(a, b) for a, b in zip(actual, expected, strict=True))
+    if (
+        isinstance(actual, (int, float))
+        and isinstance(expected, (int, float))
+        and not isinstance(actual, bool)
+        and not isinstance(expected, bool)
+    ):
+        return abs(float(actual) - float(expected)) < 1e-3
+    return actual == expected
+
+
+def check_agreement_payload(
+    scores: Mapping[str, Any], agreement: Mapping[str, Any]
+) -> list[str]:
+    """Validate agreement.yaml reviewer_reviewer payload against scores."""
+    errors: list[str] = []
+    rev_rev = agreement.get("reviewer_reviewer")
+    if rev_rev is None:
+        errors.append(
+            "agreement.yaml must record non-null reviewer_reviewer when scores are complete"
+        )
+        return errors
+    if not isinstance(rev_rev, Mapping):
+        errors.append("agreement.yaml reviewer_reviewer must be a mapping")
+        return errors
+    crit = rev_rev.get("critical_failure")
+    if not isinstance(crit, Mapping) or "disagreements" not in crit:
+        errors.append(
+            "agreement.yaml reviewer_reviewer must include populated critical_failure comparison"
+        )
+    try:
+        computed = agreement_from_scores(scores)
+    except (ValueError, KeyError, TypeError) as exc:
+        errors.append(f"failed to compute agreement from scores: {exc}")
+        return errors
+    if not _payloads_match(rev_rev, computed):
+        errors.append(
+            "agreement.yaml reviewer_reviewer does not match computed agreement from scores"
+        )
+    return errors
 
 
 def calibration_complete(
@@ -172,7 +241,9 @@ def calibration_complete(
     if adjudication.get("status") != "complete":
         return False
     case_ids = [case["id"] for case in _as_list(sample.get("cases"))]
-    return scores_complete(scores, case_ids)
+    if not scores_complete(scores, case_ids):
+        return False
+    return not check_agreement_payload(scores, agreement)
 
 
 def cohens_kappa(left: list[int], right: list[int]) -> float:
@@ -331,6 +402,9 @@ def check_trusted_gate(
         errors.append(
             "artifact.yaml sets trusted: true before scoring and adjudication complete"
         )
+        case_ids = [case["id"] for case in _as_list(sample.get("cases"))]
+        if scores_complete(scores, case_ids):
+            errors.extend(check_agreement_payload(scores, agreement))
     calibration = results.get("calibration")
     if isinstance(calibration, Mapping):
         status = str(calibration.get("status", "pending"))
@@ -371,6 +445,17 @@ def check_score_sheet(
     if reviewer_ids != ["reviewer-a", "reviewer-b"]:
         errors.append("scores.yaml must contain reviewer-a and reviewer-b")
         return errors
+    if len(reviewers) == 2:
+        id_a = str(reviewers[0].get("identity", "")).strip()
+        id_b = str(reviewers[1].get("identity", "")).strip()
+        if (
+            id_a
+            and id_b
+            and id_a != PENDING_IDENTITY
+            and id_b != PENDING_IDENTITY
+            and id_a == id_b
+        ):
+            errors.append("reviewer-a and reviewer-b must have distinct identities")
     for reviewer in reviewers:
         reviewer_id = reviewer.get("id")
         case_ids = [item.get("id") for item in _as_list(reviewer.get("cases"))]
@@ -402,6 +487,8 @@ def collect_errors(root: Path) -> list[str]:
     for label, path in required_files.items():
         if not path.is_file():
             errors.append(f"missing {label}")
+    baseline_errors = check_baseline_retained(root)
+    errors.extend(baseline_errors)
     if errors:
         return errors
 
@@ -415,12 +502,14 @@ def collect_errors(root: Path) -> list[str]:
 
     errors.extend(check_sample(root, sample))
     errors.extend(check_score_sheet(sample, scores))
+    case_ids = [case["id"] for case in _as_list(sample.get("cases"))]
+    if scores_complete(scores, case_ids):
+        errors.extend(check_agreement_payload(scores, agreement))
     errors.extend(
         check_trusted_gate(
             artifact, sample, scores, agreement, adjudication, results, manifest
         )
     )
-    errors.extend(check_baseline_retained(root))
     held_out = root / "dataset" / "held-out"
     if not (held_out / "README.md").is_file():
         errors.append("dataset/held-out/README.md is missing")

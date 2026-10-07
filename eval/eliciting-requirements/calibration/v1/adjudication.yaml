@@ -4,7 +4,7 @@ status: pending-scores
 note: >-
   Adjudication starts after both reviewers score and agreement is
   computed. Notes identify rubric, judge, skill, or corpus
-  corrections. Confirmed failures are added to dataset/held-out/
+  corrections. Confirmed failures are added to dataset/regression/
   before the skill changes or a new baseline is promoted.
 notes: []
 rubric_corrections: []
