@@ -73,8 +73,10 @@ critical structural failure behind a semantic average.
 
 Visible development cases live in `dataset/cases/`. Known regression cases
 live in `dataset/regression/` and use `eval-regression.yaml`; they are not an
-independent held-out corpus. Confirmed failures are added there before the
-skill is changed. Issue #63 tracks curating and calibrating a truly held-out
-sample. Live harness runs retain their case outputs, traces, costs, latency,
-and human calibration artifacts under the run ID; a new baseline is a new
-directory and never replaces an earlier one.
+independent held-out corpus. Confirmed failures are added to
+`dataset/held-out/` before the skill is changed. Issue #63 records the
+calibration sample under `calibration/v1/`. Independent human scoring,
+adjudication, and held-out promotion remain pending; the v1 baseline is not
+trusted until that work completes. Live harness runs retain their case
+outputs, traces, costs, latency, and human calibration artifacts under the
+run ID; a new baseline is a new directory and never replaces an earlier one.

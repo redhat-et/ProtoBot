@@ -1,0 +1,14 @@
+---
+calibration_id: v1
+status: pending-scores
+note: >-
+  Adjudication starts after both reviewers score and agreement is
+  computed. Notes identify rubric, judge, skill, or corpus
+  corrections. Confirmed failures are added to dataset/held-out/
+  before the skill changes or a new baseline is promoted.
+notes: []
+rubric_corrections: []
+judge_corrections: []
+skill_corrections: []
+corpus_corrections: []
+held_out_additions: []

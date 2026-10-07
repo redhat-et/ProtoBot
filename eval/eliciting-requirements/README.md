@@ -8,9 +8,13 @@ This directory contains the Agent Eval Harness configuration for
 - `dataset/cases/` contains visible development cases. Each case has an
   `input.yaml`, `annotations.yaml`, and property-based `reference.md`.
 - `dataset/regression/` contains known regression cases. Run them with
-  `eval-regression.yaml`; do not use them to tune the visible corpus. An
-  independently curated held-out corpus is still pending calibration issue
-  #63.
+  `eval-regression.yaml`; do not use them to tune the visible corpus.
+- `dataset/held-out/` is the independently curated held-out corpus. It is
+  empty until calibration confirms a failure. Confirmed failures are added
+  there before the skill changes or a new baseline is promoted.
+- `calibration/v1/` records the human-calibration sample and reviewer slots
+  before scoring. Independent scoring, agreement, and adjudication remain
+  pending; the v1 baseline is not trusted until that work completes.
 - The two semantic rubrics are inline in the configs so nested config paths
   resolve correctly from both the repository root and Agent Eval Harness.
   Structural EARS and readiness checks remain inline as deterministic judges.
@@ -39,7 +43,9 @@ From the repository root, install or load Agent Eval Harness and run:
 ```
 
 Use `/eval-dataset` only to add reviewed cases. A confirmed failure becomes a
-new case in `dataset/regression/` before a skill change is accepted.
+new case in `dataset/held-out/` before a skill change is accepted. Known
+repeats of already-recorded defects continue to land in
+`dataset/regression/`.
 
 ## Baselines
 
@@ -48,4 +54,5 @@ thresholds, and the commands required to create the first live baseline. The
 case-level semantic expectations are versioned in the corpus annotations. A
 live run must save the harness `summary.yaml`, case outputs, findings, traces,
 cost, latency, and human calibration artifacts without overwriting this
-baseline. Later baselines are new directories.
+baseline. Later baselines are new directories. Human calibration for this
+snapshot lives in `calibration/v1/` and does not replace `baselines/v1/`.

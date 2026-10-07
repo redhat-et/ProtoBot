@@ -2,8 +2,9 @@
 name: eliciting-requirements-regression
 description: >
   Known regression evaluation for the eliciting-requirements skill. Run this
-  configuration separately from the visible development corpus; an independent
-  held-out sample is pending calibration.
+  configuration separately from the visible development corpus. The
+  independent held-out corpus lives in dataset/held-out/ and stays empty
+  until calibration confirms a failure.
 
 execution:
   mode: case
