@@ -1278,8 +1278,9 @@ full DAG visible to either Worker.
 
 #### Isolation acceptance tests
 
-Every supported sandbox/backend must pass negative tests proving that
-each Worker cannot:
+Every supported sandbox/backend must pass the executable suite in the
+[Job Site Sandbox Contract](jobsite-sandbox.md), including negative
+tests proving that each Worker cannot:
 
 - enumerate the other Worker or integration repository's refs;
 - read a known forbidden commit with `git cat-file` or recover it as an
@@ -2001,7 +2002,8 @@ The first Job Site backend is **Fullsend**, using its OpenShell-based
 execution path. A direct **OpenShell** backend is the fallback and the
 preferred base for a custom ProtoBot Job Site. This is an implementation
 strategy, not an architectural dependency: both adapters implement the
-same ProtoBot execution and sandbox contract. Because both still depend
+same ProtoBot [execution and sandbox contract](jobsite-sandbox.md).
+Because both still depend
 on OpenShell, a separate portable containment profile is the required
 sandbox fallback for platform incompatibility or failed OpenShell
 acceptance tests.
@@ -2039,10 +2041,13 @@ not a Job Site prerequisite unless a Fullsend OpenCode runtime is added.
 
 #### Sandbox contract and acceptance suite
 
-The sandbox is the primary enforcement mechanism for safeguards; prompts
-are not a security boundary. Fullsend/OpenShell, direct OpenShell, and
-the portable profile must pass the same end-to-end suite for every
-supported compute backend:
+The versioned, backend-neutral contract is the
+[Job Site Sandbox Contract](jobsite-sandbox.md) (`jobsite-sandbox/v1`).
+The local test adapter and reusable conformance suite live in
+`source-control-manager/internal/jobsite`. Prompts are not a security
+boundary. Fullsend/OpenShell, direct OpenShell, and the portable
+profile must pass the same end-to-end suite for every supported
+compute backend:
 
 - **Execution and filesystem:** no host, peer Worker, canonical repo, or
   integration-repo reads; no writes outside projected paths; no mount,
@@ -2069,7 +2074,9 @@ supported compute backend:
 If a backend or platform cannot pass the suite, the Job Site refuses
 autonomous execution. It must not silently switch to a weaker profile.
 Fullsend's use of OpenShell is therefore validated as effective behavior,
-not accepted transitively by product name.
+not accepted transitively by product name. The executable checks,
+local test adapter, and structured `ConformanceReport` are defined by
+the [Job Site Sandbox Contract](jobsite-sandbox.md).
 
 ### Authentication and Credential Isolation
 
@@ -2150,6 +2157,9 @@ confirmation.
   authorization, transitions, rejection semantics, and acceptance matrix
 - [Drafting Table WMS Integration Contract](drafting-table-wms.md) —
   Backend-neutral request, query, linking, and blocked-resolution operations
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution and sandbox acceptance suite, local test adapter, and
+  Fullsend/OpenShell mapping
 - [WMS Implementations](../../wms/README.md) — Backend-neutral Go evaluator
   and the in-memory fake adapter used by the conformance and fixture
   tests

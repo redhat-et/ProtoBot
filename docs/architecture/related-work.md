@@ -190,7 +190,8 @@ autonomous Job Site. ProtoBot remains the control plane for change sets,
 WMS materialization, role-projected Worker repositories, dual-worker
 integration/Triage, and conformance evidence. Fullsend supplies execution
 and may host Inspector fan-out, but adoption depends on its effective
-OpenShell boundary passing ProtoBot's sandbox contract. A direct
+OpenShell boundary passing ProtoBot's
+[sandbox contract](jobsite-sandbox.md). A direct
 OpenShell adapter remains the fallback/custom Job Site path. This is an
 integration experiment, not a decision to make Fullsend's GitHub-native
 work-item model or current agent runtimes part of ProtoBot's architecture.
@@ -278,16 +279,17 @@ Fullsend Job Site backend and is the direct fallback for a custom Job
 Site. Its per-binary, per-destination L7 policy model allows whitelisting
 package registries and documentation sites while blocking exfiltration,
 a requirement for ProtoBot when scaffolding projects from zero. The
-architecture nevertheless depends on a backend-neutral sandbox contract;
-OpenShell guarantees are accepted only after end-to-end validation.
+architecture nevertheless depends on a backend-neutral
+[sandbox contract](jobsite-sandbox.md); OpenShell guarantees are
+accepted only after end-to-end validation.
 The independent sandbox fallback is a portable rootless-OCI/microVM
 profile with external policy and credential brokers, not merely a second
 way to invoke OpenShell.
 
 **What ProtoBot should consider adopting:**
 
-- **OpenShell through Fullsend first, direct OpenShell second** behind one
-  execution/sandbox contract.
+- **OpenShell through Fullsend first, direct OpenShell second** behind
+  the [Job Site Sandbox Contract](jobsite-sandbox.md).
 - **Policy-as-code.** OpenShell's declarative YAML policies with
   three enforcement tiers (YAML authoring, OPA/Rego runtime, Z3/SMT
   formal verification) are the mechanism for ProtoBot's "enforce
@@ -578,6 +580,9 @@ implementations) succeed at much higher rates than those without.
   contract for the first local Drafting Table
 - [System Components](components.md) — Component architecture,
   interfaces, and cross-cutting concerns
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution and sandbox acceptance suite that Fullsend and OpenShell
+  must pass
 - [Git and Project-Repository Integration](git-integration.md) —
   Project identification, branches, commits, PR preparation, and
   approved specification state

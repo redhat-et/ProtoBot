@@ -1153,6 +1153,8 @@ whether this is achievable given Red Hat's AIA requirements.
   authorization, transitions, and rejection semantics
 - [Drafting Table WMS Integration](drafting-table-wms.md) — Backend-neutral
   WMS operations and blocked-work resolution
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  isolation for Building and Inspecting Workers
 - [Git and Project-Repository Integration](git-integration.md) —
   Project identification, branches, commits, PR preparation, and
   approved specification state

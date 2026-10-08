@@ -1076,6 +1076,9 @@ resurface.
   Command grammar, results, diagnostics, and impact review.
 - [Source Control Manager](source-control-manager.md) — The component
   that performs this contract's Git and Git host operations.
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Worker Git isolation
+  on role projections; this document still owns the canonical
+  repository rules.
 - [User Interaction Flow](user-interaction-flow.md) — Phase
   details, sequence diagrams, and change types.
 - [Agent Harness Adapter Contract](agent-harness/adapter-contract.md) —

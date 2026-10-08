@@ -279,6 +279,8 @@ relationships, eval coverage) stay open above.
   approved specification state
 - [Source Control Manager](source-control-manager.md) — The Git and Git
   host boundary, and the Job Site face that Q21 leaves open
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution seam; Q21 remains the Job Site Git face
 - [Agent Harness Adapter Contract](agent-harness/adapter-contract.md) —
   Harness-neutral adapter core, the guard, and harness obligations
 - [OpenCode Harness Binding](agent-harness/opencode.md) — The first
