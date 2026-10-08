@@ -96,14 +96,17 @@ var fixedEnv = []string{
 	"LC_ALL=C",
 	"LANGUAGE=",
 	"GIT_NO_REPLACE_OBJECTS=1",
+	"GIT_CONFIG_GLOBAL=/dev/null",
+	"GIT_CONFIG_NOSYSTEM=1",
 }
 
 // Timeout bounds every child process, so a call that waits on a network or
 // on a program of the user's configuration ends with a failure.
 const Timeout = 10 * time.Minute
 
-// New creates a runner for dir. The caller must call Close.
-func New(dir string) (*Runner, error) {
+// NewWithEnv creates a runner for dir using the specified base environment.
+// The caller must call Close.
+func NewWithEnv(dir string, env []string) (*Runner, error) {
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		return nil, fmt.Errorf("find git: %w", err)
@@ -112,7 +115,12 @@ func New(dir string) (*Runner, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create the empty hooks directory: %w", err)
 	}
-	return &Runner{Root: dir, gitPath: gitPath, hooksDir: hooksDir, env: Environ(os.Environ())}, nil
+	return &Runner{Root: dir, gitPath: gitPath, hooksDir: hooksDir, env: Environ(env)}, nil
+}
+
+// New creates a runner for dir. The caller must call Close.
+func New(dir string) (*Runner, error) {
+	return NewWithEnv(dir, os.Environ())
 }
 
 // Environ returns env without the variables that redirect git, plus the

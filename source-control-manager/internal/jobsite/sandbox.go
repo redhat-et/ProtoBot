@@ -97,6 +97,8 @@ type Capability struct {
 }
 
 // ResourceLimits are the v1 limits every backend must enforce and record.
+// Positive values are enforced bounds. Zero consistently means deny-all
+// (zero allowance), and negative values fail closed during Open.
 type ResourceLimits struct {
 	WallClock     time.Duration `json:"wall_clock"`
 	CPU           time.Duration `json:"cpu"`
@@ -180,6 +182,7 @@ type Session interface {
 	Cancel(ctx context.Context) error
 	Close() error
 	Audit() []SandboxAuditEvent
+	Environ() []string
 }
 
 // SandboxAuditEvent is one tamper-evident private audit record. v1 requires

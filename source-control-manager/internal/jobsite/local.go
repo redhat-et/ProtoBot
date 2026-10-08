@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +57,8 @@ func (a *LocalAdapter) Open(ctx context.Context, req OpenRequest) (Session, erro
 	if req.Projection.Path == "" {
 		return nil, fail(CodeSandboxDenied, "Sandbox projection path is missing.")
 	}
-	if req.Limits.ProcessCount < 0 || req.Limits.WritableFiles < 0 || req.Limits.WritableBytes < 0 || req.Limits.MemoryBytes < 0 {
+	if req.Limits.WallClock < 0 || req.Limits.CPU < 0 || req.Limits.ProcessCount < 0 ||
+		req.Limits.WritableFiles < 0 || req.Limits.WritableBytes < 0 || req.Limits.MemoryBytes < 0 {
 		return nil, fail(CodeSandboxFailClosed, "Sandbox resource limits are invalid; autonomous execution disabled")
 	}
 
@@ -68,7 +71,8 @@ func (a *LocalAdapter) Open(ctx context.Context, req OpenRequest) (Session, erro
 		_ = os.RemoveAll(scratch)
 		return nil, err
 	}
-	repo, err := openGit(root)
+	env := sandboxEnv(scratch)
+	repo, err := openGitWithEnv(root, env)
 	if err != nil {
 		_ = os.RemoveAll(scratch)
 		return nil, err
@@ -82,44 +86,47 @@ func (a *LocalAdapter) Open(ctx context.Context, req OpenRequest) (Session, erro
 	if req.WorkerRoot == "" {
 		req.WorkerRoot = req.Projection.RootCommit
 	}
-	deadline := time.Time{}
 	now := time.Now()
+	var wallDeadline, leaseDeadline time.Time
 	if req.Limits.WallClock > 0 {
-		deadline = now.Add(req.Limits.WallClock)
+		wallDeadline = now.Add(req.Limits.WallClock)
+	} else {
+		wallDeadline = now
 	}
 	if req.Lease > 0 {
-		leaseEnd := now.Add(req.Lease)
-		if deadline.IsZero() || leaseEnd.Before(deadline) {
-			deadline = leaseEnd
-		}
+		leaseDeadline = now.Add(req.Lease)
 	}
-	var sessionCtx context.Context
-	var cancel context.CancelFunc
-	if !deadline.IsZero() {
-		sessionCtx, cancel = context.WithDeadline(ctx, deadline)
-	} else {
-		sessionCtx, cancel = context.WithCancel(ctx)
+	deadline := wallDeadline
+	if !leaseDeadline.IsZero() && leaseDeadline.Before(deadline) {
+		deadline = leaseDeadline
 	}
+	sessionCtx, cancel := context.WithDeadline(ctx, deadline)
+
+	brokerSecret := "session-secret-" + digestBytes([]byte(req.TraceID+"/"+req.Role+"/"+req.SourceCommit)) // pragma: allowlist secret
 
 	session := &localSession{
-		identity:    a.Identity(),
-		req:         req,
-		scratch:     scratch,
-		root:        root,
-		repo:        repo,
-		cancel:      cancel,
-		ctx:         sessionCtx,
-		opened:      time.Now(),
-		writes:      map[string]localWrite{},
-		env:         sandboxEnv(),
-		allow:       append([]NetworkRule(nil), req.NetworkAllow...),
-		auditDir:    filepath.Join(scratch, auditDirName),
-		limitCPU:    req.Limits.CPU,
-		limitMemory: req.Limits.MemoryBytes,
-		limitProcs:  req.Limits.ProcessCount,
-		limitBytes:  req.Limits.WritableBytes,
-		limitFiles:  req.Limits.WritableFiles,
-		limitWall:   req.Limits.WallClock,
+		identity:      a.Identity(),
+		req:           req,
+		scratch:       scratch,
+		root:          root,
+		repo:          repo,
+		cancel:        cancel,
+		ctx:           sessionCtx,
+		opened:        time.Now(),
+		writes:        map[string]localWrite{},
+		env:           env,
+		allow:         append([]NetworkRule(nil), req.NetworkAllow...),
+		auditDir:      filepath.Join(scratch, auditDirName),
+		brokerSecret:  brokerSecret,
+		limitCPU:      req.Limits.CPU,
+		limitMemory:   req.Limits.MemoryBytes,
+		limitProcs:    req.Limits.ProcessCount,
+		limitBytes:    req.Limits.WritableBytes,
+		limitFiles:    req.Limits.WritableFiles,
+		limitWall:     req.Limits.WallClock,
+		limitLease:    req.Lease,
+		wallDeadline:  wallDeadline,
+		leaseDeadline: leaseDeadline,
 	}
 	session.startBroker()
 	session.appendAudit(SandboxAuditEvent{
@@ -158,19 +165,31 @@ type localSession struct {
 	cpuUsed      time.Duration
 	audit        []SandboxAuditEvent
 	auditDir     string
-	upstream     *httptest.Server
-	broker       *httptest.Server
-	limitCPU     time.Duration
-	limitMemory  int64
-	limitProcs   int
-	limitBytes   int64
-	limitFiles   int
-	limitWall    time.Duration
+	upstream      *httptest.Server
+	broker        *httptest.Server
+	brokerSecret  string
+	limitCPU      time.Duration
+	limitMemory   int64
+	limitProcs    int
+	limitBytes    int64
+	limitFiles    int
+	limitWall     time.Duration
+	limitLease    time.Duration
+	wallDeadline  time.Time
+	leaseDeadline time.Time
 }
 
 func (s *localSession) Role() string { return s.req.Role }
 
 func (s *localSession) Root() string { return s.root }
+
+func (s *localSession) Environ() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.env))
+	copy(out, s.env)
+	return out
+}
 
 func (s *localSession) Audit() []SandboxAuditEvent {
 	s.mu.Lock()
@@ -251,10 +270,10 @@ func (s *localSession) WritePath(ctx context.Context, projectPath string, conten
 		return denyErr
 	}
 	size := int64(len(content))
-	if s.limitMemory > 0 && size > s.limitMemory {
+	if size > s.limitMemory {
 		return s.limitLocked("memory", fmt.Sprintf("%d", s.limitMemory), "memory limit exceeded")
 	}
-	if s.limitBytes > 0 && s.writtenBytes+size > s.limitBytes {
+	if s.writtenBytes+size > s.limitBytes {
 		return s.limitLocked("writable-disk", fmt.Sprintf("%d", s.limitBytes), "writable disk limit exceeded")
 	}
 	full := filepath.Join(s.root, filepath.FromSlash(canonical))
@@ -293,8 +312,8 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 	if len(args) == 0 {
 		return s.denyLocked(EventSandboxGit, "git", "Git command is missing.")
 	}
-	if forbiddenGit(args) {
-		return s.denyLocked(EventSandboxGit, strings.Join(args, " "), "Git command is forbidden in the sandbox.")
+	if err := classifyGitArgs(args); err != nil {
+		return s.denyLocked(EventSandboxGit, strings.Join(args, " "), err.Error())
 	}
 	res, err := s.repo.run(args...)
 	if err != nil {
@@ -377,6 +396,16 @@ func (s *localSession) Close() error {
 	return err
 }
 
+func (s *localSession) expiredLimitInfo() (string, string) {
+	now := time.Now()
+	if !s.leaseDeadline.IsZero() && !now.Before(s.leaseDeadline) {
+		if s.wallDeadline.IsZero() || !s.leaseDeadline.After(s.wallDeadline) {
+			return "lease", s.limitLease.String()
+		}
+	}
+	return "wall-clock", s.limitWall.String()
+}
+
 func (s *localSession) guardLocked(ctx context.Context) error {
 	if s.closed {
 		return fail(CodeSandboxCancelled, "Sandbox session is closed.")
@@ -387,8 +416,9 @@ func (s *localSession) guardLocked(ctx context.Context) error {
 	if err := s.ctx.Err(); err != nil {
 		s.cancelled = true
 		if errors.Is(err, context.DeadlineExceeded) {
-			_ = s.limitLocked("wall-clock", s.limitWall.String(), "wall-clock or lease limit exceeded")
-			return fail(CodeSandboxLimit, "wall-clock or lease limit exceeded")
+			limitName, limitConfig := s.expiredLimitInfo()
+			_ = s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
+			return fail(CodeSandboxLimit, limitName+" limit exceeded")
 		}
 		return fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
 	}
@@ -399,14 +429,14 @@ func (s *localSession) guardLocked(ctx context.Context) error {
 		s.cancelled = true
 		return fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
 	}
-	if s.limitCPU > 0 && s.cpuUsed >= s.limitCPU {
+	if s.cpuUsed >= s.limitCPU {
 		return s.limitLocked("cpu", s.limitCPU.String(), "cpu limit exceeded")
 	}
 	return nil
 }
 
 func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecResult, error) {
-	if s.limitProcs == 0 || (s.limitProcs > 0 && len(s.cmds) >= s.limitProcs) {
+	if len(s.cmds)+1 > s.limitProcs {
 		return ExecResult{}, s.limitLocked("process-count", fmt.Sprintf("%d", s.limitProcs), "process-count limit exceeded")
 	}
 	args := req.Args
@@ -422,6 +452,7 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	s.cmds = append(s.cmds, cmd)
 	sessionCtx := s.ctx
 	s.mu.Unlock()
+	start := time.Now()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	var waitErr error
@@ -442,10 +473,12 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 			cancelled = true
 		}
 	}
+	elapsed := time.Since(start)
 	s.mu.Lock()
-	s.cpuUsed += time.Since(s.opened)
+	s.cpuUsed += elapsed
 	if timedOut {
-		return ExecResult{Denied: true, Status: -1}, s.limitLocked("wall-clock", s.limitWall.String(), "wall-clock or lease limit exceeded")
+		limitName, limitConfig := s.expiredLimitInfo()
+		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
 	}
 	if cancelled || s.cancelled {
 		s.cancelled = true
@@ -497,6 +530,7 @@ func (s *localSession) networkLocked(req ExecRequest) (ExecResult, error) {
 	if err != nil {
 		return ExecResult{}, err
 	}
+	httpReq.Header.Set("X-Sandbox-Session-Token", s.brokerSecret)
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -517,7 +551,7 @@ func (s *localSession) networkLocked(req ExecRequest) (ExecResult, error) {
 		}
 		return ExecResult{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return ExecResult{}, err
@@ -575,6 +609,10 @@ func (s *localSession) startBroker() {
 	}))
 	upstream := s.upstream.URL
 	s.broker = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Sandbox-Session-Token") != s.brokerSecret {
+			http.Error(w, "unauthorized broker caller", http.StatusUnauthorized)
+			return
+		}
 		if r.Header.Get(sandboxBrokerHeader) != "" {
 			http.Error(w, "sandbox must not supply credentials", http.StatusForbidden)
 			return
@@ -596,7 +634,7 @@ func (s *localSession) startBroker() {
 			http.Error(w, "upstream error", http.StatusBadGateway)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			http.Error(w, "upstream body error", http.StatusBadGateway)
@@ -696,61 +734,99 @@ func (s *localSession) killAllLocked() {
 	}
 }
 
-func sandboxEnv() []string {
+func sandboxEnv(scratch string) []string {
 	var env []string
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		upper := strings.ToUpper(key)
-		if strings.Contains(upper, "TOKEN") || strings.Contains(upper, "SECRET") || strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "CREDENTIAL") {
-			continue
-		}
-		if containsSentinel(entry) {
-			continue
-		}
-		env = append(env, entry)
+	if path, ok := os.LookupEnv("PATH"); ok {
+		env = append(env, "PATH="+path)
+	} else {
+		env = append(env, "PATH=/usr/local/bin:/usr/bin:/bin")
 	}
+	if lang, ok := os.LookupEnv("LANG"); ok {
+		env = append(env, "LANG="+lang)
+	} else {
+		env = append(env, "LANG=C.UTF-8")
+	}
+	if tz, ok := os.LookupEnv("TZ"); ok {
+		env = append(env, "TZ="+tz)
+	} else {
+		env = append(env, "TZ=UTC")
+	}
+	env = append(env, "HOME="+scratch)
+	env = append(env, fixtureIdentity...)
 	return env
 }
 
-func forbiddenGit(args []string) bool {
-	cmd := args[0]
-	switch cmd {
-	case "fetch", "pull", "clone", "ls-remote", "submodule", "daemon":
-		return true
-	case "remote":
-		if len(args) == 1 || args[1] == "-v" || args[1] == "--verbose" {
-			return false
+func classifyGitArgs(args []string) error {
+	if len(args) == 0 {
+		return errors.New("Git command is missing.")
+	}
+	var subcommand string
+	var subcmdIdx = -1
+	for i, arg := range args {
+		if arg == "--git-dir" || strings.HasPrefix(arg, "--git-dir=") ||
+			arg == "--work-tree" || strings.HasPrefix(arg, "--work-tree=") ||
+			arg == "-C" || (strings.HasPrefix(arg, "-C") && !strings.HasPrefix(arg, "--")) ||
+			arg == "-c" || (strings.HasPrefix(arg, "-c") && !strings.HasPrefix(arg, "--")) ||
+			arg == "--exec-path" || strings.HasPrefix(arg, "--exec-path=") ||
+			arg == "--namespace" || strings.HasPrefix(arg, "--namespace=") {
+			return fmt.Errorf("git flag %q is forbidden in the sandbox", arg)
 		}
-		return true
+		if subcmdIdx == -1 {
+			if strings.HasPrefix(arg, "-") {
+				continue
+			}
+			subcommand = arg
+			subcmdIdx = i
+		}
+	}
+	if subcmdIdx == -1 {
+		return errors.New("Git subcommand is missing.")
+	}
+	switch subcommand {
+	case "cat-file", "rev-parse", "status", "log", "show", "diff":
+		return nil
+	case "remote":
+		for _, remArg := range args[subcmdIdx+1:] {
+			if remArg != "-v" && remArg != "--verbose" {
+				return fmt.Errorf("git remote subcommand %q is forbidden in the sandbox", remArg)
+			}
+		}
+		return nil
 	default:
-		return false
+		return fmt.Errorf("git subcommand %q is forbidden in the sandbox", subcommand)
 	}
 }
 
 func looksLikeIP(dest string) bool {
 	host := dest
-	if h, _, ok := strings.Cut(dest, ":"); ok {
+	if h, _, err := net.SplitHostPort(dest); err == nil {
 		host = h
 	}
 	host = strings.Trim(host, "[]")
 	if host == "localhost" {
 		return true
 	}
-	dots := strings.Count(host, ".")
-	if dots == 3 {
-		for _, part := range strings.Split(host, ".") {
-			if part == "" {
-				return false
-			}
-			for _, r := range part {
-				if r < '0' || r > '9' {
-					return false
-				}
-			}
-		}
+	if ip := net.ParseIP(host); ip != nil {
 		return true
 	}
-	return strings.Contains(host, ":") && !strings.Contains(host, ".")
+	parts := strings.Split(host, ".")
+	if len(parts) >= 1 && len(parts) <= 4 {
+		allNumeric := true
+		for _, part := range parts {
+			if part == "" {
+				allNumeric = false
+				break
+			}
+			if _, err := strconv.ParseUint(part, 0, 64); err != nil {
+				allNumeric = false
+				break
+			}
+		}
+		if allNumeric {
+			return true
+		}
+	}
+	return strings.Contains(host, ":")
 }
 
 func copyTree(src, dst string) error {

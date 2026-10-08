@@ -22,7 +22,7 @@ artifacts:
     - id: architecture
       kind: architecture
       path: docs/architecture.md
-      digest: sha256:07b9d32b2bb2114665cdebf63f9f76342a3ca4dabf8863b7a055e8b2916aa75b
+      digest: sha256:870ab87e7d92f0b3cb142d167e6481fd1a736b791e44434010931d8e7b194f45
       owner: user
     - id: vision
       kind: vision

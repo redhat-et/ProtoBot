@@ -128,7 +128,7 @@ func RunSandboxConformance(ctx context.Context, adapter Adapter, env *Conformanc
 		report.AutonomousExecution = false
 		report.FailClosedReason = "missing capabilities " + strings.Join(missing, ", ") + "; autonomous execution disabled"
 		report.add(CheckResult{ID: "SB-FC-001", Name: "Missing capability disables autonomous execution", Passed: true, Detail: report.FailClosedReason})
-		report.Passed = true
+		report.Passed = false
 		return report
 	}
 
@@ -137,13 +137,13 @@ func RunSandboxConformance(ctx context.Context, adapter Adapter, env *Conformanc
 		report.failClosed("SB-FC-001", err)
 		return report
 	}
-	defer sessionA.Close()
+	defer func() { _ = sessionA.Close() }()
 	sessionB, err := adapter.Open(ctx, env.OpenRequest(RoleWorkerB))
 	if err != nil {
 		report.failClosed("SB-FC-001", err)
 		return report
 	}
-	defer sessionB.Close()
+	defer func() { _ = sessionB.Close() }()
 
 	report.AutonomousExecution = true
 	runChecks(ctx, report, adapter, env, sessionA, sessionB)
@@ -222,7 +222,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			return err
 		}
 		if res.Status == 0 {
-			return fmt.Errorf("Worker A cat-file of implementation blob succeeded")
+			return fmt.Errorf("worker A cat-file of implementation blob succeeded")
 		}
 		return nil
 	})
@@ -235,7 +235,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			return err
 		}
 		if res.Status == 0 {
-			return fmt.Errorf("Worker B cat-file of test blob succeeded")
+			return fmt.Errorf("worker B cat-file of test blob succeeded")
 		}
 		return nil
 	})
@@ -281,14 +281,29 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 	})
 	report.check("SB-GIT-006", "Workers cannot fetch the Integration repository", func() error {
 		res, err := sessionA.Git(ctx, "fetch", env.Export.Integration.Path)
-		if err != nil {
-			if errorCode(err) == CodeSandboxDenied {
-				return nil
-			}
-			return err
-		}
-		if res.Status == 0 {
+		if err == nil && res.Status == 0 {
 			return fmt.Errorf("fetch of integration succeeded")
+		}
+		res, err = sessionA.Git(ctx, "-c", "protocol.file.allow=always", "fetch", env.Export.Integration.Path)
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("option-prefixed fetch of integration succeeded")
+		}
+		res, err = sessionA.Git(ctx, "push", env.Export.Integration.Path, "main")
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("push succeeded")
+		}
+		res, err = sessionA.Git(ctx, "-c", "protocol.file.allow=always", "push", env.Export.Integration.Path, "main")
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("option-prefixed push succeeded")
+		}
+		integrationGitDir := filepath.Join(env.Export.Integration.Path, ".git")
+		res, err = sessionA.Git(ctx, "--git-dir="+integrationGitDir, "cat-file", "-e", env.Source.HistoricalImplBlob)
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("--git-dir= cat-file against integration succeeded")
+		}
+		res, err = sessionA.Git(ctx, "--git-dir", integrationGitDir, "cat-file", "-e", env.Source.HistoricalImplBlob)
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("--git-dir cat-file against integration succeeded")
 		}
 		return nil
 	})
@@ -355,17 +370,22 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		return expectDenied(err)
 	})
 	report.check("SB-NET-004", "Direct IP destinations are denied", func() error {
-		_, err := sessionA.Execute(ctx, ExecRequest{
-			Executable: ApprovedFetchName,
-			Digest:     ApprovedFetchDigest,
-			Network: &NetworkRequest{
-				Destination: "127.0.0.1",
-				Protocol:    AllowedProtocol,
-				Method:      AllowedMethod,
-				Path:        AllowedNetworkPath,
-			},
-		})
-		return expectDenied(err)
+		for _, dest := range []string{"127.0.0.1", "::1", "[::1]", "127.1"} {
+			_, err := sessionA.Execute(ctx, ExecRequest{
+				Executable: ApprovedFetchName,
+				Digest:     ApprovedFetchDigest,
+				Network: &NetworkRequest{
+					Destination: dest,
+					Protocol:    AllowedProtocol,
+					Method:      AllowedMethod,
+					Path:        AllowedNetworkPath,
+				},
+			})
+			if err := expectDenied(err); err != nil {
+				return fmt.Errorf("direct IP %q was not denied: %w", dest, err)
+			}
+		}
+		return nil
 	})
 	report.check("SB-NET-005", "DNS tunneling is denied", func() error {
 		_, err := sessionA.Execute(ctx, ExecRequest{
@@ -394,7 +414,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if err != nil {
 			return err
 		}
-		defer session.Close()
+		defer func() { _ = session.Close() }()
 		_, err = session.Execute(ctx, ExecRequest{
 			Executable: ApprovedFetchName,
 			Digest:     ApprovedFetchDigest,
@@ -465,13 +485,19 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if err != nil {
 			return err
 		}
-		defer session.Close()
-		local, ok := session.(*localSession)
-		if !ok {
-			return inspectSessionFiles(session, env.Sentinel)
+		defer func() { _ = session.Close() }()
+		envVars := session.Environ()
+		if envVars == nil {
+			return fmt.Errorf("environment inspection is unavailable on adapter")
 		}
-		if containsSentinel(local.env...) {
+		if containsSentinel(envVars...) {
 			return fmt.Errorf("broker token present in sandbox environment")
+		}
+		for _, entry := range envVars {
+			key, _, _ := strings.Cut(entry, "=")
+			if !isAllowlistedEnvVar(key) {
+				return fmt.Errorf("disallowed environment variable %q present in sandbox environment", key)
+			}
 		}
 		return nil
 	})
@@ -569,7 +595,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if err != nil {
 			return err
 		}
-		defer session.Close()
+		defer func() { _ = session.Close() }()
 		runCtx, cancel := context.WithCancel(ctx)
 		done := make(chan error, 1)
 		go func() {
@@ -584,9 +610,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 				return fmt.Errorf("sleep returned success after cancel")
 			}
 			if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
-				if errorCode(err) == "" {
-					return fmt.Errorf("cancel error = %v", err)
-				}
+				return fmt.Errorf("expected %s or context.Canceled, got %v", CodeSandboxCancelled, err)
 			}
 			return session.Cancel(ctx)
 		case <-time.After(5 * time.Second):
@@ -601,11 +625,21 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if err != nil {
 			return err
 		}
-		defer session.Close()
+		defer func() { _ = session.Close() }()
 		time.Sleep(40 * time.Millisecond)
 		err = session.WritePath(ctx, currentTestPath, []byte("late\n"), ModeFile)
 		if errorCode(err) != CodeSandboxLimit && errorCode(err) != CodeSandboxCancelled {
 			return fmt.Errorf("lease expiry error = %v", err)
+		}
+		found := false
+		for _, ev := range session.Audit() {
+			if ev.EventType == EventSandboxLimit && ev.LimitName == "lease" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("lease limit was not recorded in audit")
 		}
 		return nil
 	})
@@ -647,7 +681,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if err != nil {
 			return err
 		}
-		defer second.Close()
+		defer func() { _ = second.Close() }()
 		if second.Root() == root {
 			return fmt.Errorf("second sandbox reused the first root")
 		}
@@ -667,11 +701,14 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 	})
 	report.check("SB-LIM-002", "CPU limit is enforced and recorded", func() error {
 		return checkLimit(ctx, adapter, env, func(req *OpenRequest) {
-			req.Limits.CPU = 1
+			req.Limits.CPU = 20 * time.Millisecond
 		}, func(session Session) error {
-			_, err := session.Execute(ctx, ExecRequest{Executable: "sleep", Args: []string{"0"}})
+			res, err := session.Execute(ctx, ExecRequest{Executable: "sleep", Args: []string{"0.03"}})
 			if err != nil {
-				return expectCode(err, CodeSandboxLimit)
+				return fmt.Errorf("first command failed: %w", err)
+			}
+			if res.Status != 0 {
+				return fmt.Errorf("first command status = %d", res.Status)
 			}
 			_, err = session.Execute(ctx, ExecRequest{Executable: "sleep", Args: []string{"0"}})
 			return expectCode(err, CodeSandboxLimit)
@@ -791,7 +828,7 @@ func checkLimit(ctx context.Context, adapter Adapter, env *ConformanceEnv, tweak
 	if err != nil {
 		return err
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	if err := op(session); err != nil {
 		return err
 	}
@@ -891,4 +928,15 @@ func (r *ConformanceReport) FailedChecks() []CheckResult {
 		}
 	}
 	return out
+}
+
+func isAllowlistedEnvVar(key string) bool {
+	switch key {
+	case "PATH", "LANG", "TZ", "HOME",
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE":
+		return true
+	default:
+		return false
+	}
 }
