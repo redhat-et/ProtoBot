@@ -203,18 +203,29 @@ func TestGitLifecycleCancellation(t *testing.T) {
 	defer func() { _ = sessionInFlight.Close() }()
 
 	gitCtx, gitCancel := context.WithCancel(context.Background())
-	if notifier, ok := sessionInFlight.(interface{ OnGitStart(func()) }); ok {
-		notifier.OnGitStart(func() {
-			gitCancel()
-		})
-	} else {
-		gitCancel()
-	}
 	gitDone := make(chan error, 1)
 	go func() {
-		_, err := sessionInFlight.Git(gitCtx, "status")
+		_, err := sessionInFlight.Git(gitCtx, "cat-file", "--batch")
 		gitDone <- err
 	}()
+	time.Sleep(50 * time.Millisecond)
+
+	locSession := sessionInFlight.(*localSession)
+	locSession.mu.Lock()
+	if len(locSession.cmds) != 1 {
+		locSession.mu.Unlock()
+		t.Fatalf("expected 1 in-flight command, got %d", len(locSession.cmds))
+	}
+	runningCmd := locSession.cmds[0].Cmd
+	pid := runningCmd.Process.Pid
+	locSession.mu.Unlock()
+
+	if pid <= 0 {
+		t.Fatalf("expected valid child PID, got %d", pid)
+	}
+
+	gitCancel()
+
 	select {
 	case err := <-gitDone:
 		if err == nil {
@@ -225,6 +236,33 @@ func TestGitLifecycleCancellation(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("in-flight git command did not terminate after cancel")
+	}
+
+	// Assert the still-running child was terminated/killed, not merely that Git returned an error
+	locSession.mu.Lock()
+	if len(locSession.cmds) != 0 {
+		t.Errorf("expected 0 active commands after cancel and wait, got %d", len(locSession.cmds))
+	}
+	locSession.mu.Unlock()
+
+	assertProcessKilled(t, runningCmd)
+
+	// Wait-first test: verify that when Git finishes before cancellation,
+	// the real git status is returned even if ctx is cancelled afterwards.
+	sessionWaitFirst, err := NewLocalAdapter().Open(context.Background(), env.OpenRequest(RoleWorkerA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sessionWaitFirst.Close() }()
+
+	waitCtx, waitCancel := context.WithCancel(context.Background())
+	res, err := sessionWaitFirst.Git(waitCtx, "status")
+	waitCancel()
+	if err != nil {
+		t.Fatalf("expected successful git status when wait returns first, got err=%v", err)
+	}
+	if res.Status != 0 {
+		t.Fatalf("expected status 0, got %d", res.Status)
 	}
 }
 

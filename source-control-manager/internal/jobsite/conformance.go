@@ -624,19 +624,23 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			_ = session.Cancel(ctx)
 			return fmt.Errorf("spawned process did not terminate")
 		}
+		if err := session.Cancel(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			return err
+		}
+
+		gitSession, err := adapter.Open(ctx, req)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = gitSession.Close() }()
 		gitCtx, gitCancel := context.WithCancel(ctx)
 		gitDone := make(chan error, 1)
-		if notifier, ok := session.(interface{ OnGitStart(func()) }); ok {
-			notifier.OnGitStart(func() {
-				gitCancel()
-			})
-		} else {
-			gitCancel()
-		}
 		go func() {
-			_, err := session.Git(gitCtx, "status")
+			_, err := gitSession.Git(gitCtx, "cat-file", "--batch")
 			gitDone <- err
 		}()
+		time.Sleep(50 * time.Millisecond)
+		gitCancel()
 		select {
 		case err := <-gitDone:
 			if err == nil {
@@ -646,9 +650,10 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 				return fmt.Errorf("expected %s or context.Canceled for git, got %v", CodeSandboxCancelled, err)
 			}
 		case <-time.After(5 * time.Second):
+			_ = gitSession.Cancel(ctx)
 			return fmt.Errorf("git command did not terminate after cancel")
 		}
-		return session.Cancel(ctx)
+		return gitSession.Cancel(ctx)
 	})
 	report.check("SB-LIFE-002", "Lease expiry disables further execution and records the limit", func() error {
 		req := env.OpenRequest(RoleWorkerA)

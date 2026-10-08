@@ -144,6 +144,11 @@ type localWrite struct {
 	content []byte
 }
 
+type trackedProcess struct {
+	*exec.Cmd
+	done chan struct{}
+}
+
 type localSession struct {
 	mu            sync.Mutex
 	identity      BackendIdentity
@@ -159,7 +164,7 @@ type localSession struct {
 	writes        map[string]localWrite
 	env           []string
 	allow         []NetworkRule
-	cmds          []*exec.Cmd
+	cmds          []*trackedProcess
 	writtenBytes  int64
 	writtenFiles  int
 	cpuUsed       time.Duration
@@ -177,7 +182,6 @@ type localSession struct {
 	limitLease    time.Duration
 	wallDeadline  time.Time
 	leaseDeadline time.Time
-	onGitStart    func()
 }
 
 func (s *localSession) Role() string { return s.req.Role }
@@ -186,12 +190,6 @@ func (s *localSession) Root() string { return s.root }
 
 func (s *localSession) EphemeralDirs() []string {
 	return []string{s.scratch}
-}
-
-func (s *localSession) OnGitStart(fn func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.onGitStart = fn
 }
 
 func (s *localSession) Environ() []string {
@@ -348,39 +346,44 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 		return res, denyErr
 	}
 	cmd, stdout, stderr := s.repo.runner.Command(s.ctx, cleanArgs...)
+	detachCmd(cmd)
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		s.mu.Unlock()
+		return ExecResult{}, fmt.Errorf("git stdin pipe: %w", err)
+	}
+	defer func() { _ = stdinW.Close() }()
+	cmd.Stdin = stdinR
 	if err := cmd.Start(); err != nil {
+		_ = stdinR.Close()
 		s.mu.Unlock()
 		return ExecResult{}, err
 	}
-	s.cmds = append(s.cmds, cmd)
+	_ = stdinR.Close()
+	tp := &trackedProcess{Cmd: cmd, done: make(chan struct{})}
+	s.cmds = append(s.cmds, tp)
 	sessionCtx := s.ctx
-	onStart := s.onGitStart
 	s.mu.Unlock()
-	if onStart != nil {
-		onStart()
-	}
 
 	start := time.Now()
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		done <- cmd.Wait()
+		close(tp.done)
+	}()
 	var waitErr error
 	var cancelled bool
 	var timedOut bool
 	select {
 	case waitErr = <-done:
-		if ctx.Err() != nil {
-			cancelled = true
-		}
 	case <-ctx.Done():
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		killCmdProcess(cmd)
+		_ = stdinW.Close()
 		<-done
 		cancelled = true
 	case <-sessionCtx.Done():
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		killCmdProcess(cmd)
+		_ = stdinW.Close()
 		<-done
 		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
 			timedOut = true
@@ -392,7 +395,7 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.removeCmdLocked(cmd)
+	s.removeCmdLocked(tp)
 	s.cpuUsed += elapsed
 	if timedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
@@ -537,26 +540,31 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	}
 	cmd := exec.CommandContext(s.ctx, "sleep", args...)
 	cmd.Dir = s.root
+	detachCmd(cmd)
 	cmd.Env = append([]string(nil), s.env...)
 	if err := cmd.Start(); err != nil {
 		return ExecResult{}, err
 	}
-	s.cmds = append(s.cmds, cmd)
+	tp := &trackedProcess{Cmd: cmd, done: make(chan struct{})}
+	s.cmds = append(s.cmds, tp)
 	sessionCtx := s.ctx
 	s.mu.Unlock()
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		done <- cmd.Wait()
+		close(tp.done)
+	}()
 	var waitErr error
 	var cancelled bool
 	var timedOut bool
 	select {
 	case waitErr = <-done:
 	case <-ctx.Done():
-		_ = cmd.Process.Kill()
+		killCmdProcess(cmd)
 		<-done
 		cancelled = true
 	case <-sessionCtx.Done():
-		_ = cmd.Process.Kill()
+		killCmdProcess(cmd)
 		<-done
 		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
 			timedOut = true
@@ -565,7 +573,7 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 		}
 	}
 	s.mu.Lock()
-	s.removeCmdLocked(cmd)
+	s.removeCmdLocked(tp)
 	if timedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
 		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
@@ -605,7 +613,7 @@ func (s *localSession) burnLocked(ctx context.Context, req ExecRequest) (ExecRes
 	target := start.Add(burnDur)
 	var timedOut bool
 	var cancelled bool
-	burnLoop:
+burnLoop:
 	for time.Now().Before(target) {
 		select {
 		case <-ctx.Done():
@@ -874,16 +882,19 @@ func (s *localSession) canonicalInRoot(projectPath string) (string, error) {
 }
 
 func (s *localSession) killAllLocked() {
-	for _, cmd := range s.cmds {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+	var waitList []chan struct{}
+	for _, tp := range s.cmds {
+		killCmdProcess(tp.Cmd)
+		waitList = append(waitList, tp.done)
+	}
+	for _, ch := range waitList {
+		<-ch
 	}
 }
 
-func (s *localSession) removeCmdLocked(cmd *exec.Cmd) {
+func (s *localSession) removeCmdLocked(tp *trackedProcess) {
 	for i, c := range s.cmds {
-		if c == cmd {
+		if c == tp {
 			s.cmds = append(s.cmds[:i], s.cmds[i+1:]...)
 			break
 		}
