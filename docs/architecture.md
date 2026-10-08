@@ -67,7 +67,7 @@ Environmental constraints are listed in a
 | 11 | IdeaBot handoff _(manual, Q4)_ | Pipeline input | IdeaBot | Drafting Table |
 | 12 | Prototype and demo artifacts | Pipeline output | Job Site | TransferBot, stakeholders |
 | 13 | Source Control Manager | MCP tool surface + CLI | Source Control Manager | Drafting Table (TUI and Web), Job Site (registration, Materializer) |
-| 14 | Job Site sandbox contract | Versioned adapter contract with deterministic conformance suite | Job Site | Local test adapter, Fullsend/OpenShell adapters, portable profile |
+| 14 | Job Site sandbox contract | Versioned adapter contract with deterministic conformance suite | Sandbox adapters/backends | Job Site |
 
 Most interfaces are described in dedicated sections below.
 The Job Site intake interface and the claim coordinator are

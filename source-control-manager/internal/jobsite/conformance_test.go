@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // NewConformanceEnv builds the suite fixture in a temporary directory.
@@ -150,7 +151,7 @@ func TestGitArgValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	forbiddenCalls := [][]string{
 		{"diff", "--no-index", "--", "/etc/passwd", "/dev/null"},
@@ -165,8 +166,8 @@ func TestGitArgValidation(t *testing.T) {
 	}
 	for _, args := range forbiddenCalls {
 		res, err := session.Git(context.Background(), args...)
-		if err == nil && res.Status == 0 {
-			t.Fatalf("Git(%v) should have been rejected", args)
+		if errorCode(err) != CodeSandboxDenied && !res.Denied {
+			t.Fatalf("Git(%v) should have been denied, got err=%v, res=%+v", args, err, res)
 		}
 	}
 }
@@ -177,7 +178,7 @@ func TestGitLifecycleCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -193,6 +194,38 @@ func TestGitLifecycleCancellation(t *testing.T) {
 	if errorCode(err) != CodeSandboxCancelled {
 		t.Fatalf("expected %s after Cancel(), got %v", CodeSandboxCancelled, err)
 	}
+
+	// In-flight cancellation test
+	sessionInFlight, err := NewLocalAdapter().Open(context.Background(), env.OpenRequest(RoleWorkerA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sessionInFlight.Close() }()
+
+	gitCtx, gitCancel := context.WithCancel(context.Background())
+	if notifier, ok := sessionInFlight.(interface{ OnGitStart(func()) }); ok {
+		notifier.OnGitStart(func() {
+			gitCancel()
+		})
+	} else {
+		gitCancel()
+	}
+	gitDone := make(chan error, 1)
+	go func() {
+		_, err := sessionInFlight.Git(gitCtx, "status")
+		gitDone <- err
+	}()
+	select {
+	case err := <-gitDone:
+		if err == nil {
+			t.Fatalf("expected error after git cancel, got nil")
+		}
+		if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected %s or context.Canceled, got %v", CodeSandboxCancelled, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("in-flight git command did not terminate after cancel")
+	}
 }
 
 func TestProcessArgsExcludeSentinel(t *testing.T) {
@@ -201,7 +234,16 @@ func TestProcessArgsExcludeSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
+
+	_, err = session.Execute(context.Background(), ExecRequest{Executable: "sleep", Args: []string{env.Sentinel}})
+	if errorCode(err) != CodeSandboxDenied {
+		t.Fatalf("expected %s when sentinel is in Args, got %v", CodeSandboxDenied, err)
+	}
+	_, err = session.Git(context.Background(), "status", env.Sentinel)
+	if errorCode(err) != CodeSandboxDenied {
+		t.Fatalf("expected %s when sentinel is in Git args, got %v", CodeSandboxDenied, err)
+	}
 
 	if _, err := session.Execute(context.Background(), ExecRequest{Executable: "sleep", Args: []string{"0.001"}}); err != nil {
 		t.Fatal(err)
@@ -216,6 +258,24 @@ func TestProcessArgsExcludeSentinel(t *testing.T) {
 			if strings.Contains(arg, env.Sentinel) {
 				t.Fatalf("process arg %q contains sentinel %q", arg, env.Sentinel)
 			}
+		}
+	}
+}
+
+func TestSequentialProcessExecutionDoesNotExhaustLimit(t *testing.T) {
+	env := NewConformanceEnv(t)
+	req := env.OpenRequest(RoleWorkerA)
+	req.Limits.ProcessCount = 2
+	session, err := NewLocalAdapter().Open(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	for i := 0; i < 5; i++ {
+		res, err := session.Git(context.Background(), "status")
+		if err != nil || res.Denied {
+			t.Fatalf("sequential git status %d failed: err=%v, res=%+v", i, err, res)
 		}
 	}
 }

@@ -177,11 +177,22 @@ type localSession struct {
 	limitLease    time.Duration
 	wallDeadline  time.Time
 	leaseDeadline time.Time
+	onGitStart    func()
 }
 
 func (s *localSession) Role() string { return s.req.Role }
 
 func (s *localSession) Root() string { return s.root }
+
+func (s *localSession) EphemeralDirs() []string {
+	return []string{s.scratch}
+}
+
+func (s *localSession) OnGitStart(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onGitStart = fn
+}
 
 func (s *localSession) Environ() []string {
 	s.mu.Lock()
@@ -204,6 +215,9 @@ func (s *localSession) Execute(ctx context.Context, req ExecRequest) (ExecResult
 	defer s.mu.Unlock()
 	if err := s.guardLocked(ctx); err != nil {
 		return ExecResult{}, err
+	}
+	if containsSentinel(req.Args...) {
+		return s.denyLocked(EventSandboxExec, req.Executable, "Process argument contains credential sentinel.")
 	}
 	if req.Network != nil {
 		return s.networkLocked(req)
@@ -317,6 +331,11 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 		s.mu.Unlock()
 		return res, err
 	}
+	if containsSentinel(args...) {
+		res, denyErr := s.denyLocked(EventSandboxGit, "git", "Git argument contains credential sentinel.")
+		s.mu.Unlock()
+		return res, denyErr
+	}
 	if len(s.cmds)+1 > s.limitProcs {
 		err := s.limitLocked("process-count", fmt.Sprintf("%d", s.limitProcs), "process-count limit exceeded")
 		s.mu.Unlock()
@@ -335,7 +354,11 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 	}
 	s.cmds = append(s.cmds, cmd)
 	sessionCtx := s.ctx
+	onStart := s.onGitStart
 	s.mu.Unlock()
+	if onStart != nil {
+		onStart()
+	}
 
 	start := time.Now()
 	done := make(chan error, 1)
@@ -345,6 +368,9 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 	var timedOut bool
 	select {
 	case waitErr = <-done:
+		if ctx.Err() != nil {
+			cancelled = true
+		}
 	case <-ctx.Done():
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
@@ -366,6 +392,7 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.removeCmdLocked(cmd)
 	s.cpuUsed += elapsed
 	if timedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
@@ -538,6 +565,7 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 		}
 	}
 	s.mu.Lock()
+	s.removeCmdLocked(cmd)
 	if timedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
 		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
@@ -577,25 +605,23 @@ func (s *localSession) burnLocked(ctx context.Context, req ExecRequest) (ExecRes
 	target := start.Add(burnDur)
 	var timedOut bool
 	var cancelled bool
+	burnLoop:
 	for time.Now().Before(target) {
 		select {
 		case <-ctx.Done():
 			cancelled = true
-			break
+			break burnLoop
 		case <-sessionCtx.Done():
 			if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
 				timedOut = true
 			} else {
 				cancelled = true
 			}
-			break
+			break burnLoop
 		default:
 			for i := 0; i < 50000; i++ {
 				_ = i * i
 			}
-		}
-		if cancelled || timedOut {
-			break
 		}
 	}
 	elapsed := time.Since(start)
@@ -855,6 +881,15 @@ func (s *localSession) killAllLocked() {
 	}
 }
 
+func (s *localSession) removeCmdLocked(cmd *exec.Cmd) {
+	for i, c := range s.cmds {
+		if c == cmd {
+			s.cmds = append(s.cmds[:i], s.cmds[i+1:]...)
+			break
+		}
+	}
+}
+
 func sandboxEnv(scratch string) []string {
 	var env []string
 	if path, ok := os.LookupEnv("PATH"); ok {
@@ -876,11 +911,6 @@ func sandboxEnv(scratch string) []string {
 	env = append(env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	env = append(env, fixtureIdentity...)
 	return env
-}
-
-func classifyGitArgs(args []string) error {
-	_, err := classifyAndPrepareGitArgs(args)
-	return err
 }
 
 func classifyAndPrepareGitArgs(args []string) ([]string, error) {

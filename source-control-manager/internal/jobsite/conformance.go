@@ -1,6 +1,7 @@
 package jobsite
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -286,29 +287,21 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			return fmt.Errorf("option-prefixed push succeeded")
 		}
 		integrationGitDir := filepath.Join(env.Export.Integration.Path, ".git")
-		res, err = sessionA.Git(ctx, "--git-dir="+integrationGitDir, "cat-file", "-e", env.Source.HistoricalImplBlob)
-		if err == nil && res.Status == 0 {
-			return fmt.Errorf("--git-dir= cat-file against integration succeeded")
-		}
-		res, err = sessionA.Git(ctx, "--git-dir", integrationGitDir, "cat-file", "-e", env.Source.HistoricalImplBlob)
-		if err == nil && res.Status == 0 {
-			return fmt.Errorf("--git-dir cat-file against integration succeeded")
-		}
-		res, err = sessionA.Git(ctx, "diff", "--no-index", "--", "/etc/passwd", "/dev/null")
-		if err == nil && res.Status == 0 {
-			return fmt.Errorf("diff --no-index against host path succeeded")
-		}
-		res, err = sessionA.Git(ctx, "log", "--output=/tmp/leak.txt")
-		if err == nil && res.Status == 0 {
-			return fmt.Errorf("log --output outside projection succeeded")
-		}
-		res, err = sessionA.Git(ctx, "log", "--output", "/tmp/leak.txt")
-		if err == nil && res.Status == 0 {
-			return fmt.Errorf("log --output outside projection succeeded")
-		}
-		res, err = sessionA.Git(ctx, "--config-env=foo=BAR", "status")
-		if err == nil && res.Status == 0 {
-			return fmt.Errorf("--config-env succeeded")
+		for _, args := range [][]string{
+			{"--git-dir=" + integrationGitDir, "cat-file", "-e", env.Source.HistoricalImplBlob},
+			{"--git-dir", integrationGitDir, "cat-file", "-e", env.Source.HistoricalImplBlob},
+			{"diff", "--no-index", "--", "/etc/passwd", "/dev/null"},
+			{"log", "--output=/tmp/leak.txt"},
+			{"log", "--output", "/tmp/leak.txt"},
+			{"--config-env=foo=BAR", "status"},
+		} {
+			res, err = sessionA.Git(ctx, args...)
+			if errorCode(err) != CodeSandboxDenied && !res.Denied {
+				return fmt.Errorf("host-escape probe %v was not denied: err=%v, res=%+v", args, err, res)
+			}
+			if bytes.Contains(res.Stdout, []byte("root:")) {
+				return fmt.Errorf("host-escape probe %v leaked host file contents", args)
+			}
 		}
 		return nil
 	})
@@ -521,13 +514,23 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 				Path:        AllowedNetworkPath,
 			},
 		})
-		if err != nil {
+		if err != nil && errorCode(err) != CodeSandboxDenied {
 			return err
 		}
 		for _, ev := range sessionA.Audit() {
 			if containsSentinel(ev.Target, ev.RejectionReason, ev.Action, ev.Executable) {
 				return fmt.Errorf("credential sentinel in audit of process arguments")
 			}
+		}
+		_, err = sessionA.Execute(ctx, ExecRequest{
+			Executable: "sleep",
+			Args:       []string{env.Sentinel},
+		})
+		if err == nil {
+			return fmt.Errorf("expected denial when sentinel is passed in process arguments")
+		}
+		if errorCode(err) != CodeSandboxDenied {
+			return fmt.Errorf("expected %s for sentinel process argument, got %v", CodeSandboxDenied, err)
 		}
 		return nil
 	})
@@ -623,14 +626,23 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		}
 		gitCtx, gitCancel := context.WithCancel(ctx)
 		gitDone := make(chan error, 1)
+		if notifier, ok := session.(interface{ OnGitStart(func()) }); ok {
+			notifier.OnGitStart(func() {
+				gitCancel()
+			})
+		} else {
+			gitCancel()
+		}
 		go func() {
 			_, err := session.Git(gitCtx, "status")
 			gitDone <- err
 		}()
-		gitCancel()
 		select {
 		case err := <-gitDone:
-			if err != nil && errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
+			if err == nil {
+				return fmt.Errorf("git returned success after cancel")
+			}
+			if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
 				return fmt.Errorf("expected %s or context.Canceled for git, got %v", CodeSandboxCancelled, err)
 			}
 		case <-time.After(5 * time.Second):
@@ -875,23 +887,37 @@ func checkLimit(ctx context.Context, adapter Adapter, env *ConformanceEnv, tweak
 }
 
 func inspectSessionFiles(session Session, sentinel string) error {
-	root := session.Root()
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	seen := make(map[string]bool)
+	dirs := append([]string{session.Root()}, session.EphemeralDirs()...)
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
 		}
-		if d.IsDir() {
+		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if seen[path] {
+				return nil
+			}
+			seen[path] = true
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(data), sentinel) {
+				return fmt.Errorf("sentinel found in %s", path)
+			}
 			return nil
-		}
-		data, err := os.ReadFile(path)
+		})
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), sentinel) {
-			return fmt.Errorf("sentinel found in %s", path)
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func expectDenied(err error) error {

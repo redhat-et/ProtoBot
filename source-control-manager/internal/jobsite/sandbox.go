@@ -187,6 +187,7 @@ type Session interface {
 	Close() error
 	Audit() []SandboxAuditEvent
 	Environ() []string
+	EphemeralDirs() []string
 }
 
 // SandboxAuditEvent is one tamper-evident private audit record. v1 requires
@@ -258,7 +259,7 @@ func VerifyAuditChain(events []SandboxAuditEvent) error {
 			return err
 		}
 		if digestBytes(payload) != ev.EventDigest {
-			return fmt.Errorf("audit event %d digest does not match the canonical payload", i)
+			return fmt.Errorf("audit event %d digest does not match the canonical payload", ev.Sequence)
 		}
 		if ev.Sequence != i+1 {
 			return fmt.Errorf("audit sequence %d, want %d", ev.Sequence, i+1)
