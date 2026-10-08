@@ -163,17 +163,21 @@ must follow these rules:
    updates.** When a PR creates or modifies a registered specification
    artifact, or when Rule 4 identifies staleness in a registered
    specification artifact, check that changes were authored through
-   `ears-manager artifact put` within an active change set (checking
-   change-set manifest `artifact_operations`), that the registered
-   specification artifact and `.protobot/project.yaml` were not edited
-   by hand, that formatters and linters ran prior to
-   `ears-manager artifact put`, and that `ears-manager check` passes
-   without `artifact.digest_mismatch`. Findings should include a
-   registered specification artifact or `.protobot/project.yaml`
-   edited by hand, missing `ears-manager artifact put` when a PR creates
-   or modifies a registered specification artifact or when Rule 4
-   identifies staleness in a registered specification artifact,
-   missing `artifact_operations` in the change-set manifest, and
+   `ears-manager artifact put` within an active change set (requiring a
+   change-set manifest entry under `.protobot/change-sets/` whose
+   `artifact_id` matches each registered specification artifact the PR
+   creates or modifies and each registered specification artifact Rule 4
+   found stale; field presence alone is not enough), that the
+   registered specification artifact and `.protobot/project.yaml` were
+   not edited by hand, and that `ears-manager check` passes without
+   `artifact.digest_mismatch`. Findings should include a registered
+   specification artifact or `.protobot/project.yaml` edited by hand,
+   missing `ears-manager artifact put` when a PR creates or modifies a
+   registered specification artifact or when Rule 4 identifies staleness
+   in a registered specification artifact, a missing change-set manifest
+   entry under `.protobot/change-sets/` whose `artifact_id` matches each
+   registered specification artifact the PR creates or modifies and each
+   registered specification artifact Rule 4 found stale, and
    `artifact.digest_mismatch`, not only formatting and cross-reference
    text matching. When Rule 4 identifies staleness in a registered
    specification artifact, raise a staleness finding that prescribes

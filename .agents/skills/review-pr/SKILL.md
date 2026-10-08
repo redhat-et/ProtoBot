@@ -23,19 +23,27 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   Record what you checked and what you did not.
 - When a PR creates or modifies a registered specification artifact
   (`docs/vision.md`, `docs/architecture.md`, or any other artifact
-  registered in `.protobot/project.yaml`), or when Rule 4 identifies
+  registered in `.protobot/project.yaml`), or when Rule 4 of 'Rules for
+  creating or modifying specification documents' in AGENTS.md identifies
   staleness in a registered specification artifact, check that the changes
   were authored through `ears-manager artifact put` within an active
-  change set. Inspect the change-set manifest `artifact_operations`
-  and the registry digest in `.protobot/project.yaml`. A registered
-  specification artifact or `.protobot/project.yaml` edited by hand
-  is a finding. Confirm `ears-manager check` passes without
-  `artifact.digest_mismatch`. A missing `ears-manager artifact put`,
-  when a PR creates or modifies a registered specification artifact or
-  when Rule 4 identifies staleness in a registered specification artifact,
-  is a finding; when Rule 4 identifies staleness in a registered
-  specification artifact, raise a staleness finding that prescribes
-  `ears-manager artifact put`, not an edit by hand.
+  change set. Require a change-set manifest entry under
+  `.protobot/change-sets/` whose `artifact_id` matches each registered
+  specification artifact the PR creates or modifies and each registered
+  specification artifact Rule 4 of 'Rules for creating or modifying
+  specification documents' in AGENTS.md found stale (field presence alone
+  is not enough), and inspect the registry digest in
+  `.protobot/project.yaml`. A registered specification artifact or
+  `.protobot/project.yaml` edited by hand is a finding. Confirm
+  `ears-manager check` passes without `artifact.digest_mismatch`. A missing
+  `ears-manager artifact put`, when a PR creates or modifies a registered
+  specification artifact or when Rule 4 of 'Rules for creating or
+  modifying specification documents' in AGENTS.md identifies staleness in a
+  registered specification artifact, is a finding; when Rule 4 of 'Rules
+  for creating or modifying specification documents' in AGENTS.md
+  identifies staleness in a registered specification artifact, raise a
+  staleness finding that prescribes `ears-manager artifact put`, not an
+  edit by hand.
 - Write the review to `review-<PR number>.md` in the repository root. Do not
   commit it, do not post it, do not push.
 
