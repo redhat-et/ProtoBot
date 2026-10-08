@@ -87,6 +87,11 @@ func (a *Adapter) executeLifecycleLocked(call adapter.CallRequest, authorization
 	if result, handled := a.replayLifecycleRequest(call, request, fingerprint); handled {
 		return result
 	}
+	if current != nil && request.Operation == validation.OperationClaim {
+		if result, handled := a.reconcileAppliedClaim(call, request, fingerprint, *current); handled {
+			return result
+		}
+	}
 	if current != nil && request.Operation == validation.OperationMaterialize {
 		dependencies := a.liveDependenciesLocked(*current)
 		evaluation.RefreshDependencies = &dependencies
@@ -152,6 +157,59 @@ func requestMaterializationKey(call adapter.CallRequest, payload validation.Payl
 	return ""
 }
 
+// reconcileAppliedClaim rebuilds the applied result a claim must have
+// returned the first time, from the durable LastClaim binding on the
+// work-item issue, when call is an exact idempotency-key-and-fingerprint
+// retry of it. Without this check, a retry after an ambiguous (lost
+// response) UpdateIssue would load the already-claimed item and freeze a
+// determinate DUPLICATE_CLAIM under the claim key, which the Job Site can
+// never reconcile. handled is true whenever the caller must return result
+// immediately.
+func (a *Adapter) reconcileAppliedClaim(call adapter.CallRequest, request validation.Request, fingerprint string, current validation.WorkItem) (adapter.Result, bool) {
+	number, ok := a.idx.workItemIssue[current.ID]
+	if !ok {
+		return adapter.Result{}, false
+	}
+	issue, err := a.client.GetIssue(a.ctx, number)
+	if err != nil {
+		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)), true
+	}
+	doc, err := decodeBody(issue.Body)
+	if err != nil || doc.Kind != kindWorkItem || doc.LastClaim == nil {
+		return adapter.Result{}, false
+	}
+	claim := doc.LastClaim
+	if claim.Operation != string(request.Operation) || claim.IdempotencyKey != request.IdempotencyKey || claim.Fingerprint != fingerprint {
+		return adapter.Result{}, false
+	}
+	result := newResult(call.Operation)
+	result.Outcome = adapter.OutcomeApplied
+	result.Mutation = adapter.MutationApplied
+	result.Idempotency = adapter.IdempotencyNew
+	result.WorkItemID = current.ID
+	result.WorkItemState = current.State
+	result.ContractVersion = current.ContractVersion
+	result.Resource = cloneWorkItem(current)
+	if claim.FencingToken != "" {
+		result.Decision = &validation.Decision{
+			Outcome:            validation.OutcomeAllowed,
+			Authority:          validation.AuthorityAuthoritative,
+			Operation:          request.Operation,
+			Before:             &validation.StateVersion{State: request.ExpectedState, ContractVersion: derefVersion(request.ExpectedContractVersion)},
+			After:              &validation.StateVersion{State: current.State, ContractVersion: current.ContractVersion},
+			FencingTokenIssued: claim.FencingToken,
+		}
+	}
+	return markReplayed(result), true
+}
+
+func derefVersion(version *uint64) uint64 {
+	if version == nil {
+		return 0
+	}
+	return *version
+}
+
 func (a *Adapter) replayLifecycleRequest(call adapter.CallRequest, request validation.Request, fingerprint string) (adapter.Result, bool) {
 	if replay, conflict := a.checkIdempotencyLocked(request.IdempotencyKey, fingerprint); replay != nil {
 		return *replay, true
@@ -210,7 +268,11 @@ func (a *Adapter) checkMaterializationLocked(request validation.Request) (*adapt
 }
 
 // loadMaterializationEntryLocked returns the in-process binding, or rebinds from
-// a durable GitHub scan when the process-local index has no entry.
+// a durable GitHub scan when the process-local index has no entry. Only a
+// definitive ErrNotFound establishes that no durable binding exists; any
+// other scan error is inconclusive and must be reported as WMS_UNAVAILABLE,
+// or materialize could create a second issue under the same
+// materialization_key.
 func (a *Adapter) loadMaterializationEntryLocked(key string) (*materializationEntry, *validation.Rejection) {
 	if entry, ok := a.idx.materializationKey[key]; ok {
 		copied := entry
@@ -218,10 +280,10 @@ func (a *Adapter) loadMaterializationEntryLocked(key string) (*materializationEn
 	}
 	item, doc, number, err := a.findWorkItemByMaterializationKey(key)
 	if err != nil {
-		if errorsIsTransient(err) {
-			return nil, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
 		}
-		return nil, nil
+		return nil, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)
 	}
 	replay := materializationReplayResult(item)
 	a.bindWorkItemLocked(item, doc, number, replay)
@@ -300,7 +362,13 @@ func (a *Adapter) applyLifecycleRequest(
 			updated.Reconciliation = validation.ReconciliationEvidence{}
 			a.startLease(&updated, authorization.Subject, decision.FencingTokenIssued, evaluation.EvaluationTime)
 			number := a.idx.workItemIssue[updated.ID]
-			if err := a.updateWorkItemIssue(number, updated, "", "", updated.Priority); err != nil {
+			mutation := &lastMutationRecord{
+				Operation:      string(request.Operation),
+				IdempotencyKey: request.IdempotencyKey,
+				Fingerprint:    fingerprint,
+				FencingToken:   decision.FencingTokenIssued,
+			}
+			if err := a.updateWorkItemIssue(number, updated, workItemIssueUpdateOptions{mutation: mutation}); err != nil {
 				if errorsIsTransient(err) {
 					return unknownMutationResult(operation, "GitHub write result could not be established.")
 				}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/redhat-et/protobot/wms/adapter"
 	"github.com/redhat-et/protobot/wms/validation"
@@ -33,6 +34,9 @@ func (a *Adapter) queryWorkItemsLocked(call adapter.CallRequest) adapter.Result 
 	var query workItemQueryPayload
 	if err := decodePayload(call.Payload, &query); err != nil {
 		return rejectedResult(call.Operation, invalidRequest("payload", err.Error()))
+	}
+	if err := a.ensureWorkItemsHydratedLocked(); err != nil {
+		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 	}
 	items := make([]adapter.WorkItemProjection, 0)
 	for id := range a.idx.workItemIssue {
@@ -65,6 +69,9 @@ func (a *Adapter) queryWorkItemsLocked(call adapter.CallRequest) adapter.Result 
 }
 
 func (a *Adapter) queryBlockedWorkLocked(call adapter.CallRequest) adapter.Result {
+	if err := a.ensureWorkItemsHydratedLocked(); err != nil {
+		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
+	}
 	items := make([]adapter.WorkItemProjection, 0)
 	for id := range a.idx.workItemIssue {
 		item, doc, _, err := a.loadWorkItemDocument(id)
@@ -78,10 +85,14 @@ func (a *Adapter) queryBlockedWorkLocked(call adapter.CallRequest) adapter.Resul
 			continue
 		}
 		projection := projectWorkItem(item, doc)
-		projection.ReasonKind = "blocked"
-		if item.BlockReason != "" {
-			projection.NextAction = "resolve-block"
-			projection.ResolutionOptions = []string{"add-requirement", "out-of-scope", "impact-amendment"}
+		projection.ReasonKind = sanitizedReasonKind(item.BlockReason)
+		projection.NextAction = "review-resolution"
+		projection.ResolutionOptions = []string{
+			"add-requirement",
+			"out-of-scope",
+			"impact-amendment",
+			"defer",
+			"acknowledge",
 		}
 		items = append(items, projection)
 	}
@@ -100,7 +111,16 @@ func (a *Adapter) loadWorkItem(id string) (validation.WorkItem, int, error) {
 func (a *Adapter) loadWorkItemDocument(id string) (validation.WorkItem, storedDocument, int, error) {
 	number, ok := a.idx.workItemIssue[id]
 	if !ok {
-		return validation.WorkItem{}, storedDocument{}, 0, ErrNotFound
+		// In-process index miss: fall back to the durable store so a
+		// restarted adapter does not report a durable work item as
+		// NOT_FOUND. A scan failure is returned as an error so callers
+		// report WMS_UNAVAILABLE, never a false NOT_FOUND.
+		item, doc, number, err := a.findWorkItemByID(id)
+		if err != nil {
+			return validation.WorkItem{}, storedDocument{}, 0, err
+		}
+		a.idx.workItemIssue[id] = number
+		return item, doc, number, nil
 	}
 	issue, err := a.client.GetIssue(a.ctx, number)
 	if err != nil {
@@ -116,17 +136,56 @@ func (a *Adapter) loadWorkItemDocument(id string) (validation.WorkItem, storedDo
 	return cloneWorkItem(*doc.WorkItem), doc, number, nil
 }
 
-func (a *Adapter) updateWorkItemIssue(number int, item validation.WorkItem, requestID, changeSetID, priority string) error {
-	if priority != "" {
-		item.Priority = priority
+// workItemIssueUpdateOptions carries the durable bookkeeping an
+// updateWorkItemIssue call must persist in the same write as the work-item
+// body it applies. Omitted linked IDs and the mutation record preserve the
+// values already stored on the issue, so an update cannot blank them.
+type workItemIssueUpdateOptions struct {
+	mutation    *lastMutationRecord
+	requestID   string
+	changeSetID string
+	priority    string
+}
+
+// updateWorkItemIssue persists item to its GitHub issue, preserving the
+// durable request/change-set links, source fingerprint, and last-claim
+// binding already stored on the issue unless opts replaces them. Writing the
+// lease and the last-claim binding together in one GitHub API call is what
+// makes claim reconciliation atomic with the lease itself.
+func (a *Adapter) updateWorkItemIssue(number int, item validation.WorkItem, opts workItemIssueUpdateOptions) error {
+	if opts.priority != "" {
+		item.Priority = opts.priority
 	}
-	sourceFingerprint := ""
-	if entry, ok := a.idx.materializationKey[item.MaterializationKey]; ok {
-		sourceFingerprint = entry.fingerprint
-	} else if issue, err := a.client.GetIssue(a.ctx, number); err == nil {
-		if doc, err := decodeBody(issue.Body); err == nil {
-			sourceFingerprint = storedSourceFingerprint(doc)
+	current, err := a.client.GetIssue(a.ctx, number)
+	if err != nil {
+		return err
+	}
+	prior, err := decodeBody(current.Body)
+	if err != nil {
+		return err
+	}
+	requestID := opts.requestID
+	if requestID == "" {
+		requestID = prior.LinkedRequestID
+	}
+	changeSetID := opts.changeSetID
+	if changeSetID == "" {
+		changeSetID = prior.LinkedChangeSetID
+	}
+	// The prior source fingerprint survives every update: it is bound at
+	// materialization time to the source contract this issue was created
+	// from, and no work-item mutation changes that contract. The
+	// in-process materialization index is only a cache for it; the durable
+	// issue body is authoritative.
+	sourceFingerprint := prior.SourceFingerprint
+	if sourceFingerprint == "" {
+		if entry, ok := a.idx.materializationKey[item.MaterializationKey]; ok {
+			sourceFingerprint = entry.fingerprint
 		}
+	}
+	lastClaim := prior.LastClaim
+	if opts.mutation != nil {
+		lastClaim = opts.mutation
 	}
 	body, err := encodeBody("ProtoBot build work-item record.", storedDocument{
 		Kind:               kindWorkItem,
@@ -137,6 +196,7 @@ func (a *Adapter) updateWorkItemIssue(number int, item validation.WorkItem, requ
 		LinkedRequestID:    requestID,
 		LinkedChangeSetID:  changeSetID,
 		LinkedPriority:     item.Priority,
+		LastClaim:          lastClaim,
 	})
 	if err != nil {
 		return err
@@ -175,6 +235,16 @@ func hasDependency(dependencies []validation.Dependency, id string) bool {
 		}
 	}
 	return false
+}
+
+// sanitizedReasonKind maps a stored block reason to the sanitized reason
+// class the blocked-work.query projection requires, matching the memory
+// adapter (wms/memory/requests.go) and the golden fixture.
+func sanitizedReasonKind(reason string) string {
+	if strings.Contains(strings.ToLower(reason), "undefined") {
+		return "undefined-behavior"
+	}
+	return "unresolved-precondition"
 }
 
 func firstNonEmpty(values ...string) string {

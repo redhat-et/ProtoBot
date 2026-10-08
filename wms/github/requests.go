@@ -66,6 +66,7 @@ type lastMutationRecord struct {
 	Operation               string            `json:"operation"`
 	IdempotencyKey          string            `json:"idempotency_key"`
 	Fingerprint             string            `json:"fingerprint"`
+	FencingToken            string            `json:"fencing_token,omitempty"`
 	ApprovalStatus          string            `json:"approval_status,omitempty"`
 	Link                    map[string]string `json:"link,omitempty"`
 	LinkedChangeSetPriority string            `json:"linked_change_set_priority,omitempty"`
@@ -86,6 +87,22 @@ func (a *Adapter) executeRequestLocked(call adapter.CallRequest, authorization v
 	mutating := isRequestMutation(operation)
 	if mutating && call.IdempotencyKey == "" {
 		return rejectedResult(call.Operation, invalidRequest("idempotency_key", "request mutations require an idempotency key"))
+	}
+	// Every request read and write hydrates the request indexes from the
+	// durable store first (once per process), so a restarted adapter serves
+	// durable requests instead of NOT_FOUND, keeps semantic dedup working,
+	// and does not freeze a spurious rejection under a mutation's
+	// idempotency key. A failed scan must not be served as an empty result.
+	// request.create and the work-item operations are excluded: create
+	// performs its own fresh durable scan (that scan is its durable-replay
+	// detection), and work-item operations hydrate the work-item indexes in
+	// their own handlers instead.
+	switch operation {
+	case validation.OperationRequestCreate, validation.OperationWorkItemGet, validation.OperationWorkItemQuery, validation.OperationBlockedWorkQuery:
+	default:
+		if err := a.ensureRequestsHydratedLocked(); err != nil {
+			return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
+		}
 	}
 	fingerprint := requestFingerprint(call, authorization)
 	if mutating {
@@ -407,7 +424,11 @@ func (a *Adapter) updatePriorityLocked(call adapter.CallRequest, authorization v
 			return rejectedResult(call.Operation, backendLoadRejection("work-item", loadErr))
 		}
 		item.Priority = payload.BusinessPriority
-		if err := a.updateWorkItemIssue(issueNumber, item, request.ID, request.ChangeSetID, payload.BusinessPriority); err != nil {
+		if err := a.updateWorkItemIssue(issueNumber, item, workItemIssueUpdateOptions{
+			requestID:   request.ID,
+			changeSetID: request.ChangeSetID,
+			priority:    payload.BusinessPriority,
+		}); err != nil {
 			if errorsIsTransient(err) {
 				return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 			}
@@ -512,13 +533,20 @@ func (a *Adapter) linkWorkItemLocked(call adapter.CallRequest, authorization val
 	request.BuildWorkItemID = item.ID
 	if request.BusinessPriority != "" {
 		item.Priority = request.BusinessPriority
-		if err := a.updateWorkItemIssue(issueNumber, item, request.ID, request.ChangeSetID, request.BusinessPriority); err != nil {
+		if err := a.updateWorkItemIssue(issueNumber, item, workItemIssueUpdateOptions{
+			requestID:   request.ID,
+			changeSetID: request.ChangeSetID,
+			priority:    request.BusinessPriority,
+		}); err != nil {
 			if errorsIsTransient(err) {
 				return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 			}
 			return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 		}
-	} else if err := a.updateWorkItemIssue(issueNumber, item, request.ID, request.ChangeSetID, item.Priority); err != nil {
+	} else if err := a.updateWorkItemIssue(issueNumber, item, workItemIssueUpdateOptions{
+		requestID:   request.ID,
+		changeSetID: request.ChangeSetID,
+	}); err != nil {
 		if errorsIsTransient(err) {
 			return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 		}
@@ -566,6 +594,9 @@ func (a *Adapter) queryRequestsLocked(call adapter.CallRequest) adapter.Result {
 	var query requestQueryPayload
 	if err := decodePayload(call.Payload, &query); err != nil {
 		return rejectedResult(call.Operation, invalidRequest("payload", err.Error()))
+	}
+	if err := a.ensureRequestsHydratedLocked(); err != nil {
+		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 	}
 	requests := make([]adapter.RequestRecord, 0)
 	for id := range a.idx.requestIssue {
@@ -668,7 +699,24 @@ func (a *Adapter) updateRequestIssue(number int, request adapter.RequestRecord, 
 func (a *Adapter) loadRequest(id string) (adapter.RequestRecord, storedDocument, int, error) {
 	number, ok := a.idx.requestIssue[id]
 	if !ok {
-		return adapter.RequestRecord{}, storedDocument{}, 0, ErrNotFound
+		// The in-process map is empty until the first hydration; fall back
+		// to the durable store so a restarted adapter does not report a
+		// durable request as NOT_FOUND. A scan failure is returned as an
+		// error so callers report WMS_UNAVAILABLE, never a false NOT_FOUND.
+		request, number, err := a.findRequestByID(id)
+		if err != nil {
+			return adapter.RequestRecord{}, storedDocument{}, 0, err
+		}
+		issue, err := a.client.GetIssue(a.ctx, number)
+		if err != nil {
+			return adapter.RequestRecord{}, storedDocument{}, 0, err
+		}
+		doc, err := decodeBody(issue.Body)
+		if err != nil || doc.Kind != kindRequest || doc.Request == nil || doc.ProjectID != a.projectID || doc.Request.ID != id {
+			return adapter.RequestRecord{}, storedDocument{}, 0, ErrNotFound
+		}
+		a.idx.requestIssue[id] = number
+		return request, doc, number, nil
 	}
 	issue, err := a.client.GetIssue(a.ctx, number)
 	if err != nil {

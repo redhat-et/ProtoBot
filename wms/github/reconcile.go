@@ -50,6 +50,27 @@ func (a *Adapter) findWorkItemByMaterializationKey(key string) (validation.WorkI
 	return validation.WorkItem{}, storedDocument{}, 0, ErrNotFound
 }
 
+// findWorkItemByID scans labeled work-item issues for a durable work-item id.
+func (a *Adapter) findWorkItemByID(id string) (validation.WorkItem, storedDocument, int, error) {
+	if id == "" {
+		return validation.WorkItem{}, storedDocument{}, 0, ErrNotFound
+	}
+	docs, err := a.listStoredDocuments(LabelWorkItem)
+	if err != nil {
+		return validation.WorkItem{}, storedDocument{}, 0, err
+	}
+	for _, scanned := range docs {
+		if scanned.doc.Kind != kindWorkItem || scanned.doc.WorkItem == nil {
+			continue
+		}
+		if scanned.doc.WorkItem.ID != id {
+			continue
+		}
+		return cloneWorkItem(*scanned.doc.WorkItem), scanned.doc, scanned.number, nil
+	}
+	return validation.WorkItem{}, storedDocument{}, 0, ErrNotFound
+}
+
 // findRequestByID scans labeled request issues for a durable request_id.
 func (a *Adapter) findRequestByID(id string) (adapter.RequestRecord, int, error) {
 	if id == "" {
@@ -150,6 +171,65 @@ func (a *Adapter) hydrateRequestsLocked() ([]scannedDocument, error) {
 		}
 	}
 	return docs, nil
+}
+
+// hydrateWorkItemsLocked rebuilds work-item indexes from durable work-item
+// issues so a restarted adapter sees every durable work item instead of an
+// empty in-process map. It returns an error for any scan failure: only a
+// completed scan establishes the durable set, and a failed scan must not be
+// served as an empty result.
+func (a *Adapter) hydrateWorkItemsLocked() error {
+	docs, err := a.listStoredDocuments(LabelWorkItem)
+	if err != nil {
+		return err
+	}
+	for _, scanned := range docs {
+		item := scanned.doc.WorkItem
+		if scanned.doc.Kind != kindWorkItem || item == nil {
+			continue
+		}
+		if _, ok := a.idx.workItemIssue[item.ID]; !ok {
+			a.idx.workItemIssue[item.ID] = scanned.number
+		}
+		if scanned.doc.MaterializationKey != "" {
+			if _, ok := a.idx.materializationKey[scanned.doc.MaterializationKey]; !ok {
+				a.idx.materializationKey[scanned.doc.MaterializationKey] = materializationEntry{
+					fingerprint: storedSourceFingerprint(scanned.doc),
+					issueNumber: scanned.number,
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ensureRequestsHydratedLocked runs the one-time durable request scan a cold
+// adapter needs before serving a request operation. After the first success
+// the in-process indexes are trusted (they are updated on every write), so
+// repeated operations do not rescan. A scan failure leaves the adapter
+// unhydrated so a later call can retry.
+func (a *Adapter) ensureRequestsHydratedLocked() error {
+	if a.idx.requestsHydrated {
+		return nil
+	}
+	if _, err := a.hydrateRequestsLocked(); err != nil {
+		return err
+	}
+	a.idx.requestsHydrated = true
+	return nil
+}
+
+// ensureWorkItemsHydratedLocked is the work-item analogue of
+// ensureRequestsHydratedLocked.
+func (a *Adapter) ensureWorkItemsHydratedLocked() error {
+	if a.idx.workItemsHydrated {
+		return nil
+	}
+	if err := a.hydrateWorkItemsLocked(); err != nil {
+		return err
+	}
+	a.idx.workItemsHydrated = true
+	return nil
 }
 
 // replayDurableRequestCreate replays or rejects a request.create whose

@@ -59,6 +59,12 @@ type indexes struct {
 	approvals            map[string]validation.ApprovalRecord
 	nextRequestSeq       uint64
 	nextFenceSeq         uint64
+	// requestsHydrated and workItemsHydrated record that the durable
+	// LabelRequest/LabelWorkItem scans have completed once for this
+	// process, so reads fall back to a rescan only before the first
+	// successful hydration.
+	requestsHydrated  bool
+	workItemsHydrated bool
 }
 
 func newIndexes() *indexes {

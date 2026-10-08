@@ -44,6 +44,12 @@ type storedDocument struct {
 	// this binding and reconcile to the already-applied result instead of a
 	// spurious STALE_REQUEST_REVISION.
 	LastMutation *lastMutationRecord `json:"last_mutation,omitempty"`
+	// LastClaim binds the most recent applied claim's idempotency key and
+	// fingerprint to the lease it issued, in the same body write as the
+	// lease. A retry after an ambiguous (exhausted-transient) UpdateIssue
+	// can match this binding and reconcile to the applied claim result
+	// instead of a determinate DUPLICATE_CLAIM frozen under the claim key.
+	LastClaim *lastMutationRecord `json:"last_claim,omitempty"`
 }
 
 const (
