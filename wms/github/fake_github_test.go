@@ -15,6 +15,7 @@ type FakeClient struct {
 	transientLeft             map[string]int // op -> remaining transient failures
 	callCounts                map[string]int
 	createSucceedThenFailLeft int // create stores the issue, then returns ErrTransient
+	updateSucceedThenFailLeft int // update stores the issue, then returns ErrTransient
 }
 
 // NewFakeClient constructs an empty fake GitHub Issues API.
@@ -41,6 +42,15 @@ func (f *FakeClient) InjectCreateSucceedThenTransient(n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createSucceedThenFailLeft = n
+}
+
+// InjectUpdateSucceedThenTransient queues n UpdateIssue calls that apply the
+// write and then return ErrTransient (lost response after apply), so a
+// caller sees an ambiguous failure for a mutation GitHub already committed.
+func (f *FakeClient) InjectUpdateSucceedThenTransient(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateSucceedThenFailLeft = n
 }
 
 // CallCount returns how many times op was invoked.
@@ -108,13 +118,16 @@ func (f *FakeClient) GetIssue(_ context.Context, number int) (Issue, error) {
 }
 
 func (f *FakeClient) UpdateIssue(_ context.Context, number int, input UpdateIssueInput) (Issue, error) {
-	if err := f.bump("update"); err != nil {
-		return Issue{}, err
-	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.callCounts["update"]++
+	if f.transientLeft["update"] > 0 {
+		f.transientLeft["update"]--
+		f.mu.Unlock()
+		return Issue{}, fmt.Errorf("%w: injected 429", ErrTransient)
+	}
 	issue, ok := f.issues[number]
 	if !ok {
+		f.mu.Unlock()
 		return Issue{}, ErrNotFound
 	}
 	if input.Title != nil {
@@ -130,6 +143,14 @@ func (f *FakeClient) UpdateIssue(_ context.Context, number int, input UpdateIssu
 		issue.State = *input.State
 	}
 	f.issues[number] = issue
+	lostResponse := f.updateSucceedThenFailLeft > 0
+	if lostResponse {
+		f.updateSucceedThenFailLeft--
+	}
+	f.mu.Unlock()
+	if lostResponse {
+		return Issue{}, fmt.Errorf("%w: lost response after update", ErrTransient)
+	}
 	return cloneIssue(issue), nil
 }
 

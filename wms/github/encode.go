@@ -30,6 +30,20 @@ type storedDocument struct {
 	// request.create call that produced it so a restarted adapter can replay it.
 	CreateIdempotencyKey string `json:"create_idempotency_key,omitempty"`
 	CreateFingerprint    string `json:"create_fingerprint,omitempty"`
+	// ConsumedApprovalIDs durably records every Gate approval ID already
+	// consumed by a refinement of this request, written in the same body
+	// update as the request revision it authorized. A restarted adapter's
+	// in-process approval index loses consumed status, so this field is the
+	// durable source of truth that a replayed approval ID cannot authorize
+	// another refinement (docs/architecture/drafting-table-wms.md, "the same
+	// durable write as the request revision").
+	ConsumedApprovalIDs []string `json:"consumed_approval_ids,omitempty"`
+	// LastMutation binds the most recent non-create request mutation's
+	// idempotency key and fingerprint to the revision it produced. A retry
+	// that arrives after an ambiguous (exhausted-transient) write can match
+	// this binding and reconcile to the already-applied result instead of a
+	// spurious STALE_REQUEST_REVISION.
+	LastMutation *lastMutationRecord `json:"last_mutation,omitempty"`
 }
 
 const (

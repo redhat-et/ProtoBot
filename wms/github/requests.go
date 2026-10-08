@@ -56,6 +56,31 @@ type requestQueryPayload struct {
 	Relationship     string `json:"relationship,omitempty"`
 }
 
+// lastMutationRecord durably binds one applied non-create request mutation
+// to the revision it produced, so a lost-response retry under the same
+// idempotency key can reconcile to the original applied result instead of a
+// spurious STALE_REQUEST_REVISION. It also carries the result fields each
+// mutation reports, so the reconciled result matches what the original call
+// would have returned.
+type lastMutationRecord struct {
+	Operation               string            `json:"operation"`
+	IdempotencyKey          string            `json:"idempotency_key"`
+	Fingerprint             string            `json:"fingerprint"`
+	ApprovalStatus          string            `json:"approval_status,omitempty"`
+	Link                    map[string]string `json:"link,omitempty"`
+	LinkedChangeSetPriority string            `json:"linked_change_set_priority,omitempty"`
+	LinkedWorkItemPriority  string            `json:"linked_work_item_priority,omitempty"`
+	AuditEvent              string            `json:"audit_event,omitempty"`
+}
+
+// requestIssueUpdateOptions carries the durable bookkeeping an
+// updateRequestIssue call must persist in the same write as the request
+// revision it applies.
+type requestIssueUpdateOptions struct {
+	mutation           *lastMutationRecord
+	consumedApprovalID string
+}
+
 func (a *Adapter) executeRequestLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
 	operation := validation.Operation(call.Operation)
 	mutating := isRequestMutation(operation)
@@ -158,7 +183,11 @@ func (a *Adapter) createRequestLocked(call adapter.CallRequest, authorization va
 }
 
 // reconcilePendingRequestCreate looks up a request_id reserved after a prior
-// UNKNOWN_MUTATION for this idempotency key before creating again.
+// UNKNOWN_MUTATION for this idempotency key before creating again. Only a
+// definitive ErrNotFound establishes that the first issue is actually
+// absent; any other scan error (transient or not) is inconclusive and must
+// not be treated as a clean no-match, or the caller could create a second
+// issue under the same reserved request ID.
 func (a *Adapter) reconcilePendingRequestCreate(call adapter.CallRequest, semanticKey string) (adapter.Result, bool) {
 	pendingID, ok := a.idx.pendingRequestCreate[call.IdempotencyKey]
 	if !ok {
@@ -170,10 +199,10 @@ func (a *Adapter) reconcilePendingRequestCreate(call adapter.CallRequest, semant
 		a.bindRequestLocked(existing, number, semanticKey)
 		return requestCreateAppliedResult(call.Operation, existing), true
 	}
-	if errorsIsTransient(err) {
-		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)), true
+	if errors.Is(err, ErrNotFound) {
+		return adapter.Result{}, false
 	}
-	return adapter.Result{}, false
+	return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh)), true
 }
 
 func (a *Adapter) persistNewRequestLocked(
@@ -215,12 +244,12 @@ func (a *Adapter) persistNewRequestLocked(
 }
 
 func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
-	request, number, err := a.loadRequest(call.RequestID)
+	request, doc, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
 		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
-	if rejection := validateRequestRevision(call, request); rejection != nil {
-		return rejectedResult(call.Operation, rejection)
+	if result, handled := resolveRequestRevision(call, authorization, request, doc); handled {
+		return result
 	}
 	var payload refineRequestPayload
 	if err := decodePayload(call.Payload, &payload); err != nil {
@@ -232,10 +261,16 @@ func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization va
 	if !validRefinementState(payload.RefinementState) {
 		return rejectedResult(call.Operation, invalidRequest("refinement_state", "the value is outside the request vocabulary"))
 	}
+	if (payload.Intent != "" && isBlank(payload.Intent)) || (payload.Rationale != "" && isBlank(payload.Rationale)) {
+		return rejectedResult(call.Operation, invalidRequest("intent/rationale", "supplied intent and rationale must not be blank"))
+	}
 	priorSemanticKey := requestSemanticKeyFor(request.Intent, request.AffectedInterfaces, request.AffectedScopes)
 	approvalID := payload.HumanApprovalID
 	if call.HumanApprovalID != "" {
 		approvalID = call.HumanApprovalID
+	}
+	if slices.Contains(doc.ConsumedApprovalIDs, approvalID) {
+		return rejectedResult(call.Operation, unauthorizedRejection(call.Operation, "", authorization.PolicyVersion))
 	}
 	approval, exists := a.idx.approvals[approvalID]
 	if !exists {
@@ -270,6 +305,9 @@ func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization va
 		refined.AffectedScopes = sortedUnique(payload.AffectedScopes)
 	}
 	if payload.Relationships != nil {
+		if rejection := a.validateRelationshipsLocked(payload.Relationships, refined.ID); rejection != nil {
+			return rejectedResult(call.Operation, rejection)
+		}
 		refined.Relationships = append([]adapter.RequestRelationship(nil), payload.Relationships...)
 	}
 	if payload.Classification != "" {
@@ -308,7 +346,13 @@ func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization va
 	}
 
 	refined.Revision++
-	if err := a.updateRequestIssue(number, refined); err != nil {
+	mutation := &lastMutationRecord{
+		Operation:      call.Operation,
+		IdempotencyKey: call.IdempotencyKey,
+		Fingerprint:    requestFingerprint(call, authorization),
+		ApprovalStatus: string(validation.ApprovalStatusConsumed),
+	}
+	if err := a.updateRequestIssue(number, refined, requestIssueUpdateOptions{mutation: mutation, consumedApprovalID: approvalID}); err != nil {
 		if errorsIsTransient(err) {
 			return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 		}
@@ -333,12 +377,12 @@ func (a *Adapter) refineRequestLocked(call adapter.CallRequest, authorization va
 }
 
 func (a *Adapter) updatePriorityLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
-	request, number, err := a.loadRequest(call.RequestID)
+	request, doc, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
 		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
-	if rejection := validateRequestRevision(call, request); rejection != nil {
-		return rejectedResult(call.Operation, rejection)
+	if result, handled := resolveRequestRevision(call, authorization, request, doc); handled {
+		return result
 	}
 	var payload priorityPayload
 	if err := decodePayload(call.Payload, &payload); err != nil {
@@ -373,13 +417,20 @@ func (a *Adapter) updatePriorityLocked(call adapter.CallRequest, authorization v
 	}
 	request.BusinessPriority = payload.BusinessPriority
 	request.Revision++
-	if err := a.updateRequestIssue(number, request); err != nil {
+	mutation := &lastMutationRecord{
+		Operation:               call.Operation,
+		IdempotencyKey:          call.IdempotencyKey,
+		Fingerprint:             requestFingerprint(call, authorization),
+		LinkedChangeSetPriority: changeSetPriority,
+		LinkedWorkItemPriority:  workItemPriority,
+		AuditEvent:              "priority-updated",
+	}
+	if err := a.updateRequestIssue(number, request, requestIssueUpdateOptions{mutation: mutation}); err != nil {
 		if errorsIsTransient(err) {
 			return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 		}
 		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 	}
-	_ = authorization
 	result := newResult(call.Operation)
 	result.Outcome = adapter.OutcomeApplied
 	result.Mutation = adapter.MutationApplied
@@ -389,16 +440,17 @@ func (a *Adapter) updatePriorityLocked(call adapter.CallRequest, authorization v
 	result.RequestRevision = request.Revision
 	result.LinkedChangeSetPriority = changeSetPriority
 	result.LinkedWorkItemPriority = workItemPriority
+	result.AuditEvent = "priority-updated"
 	return result
 }
 
 func (a *Adapter) linkChangeSetLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
-	request, number, err := a.loadRequest(call.RequestID)
+	request, doc, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
 		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
-	if rejection := validateRequestRevision(call, request); rejection != nil {
-		return rejectedResult(call.Operation, rejection)
+	if result, handled := resolveRequestRevision(call, authorization, request, doc); handled {
+		return result
 	}
 	var payload changeSetLinkPayload
 	if err := decodePayload(call.Payload, &payload); err != nil {
@@ -416,13 +468,19 @@ func (a *Adapter) linkChangeSetLocked(call adapter.CallRequest, authorization va
 		request.BusinessPriority = changeSet.BusinessPriority
 	}
 	request.Revision++
-	if err := a.updateRequestIssue(number, request); err != nil {
+	mutation := &lastMutationRecord{
+		Operation:               call.Operation,
+		IdempotencyKey:          call.IdempotencyKey,
+		Fingerprint:             requestFingerprint(call, authorization),
+		Link:                    map[string]string{"change_set_id": changeSet.ID},
+		LinkedChangeSetPriority: changeSet.BusinessPriority,
+	}
+	if err := a.updateRequestIssue(number, request, requestIssueUpdateOptions{mutation: mutation}); err != nil {
 		if errorsIsTransient(err) {
 			return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 		}
 		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 	}
-	_ = authorization
 	result := newResult(call.Operation)
 	result.Outcome = adapter.OutcomeApplied
 	result.Mutation = adapter.MutationApplied
@@ -436,12 +494,12 @@ func (a *Adapter) linkChangeSetLocked(call adapter.CallRequest, authorization va
 }
 
 func (a *Adapter) linkWorkItemLocked(call adapter.CallRequest, authorization validation.AuthorizationContext) adapter.Result {
-	request, number, err := a.loadRequest(call.RequestID)
+	request, doc, number, err := a.loadRequest(call.RequestID)
 	if err != nil {
 		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
-	if rejection := validateRequestRevision(call, request); rejection != nil {
-		return rejectedResult(call.Operation, rejection)
+	if result, handled := resolveRequestRevision(call, authorization, request, doc); handled {
+		return result
 	}
 	var payload workItemLinkPayload
 	if err := decodePayload(call.Payload, &payload); err != nil {
@@ -467,13 +525,19 @@ func (a *Adapter) linkWorkItemLocked(call adapter.CallRequest, authorization val
 		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 	}
 	request.Revision++
-	if err := a.updateRequestIssue(number, request); err != nil {
+	mutation := &lastMutationRecord{
+		Operation:              call.Operation,
+		IdempotencyKey:         call.IdempotencyKey,
+		Fingerprint:            requestFingerprint(call, authorization),
+		Link:                   map[string]string{"build_work_item_id": item.ID},
+		LinkedWorkItemPriority: item.Priority,
+	}
+	if err := a.updateRequestIssue(number, request, requestIssueUpdateOptions{mutation: mutation}); err != nil {
 		if errorsIsTransient(err) {
 			return unknownMutationResult(call.Operation, "GitHub write result could not be established.")
 		}
 		return rejectedResult(call.Operation, wmsRejection(adapter.CodeWMSUnavailable, err.Error(), map[string]any{}, validation.RetryRefresh))
 	}
-	_ = authorization
 	result := newResult(call.Operation)
 	result.Outcome = adapter.OutcomeApplied
 	result.Mutation = adapter.MutationApplied
@@ -487,7 +551,7 @@ func (a *Adapter) linkWorkItemLocked(call adapter.CallRequest, authorization val
 }
 
 func (a *Adapter) getRequestLocked(call adapter.CallRequest) adapter.Result {
-	request, _, err := a.loadRequest(call.RequestID)
+	request, _, _, err := a.loadRequest(call.RequestID)
 	if err != nil {
 		return rejectedResult(call.Operation, backendLoadRejection("request", err))
 	}
@@ -505,7 +569,7 @@ func (a *Adapter) queryRequestsLocked(call adapter.CallRequest) adapter.Result {
 	}
 	requests := make([]adapter.RequestRecord, 0)
 	for id := range a.idx.requestIssue {
-		request, _, err := a.loadRequest(id)
+		request, _, _, err := a.loadRequest(id)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				continue
@@ -557,7 +621,13 @@ func (a *Adapter) persistRequestIssue(request adapter.RequestRecord, idempotency
 	})
 }
 
-func (a *Adapter) updateRequestIssue(number int, request adapter.RequestRecord) error {
+// updateRequestIssue persists request to its GitHub issue, along with any
+// durable mutation bookkeeping in opts, in the single body write that
+// updates the issue. Writing the request revision, the consumed-approval
+// record, and the last-mutation binding together in one GitHub API call is
+// what makes approval consumption and mutation reconciliation atomic with
+// the revision bump.
+func (a *Adapter) updateRequestIssue(number int, request adapter.RequestRecord, opts requestIssueUpdateOptions) error {
 	current, err := a.client.GetIssue(a.ctx, number)
 	if err != nil {
 		return err
@@ -566,12 +636,22 @@ func (a *Adapter) updateRequestIssue(number int, request adapter.RequestRecord) 
 	if err != nil {
 		return err
 	}
+	consumedApprovalIDs := prior.ConsumedApprovalIDs
+	if opts.consumedApprovalID != "" && !slices.Contains(consumedApprovalIDs, opts.consumedApprovalID) {
+		consumedApprovalIDs = append(append([]string(nil), consumedApprovalIDs...), opts.consumedApprovalID)
+	}
+	lastMutation := prior.LastMutation
+	if opts.mutation != nil {
+		lastMutation = opts.mutation
+	}
 	body, err := encodeBody("ProtoBot request backlog record.", storedDocument{
 		Kind:                 kindRequest,
 		ProjectID:            a.projectID,
 		Request:              &request,
 		CreateIdempotencyKey: prior.CreateIdempotencyKey,
 		CreateFingerprint:    prior.CreateFingerprint,
+		ConsumedApprovalIDs:  consumedApprovalIDs,
+		LastMutation:         lastMutation,
 	})
 	if err != nil {
 		return err
@@ -585,41 +665,96 @@ func (a *Adapter) updateRequestIssue(number int, request adapter.RequestRecord) 
 	return err
 }
 
-func (a *Adapter) loadRequest(id string) (adapter.RequestRecord, int, error) {
+func (a *Adapter) loadRequest(id string) (adapter.RequestRecord, storedDocument, int, error) {
 	number, ok := a.idx.requestIssue[id]
 	if !ok {
-		return adapter.RequestRecord{}, 0, ErrNotFound
+		return adapter.RequestRecord{}, storedDocument{}, 0, ErrNotFound
 	}
 	issue, err := a.client.GetIssue(a.ctx, number)
 	if err != nil {
-		return adapter.RequestRecord{}, 0, err
+		return adapter.RequestRecord{}, storedDocument{}, 0, err
 	}
 	doc, err := decodeBody(issue.Body)
 	if err != nil || doc.Kind != kindRequest || doc.Request == nil {
-		return adapter.RequestRecord{}, 0, fmt.Errorf("invalid request document")
+		return adapter.RequestRecord{}, storedDocument{}, 0, fmt.Errorf("invalid request document")
 	}
 	if doc.ProjectID != a.projectID || doc.Request.ID != id {
-		return adapter.RequestRecord{}, 0, ErrNotFound
+		return adapter.RequestRecord{}, storedDocument{}, 0, ErrNotFound
 	}
-	return cloneRequest(*doc.Request), number, nil
+	return cloneRequest(*doc.Request), doc, number, nil
 }
 
-func validateRequestRevision(call adapter.CallRequest, request adapter.RequestRecord) *validation.Rejection {
+// resolveRequestRevision checks the expected request revision against the
+// loaded request's current revision. A mismatch is ordinarily a genuine
+// stale write, but when the call's idempotency key and fingerprint match
+// this request's durably recorded LastMutation, the mismatch is instead a
+// lost-response retry of a mutation that already applied: the retry
+// reconciles to that original applied result rather than freezing a
+// spurious STALE_REQUEST_REVISION under the key (handled is true in both
+// cases; the caller returns the result immediately).
+func resolveRequestRevision(
+	call adapter.CallRequest,
+	authorization validation.AuthorizationContext,
+	request adapter.RequestRecord,
+	doc storedDocument,
+) (adapter.Result, bool) {
 	if call.ExpectedRequestRevision == nil {
-		return invalidRequest("expected_request_revision", "request mutations require an expected revision")
+		return rejectedResult(call.Operation, invalidRequest("expected_request_revision", "request mutations require an expected revision")), true
 	}
-	if *call.ExpectedRequestRevision != request.Revision {
-		return wmsRejection(
-			adapter.CodeStaleRequestRevision,
-			"The request revision does not match the expected revision.",
-			map[string]any{
-				"expected_request_revision": *call.ExpectedRequestRevision,
-				"current_request_revision":  request.Revision,
-			},
-			validation.RetryRefresh,
-		)
+	if *call.ExpectedRequestRevision == request.Revision {
+		return adapter.Result{}, false
 	}
-	return nil
+	if reconciled, ok := reconcileStaleRequestMutation(call, authorization, request, doc); ok {
+		return reconciled, true
+	}
+	return rejectedResult(call.Operation, wmsRejection(
+		adapter.CodeStaleRequestRevision,
+		"The request revision does not match the expected revision.",
+		map[string]any{
+			"expected_request_revision": *call.ExpectedRequestRevision,
+			"current_request_revision":  request.Revision,
+		},
+		validation.RetryRefresh,
+	)), true
+}
+
+// reconcileStaleRequestMutation rebuilds the applied result a mutation must
+// have returned the first time, from the durable LastMutation binding on
+// doc, when call is an exact idempotency-key-and-fingerprint retry of it.
+func reconcileStaleRequestMutation(
+	call adapter.CallRequest,
+	authorization validation.AuthorizationContext,
+	request adapter.RequestRecord,
+	doc storedDocument,
+) (adapter.Result, bool) {
+	mutation := doc.LastMutation
+	if mutation == nil || call.IdempotencyKey == "" ||
+		mutation.IdempotencyKey != call.IdempotencyKey || mutation.Operation != call.Operation {
+		return adapter.Result{}, false
+	}
+	if mutation.Fingerprint != requestFingerprint(call, authorization) {
+		return adapter.Result{}, false
+	}
+	result := newResult(call.Operation)
+	result.Outcome = adapter.OutcomeApplied
+	result.Mutation = adapter.MutationApplied
+	result.Idempotency = adapter.IdempotencyNew
+	result.Resource = cloneRequest(request)
+	result.RequestID = request.ID
+	result.RequestRevision = request.Revision
+	if mutation.ApprovalStatus != "" {
+		result.ApprovalStatus = validation.ApprovalStatus(mutation.ApprovalStatus)
+	}
+	if mutation.Link != nil {
+		result.Link = map[string]string{}
+		for key, value := range mutation.Link {
+			result.Link[key] = value
+		}
+	}
+	result.LinkedChangeSetPriority = mutation.LinkedChangeSetPriority
+	result.LinkedWorkItemPriority = mutation.LinkedWorkItemPriority
+	result.AuditEvent = mutation.AuditEvent
+	return markReplayed(result), true
 }
 
 func requestFingerprint(call adapter.CallRequest, authorization validation.AuthorizationContext) string {
@@ -657,10 +792,23 @@ func requestSemanticKey(payload createRequestPayload) string {
 	return requestSemanticKeyFor(payload.Intent, payload.AffectedInterfaces, payload.AffectedScopes)
 }
 
+// requestSemanticKeyFor hashes a canonical structured value (not a
+// delimiter-joined string) so that distinct interface/scope slices can never
+// collapse onto the same key through an ambiguous separator, and so a
+// value containing the delimiter cannot shift field boundaries.
 func requestSemanticKeyFor(intent string, interfaces, scopes []string) string {
-	return strings.ToLower(strings.TrimSpace(intent)) + "\x00" +
-		strings.Join(sortedUnique(interfaces), ",") + "\x00" +
-		strings.Join(sortedUnique(scopes), ",")
+	value := struct {
+		Intent     string
+		Interfaces []string
+		Scopes     []string
+	}{
+		strings.ToLower(strings.TrimSpace(intent)),
+		sortedUnique(interfaces),
+		sortedUnique(scopes),
+	}
+	encoded, _ := json.Marshal(value)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }
 
 func sortedUnique(values []string) []string {
@@ -680,9 +828,14 @@ func sortedUnique(values []string) []string {
 	return out
 }
 
+// validClassification and validRefinementState use exactly the request
+// vocabulary defined by the contract
+// (docs/architecture/drafting-table-wms.md:171-172), matching the memory
+// adapter (wms/memory/requests.go) so both backends accept and reject the
+// same values.
 func validClassification(value string) bool {
 	switch value {
-	case "undefined", "changes", "contradicts", "clarification":
+	case "undefined", "changes", "contradicts":
 		return true
 	default:
 		return false
@@ -691,7 +844,7 @@ func validClassification(value string) bool {
 
 func validRefinementState(value string) bool {
 	switch value {
-	case "unrefined", "refining", "ready", "linked":
+	case "unrefined", "refining", "ready-for-dimensioning", "closed":
 		return true
 	default:
 		return false
@@ -705,6 +858,39 @@ func validPriority(value string) bool {
 	default:
 		return false
 	}
+}
+
+// validRelationshipType restricts relationships to the ADR-0002 relationship
+// vocabulary, matching the memory adapter (wms/memory/requests.go).
+func validRelationshipType(value string) bool {
+	switch value {
+	case "depends-on", "conflicts-with", "supersedes", "related-to":
+		return true
+	default:
+		return false
+	}
+}
+
+// validateRelationshipsLocked checks relationship type, target existence,
+// self-reference, and duplicates, mirroring the memory adapter's refine
+// contract (wms/memory/requests.go) so the GitHub backend rejects the same
+// invalid relationships (docs/architecture/drafting-table-wms.md:232).
+func (a *Adapter) validateRelationshipsLocked(relationships []adapter.RequestRelationship, requestID string) *validation.Rejection {
+	seen := make(map[string]struct{}, len(relationships))
+	for _, relationship := range relationships {
+		if relationship.Target == "" || relationship.Target == requestID || !validRelationshipType(relationship.Type) {
+			return invalidRequest("relationships", "relationship type or target is invalid")
+		}
+		if _, _, _, err := a.loadRequest(relationship.Target); err != nil {
+			return backendLoadRejection("request", err)
+		}
+		key := relationship.Type + "\x00" + relationship.Target
+		if _, exists := seen[key]; exists {
+			return invalidRequest("relationships", "duplicate relationship")
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func hasRelationship(relationships []adapter.RequestRelationship, relationshipType string) bool {
