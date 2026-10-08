@@ -193,8 +193,14 @@ func (a *Adapter) hydrateWorkItemsLocked() error {
 		}
 		if scanned.doc.MaterializationKey != "" {
 			if _, ok := a.idx.materializationKey[scanned.doc.MaterializationKey]; !ok {
+				// The cached entry must carry the replay envelope
+				// (same as bindWorkItemLocked), not just the fingerprint:
+				// checkMaterializationLocked replays entry.result, so a
+				// zero Result would freeze an empty rejection under the
+				// caller's idempotency key on the next materialize.
 				a.idx.materializationKey[scanned.doc.MaterializationKey] = materializationEntry{
 					fingerprint: storedSourceFingerprint(scanned.doc),
+					result:      materializationReplayResult(*item),
 					issueNumber: scanned.number,
 				}
 			}

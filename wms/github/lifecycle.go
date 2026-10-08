@@ -274,7 +274,7 @@ func (a *Adapter) checkMaterializationLocked(request validation.Request) (*adapt
 // or materialize could create a second issue under the same
 // materialization_key.
 func (a *Adapter) loadMaterializationEntryLocked(key string) (*materializationEntry, *validation.Rejection) {
-	if entry, ok := a.idx.materializationKey[key]; ok {
+	if entry, ok := a.idx.materializationKey[key]; ok && entry.result.WorkItemID != "" {
 		copied := entry
 		return &copied, nil
 	}

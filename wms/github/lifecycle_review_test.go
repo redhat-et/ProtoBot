@@ -351,7 +351,52 @@ func TestBlockedWorkQueryMatchesGoldenFixtureShape(t *testing.T) {
 	}
 }
 
-// TestMaterializeScanFailureDoesNotCreateDuplicate covers the fix for
+// TestMaterializeAfterHydrationReplaysBoundWorkItem covers the composed
+// path query-then-rematerialize on a cold adapter: hydration previously
+// cached the materialization key with a zero replay envelope, so a later
+// materialize with the same key replayed an empty rejection (OK=false, no
+// work-item ID) and froze it under the caller's idempotency key. The fix
+// stores the same replay envelope the durable-scan path builds.
+func TestMaterializeAfterHydrationReplaysBoundWorkItem(t *testing.T) {
+	fake := NewFakeClient()
+	first := newTestAdapter(t, fake)
+	candidate := testWorkItem("wi-hydrate-replay", validation.StateInitial, 0)
+	created := first.Execute(materializeCall(candidate, "mat-hydrate-replay-1", "mat-hydrate-replay-key"))
+	if !created.OK {
+		t.Fatalf("materialize = %#v", created)
+	}
+
+	// Cold adapter: a query hydrates the work-item (and materialization-key)
+	// indexes from durable issues before any materialize touches them.
+	second := newTestAdapter(t, fake)
+	query := second.Execute(adapter.CallRequest{
+		Operation:       string(validation.OperationWorkItemQuery),
+		ActorContextRef: "drafting-table",
+		Payload:         jsonPayload(t, map[string]any{}),
+	})
+	if !query.OK || len(query.Items) != 1 || query.Items[0].ID != candidate.ID {
+		t.Fatalf("work-item query after restart = %#v, want the durable work item", query)
+	}
+
+	// Rematerialize under the same key with a fresh idempotency key: the
+	// hydrated cache entry must replay the bound work item, not an empty
+	// envelope.
+	replay := second.Execute(materializeCall(candidate, "mat-hydrate-replay-2", "mat-hydrate-replay-key"))
+	if !replay.OK || replay.Outcome != adapter.OutcomeReplayed {
+		t.Fatalf("rematerialize after hydration = %#v, want replayed applied result", replay)
+	}
+	if replay.WorkItemID != candidate.ID {
+		t.Fatalf("rematerialize work item id = %q, want %q", replay.WorkItemID, candidate.ID)
+	}
+	item, ok := replay.Resource.(validation.WorkItem)
+	if !ok || item.ID != candidate.ID {
+		t.Fatalf("rematerialize resource = %#v, want the bound work item", replay.Resource)
+	}
+	if fake.CallCount("create") != 1 {
+		t.Fatalf("create calls = %d, want 1 (rematerialize must not create a second issue)", fake.CallCount("create"))
+	}
+}
+
 // loadMaterializationEntryLocked treating every non-transient scan error as
 // "no binding": a permanent ListIssues failure is inconclusive, and
 // proceeding to CreateIssue could orphan a second work-item issue under the
