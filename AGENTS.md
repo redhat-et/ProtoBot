@@ -166,27 +166,33 @@ must follow these rules:
    `ears-manager artifact put` within an active change set (for each
    registered path the PR creates or modifies or that Rule 4 found
    stale, resolve `artifacts[].id` for that path in
-   `.protobot/project.yaml`, then require a change-set manifest the PR
-   adds or modifies under `.protobot/change-sets/` (status proposed —
-   not an already-approved file that merely happens to sit in that
-   directory) to contain an `artifact_operations[]` entry whose
-   `artifact_id` equals that registry id; treat a digest-only or
-   content change without that proposed operation as a hand edit),
-   that the registered specification artifact and
-   `.protobot/project.yaml` were not edited by hand, and that
-   `ears-manager check` passes without `artifact.digest_mismatch`.
-   Findings should include a registered specification artifact or
-   `.protobot/project.yaml` edited by hand, missing `ears-manager artifact
-   put` when a PR creates or modifies a registered specification artifact
-   or when Rule 4 identifies staleness in a registered specification
-   artifact, for each registered path the PR creates or modifies or that
-   Rule 4 found stale, resolving `artifacts[].id` for that path in
-   `.protobot/project.yaml`, a change-set manifest the PR adds or
-   modifies under `.protobot/change-sets/` (status proposed — not an
-   already-approved file that merely happens to sit in that directory)
-   missing an `artifact_operations[]` entry whose `artifact_id` equals
-   that registry id (treating a digest-only or content change without
-   that proposed operation as a hand edit), and
+   `.protobot/project.yaml`, then require a change-set manifest under
+   `.protobot/change-sets/` (count a change-set only when
+   `ears-manager change-set show` reports `proposed`, equivalently when
+   its manifest path is absent from the default-branch tree; never
+   treat a path that already exists on the default branch, including a
+   modified `cs-00001.yaml`, as evidence of `artifact put`) to contain
+   an `artifact_operations[]` entry whose `artifact_id` equals that
+   registry id; treat a digest-only or content change without that
+   proposed operation as a hand edit), that the registered
+   specification artifact and `.protobot/project.yaml` were not edited
+   by hand, and that `ears-manager check` passes without
+   `artifact.digest_mismatch`. Findings should include a registered
+   specification artifact or `.protobot/project.yaml` edited by hand,
+   missing `ears-manager artifact put` when a PR creates or modifies a
+   registered specification artifact or when Rule 4 identifies
+   staleness in a registered specification artifact, for each
+   registered path the PR creates or modifies or that Rule 4 found
+   stale, resolving `artifacts[].id` for that path in
+   `.protobot/project.yaml`, a change-set manifest under
+   `.protobot/change-sets/` (count a change-set only when
+   `ears-manager change-set show` reports `proposed`, equivalently when
+   its manifest path is absent from the default-branch tree; never
+   treat a path that already exists on the default branch, including a
+   modified `cs-00001.yaml`, as evidence of `artifact put`) missing an
+   `artifact_operations[]` entry whose `artifact_id` equals that
+   registry id (treating a digest-only or content change without that
+   proposed operation as a hand edit), and
    `artifact.digest_mismatch`, not only formatting and
    cross-reference text matching. When Rule 4 identifies staleness in a
    registered specification artifact, raise a staleness finding that

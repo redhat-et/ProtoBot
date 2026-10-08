@@ -30,12 +30,15 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   - For each registered path the PR creates or modifies or that Rule 4 of
     "Rules for creating or modifying specification documents" in AGENTS.md
     found stale, resolve `artifacts[].id` for that path in
-    `.protobot/project.yaml`, then require the PR's proposed
-    `.protobot/change-sets/cs-*.yaml` to include an `artifact_operations[]`
-    entry whose `artifact_id` equals that registry id. Do not treat a matching
-    `artifact_id` in an already-approved manifest as evidence. Treat a
-    digest-only or content change without that proposed operation as a hand
-    edit.
+    `.protobot/project.yaml`, then require a change-set manifest under
+    `.protobot/change-sets/` (count a change-set only when
+    `ears-manager change-set show` reports `proposed`, equivalently when its
+    manifest path is absent from the default-branch tree; never treat a path
+    that already exists on the default branch, including a modified
+    `cs-00001.yaml`, as evidence of `artifact put`) to contain an
+    `artifact_operations[]` entry whose `artifact_id` equals that registry id.
+    Treat a digest-only or content change without that proposed operation as a
+    hand edit.
   - Inspect the registered specification artifact and `.protobot/project.yaml`
     to ensure neither was edited by hand. A registered specification artifact
     or `.protobot/project.yaml` edited by hand is a finding.
