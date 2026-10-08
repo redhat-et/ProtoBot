@@ -28,11 +28,19 @@
       "severity": "info"
     },
     {
+      "fingerprint": "bf6aff1c1a975087",
+      "rule_id": "content-section-length",
+      "file_path": "AGENTS.md",
+      "line": 62,
+      "message": "Section 'Specification document hierarchy' is ~524 tokens (max recommended: 500)",
+      "severity": "info"
+    },
+    {
       "fingerprint": "4c499c070d057873",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
-      "line": 53,
-      "message": "Section 'Rules for creating or modifying specification documents' is ~507 tokens (max recommended: 500)",
+      "line": 103,
+      "message": "Section 'Rules for creating or modifying specification documents' is ~1003 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
@@ -92,19 +100,35 @@
       "severity": "info"
     },
     {
-      "fingerprint": "d03d5a34ac818422",
+      "fingerprint": "47ad33e462f5231a",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 24,
+      "line": 69,
       "message": "Unlinked path reference: 'docs/vision.md' \u2014 consider wrapping in link syntax [docs/vision.md](docs/vision.md)",
       "severity": "info"
     },
     {
-      "fingerprint": "517491998fa8cb38",
+      "fingerprint": "34956d561909f4c1",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 25,
+      "line": 70,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "c00433faf64ec552",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 71,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "48d1852b65875421",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 73,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
     {
@@ -185,6 +209,54 @@
       "file_path": "AGENTS.md",
       "line": 76,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "38050468be7598ab",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 151,
+      "message": "Unlinked path reference: 'docs/vision.md' \u2014 consider wrapping in link syntax [docs/vision.md](docs/vision.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "38050468be7598ab",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 151,
+      "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "1a20aa9e1ffa13ae",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 152,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "a01406964699dc7f",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 153,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "6bb0df65293ccec4",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 169,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "ef5dc4962edf3339",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 174,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
     {

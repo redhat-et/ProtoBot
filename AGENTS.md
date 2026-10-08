@@ -66,9 +66,11 @@ including files added later. Membership is the `docs/` prefix, not
 the list. Omission from the list does not exclude a file or leave
 membership undecided.
 
-- `docs/vision.md` — project Vision (purpose, users, outcomes).
-- `docs/architecture.md` — Architecture artifact (external
-  interfaces, persistent state, environmental constraints).
+- `docs/vision.md` — registered Vision artifact (purpose, users,
+  outcomes), registered in `.protobot/project.yaml`.
+- `docs/architecture.md` — registered Architecture artifact (external
+  interfaces, persistent state, environmental constraints),
+  registered in `.protobot/project.yaml`.
 - `docs/architecture/overview.md` — guiding principles, EARS
   format, workflow, and platform.
 - `docs/architecture/components.md` — component architecture,
@@ -143,6 +145,40 @@ must follow these rules:
    only the ones the diff touches — for existing prose
    describing the same behavior, and flag any that were not
    updated to match.
+
+5. **Update registered specification artifacts through
+   `ears-manager artifact put`.** Registered specification artifacts
+   (`docs/vision.md`, `docs/architecture.md`, and any other artifact
+   registered in `.protobot/project.yaml`) must never be edited by
+   hand, and `.protobot/project.yaml` must never be edited by hand.
+   When creating or modifying a registered specification artifact, or
+   when changing behavior, interfaces, or constraints described in
+   one, apply the update exclusively via `ears-manager artifact put`
+   within an active change set. Run formatters and linters prior to
+   `ears-manager artifact put` so the registry digest covers
+   canonical content, and verify with `ears-manager check` before
+   committing.
+
+6. **Review agents must check registered specification artifact
+   updates.** When reviewing a PR that creates or modifies a
+   registered specification artifact, or changes behavior,
+   interfaces, or constraints described in one, check that changes
+   were authored through `ears-manager artifact put` within an
+   active change set (checking change-set manifest
+   `artifact_operations`), that the registered specification
+   artifact and `.protobot/project.yaml` were not edited by hand,
+   that formatters and linters ran prior to
+   `ears-manager artifact put`, and that `ears-manager check`
+   passes without `artifact.digest_mismatch`. Findings should
+   include a registered specification artifact or
+   `.protobot/project.yaml` edited by hand, missing
+   `ears-manager artifact put` when behavior described in a
+   registered specification artifact changes, missing
+   `artifact_operations` in the change-set manifest, and
+   `artifact.digest_mismatch`, not only formatting and
+   cross-reference text matching. Do not raise a staleness finding
+   whose required fix is a registered specification artifact edited
+   by hand.
 
 ## Agent skills
 

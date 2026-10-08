@@ -21,6 +21,19 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   live in the parts that nobody cites.
 - Check every claim against its source and every link against its target.
   Record what you checked and what you did not.
+- When the PR creates or modifies a registered specification artifact
+  (`docs/vision.md`, `docs/architecture.md`, or any other artifact
+  registered in `.protobot/project.yaml`), or changes behavior,
+  interfaces, or constraints described in one, check that the changes
+  were authored through `ears-manager artifact put` within an active
+  change set. Inspect the change-set manifest `artifact_operations`
+  and the registry digest in `.protobot/project.yaml`. A registered
+  specification artifact or `.protobot/project.yaml` edited by hand
+  is a finding. Confirm `ears-manager check` passes without
+  `artifact.digest_mismatch`. A missing `ears-manager artifact put`,
+  when the PR changes behavior described in a registered
+  specification artifact, is a finding; do not treat a registered
+  specification artifact edited by hand as the required fix.
 - Write the review to `review-<PR number>.md` in the repository root. Do not
   commit it, do not post it, do not push.
 
