@@ -168,9 +168,12 @@ must follow these rules:
    stale, resolve `artifacts[].id` for that path in
    `.protobot/project.yaml`, then require a change-set manifest under
    `.protobot/change-sets/` (count a change-set only when
-   `ears-manager change-set show` reports `proposed`, equivalently when
-   its manifest path is absent from the default-branch tree; never
-   treat a path that already exists on the default branch, including a
+   working-tree `ears-manager change-set show` (no `--at`), after the
+   PR head is checked out, reports `proposed` iff the manifest path is
+   absent from the default-branch tree; if `show --at <pr-head>` is
+   used, require path-absence in addition to `proposed`; do not treat
+   `--at` status alone as evidence of `artifact put`; never treat a
+   path that already exists on the default branch, including a
    modified `cs-00001.yaml`, as evidence of `artifact put`) to contain
    an `artifact_operations[]` entry whose `artifact_id` equals that
    registry id; treat a digest-only or content change without that
@@ -186,9 +189,12 @@ must follow these rules:
    stale, resolving `artifacts[].id` for that path in
    `.protobot/project.yaml`, a change-set manifest under
    `.protobot/change-sets/` (count a change-set only when
-   `ears-manager change-set show` reports `proposed`, equivalently when
-   its manifest path is absent from the default-branch tree; never
-   treat a path that already exists on the default branch, including a
+   working-tree `ears-manager change-set show` (no `--at`), after the
+   PR head is checked out, reports `proposed` iff the manifest path is
+   absent from the default-branch tree; if `show --at <pr-head>` is
+   used, require path-absence in addition to `proposed`; do not treat
+   `--at` status alone as evidence of `artifact put`; never treat a
+   path that already exists on the default branch, including a
    modified `cs-00001.yaml`, as evidence of `artifact put`) missing an
    `artifact_operations[]` entry whose `artifact_id` equals that
    registry id (treating a digest-only or content change without that
