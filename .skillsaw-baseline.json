@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated_by": "skillsaw 0.21.0",
-  "generated_at": "2026-10-08T17:18:20.301734+00:00",
+  "generated_at": "2026-10-08T17:50:13.560273+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -40,14 +40,14 @@
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
       "line": 103,
-      "message": "Section 'Rules for creating or modifying specification documents' is ~1115 tokens (max recommended: 500)",
+      "message": "Section 'Rules for creating or modifying specification documents' is ~1202 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "2838fa04ecdf928f",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
-      "line": 231,
+      "line": 236,
       "message": "Section 'Aligning skills with the specification hierarchy' is ~503 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -56,7 +56,7 @@
       "rule_id": "content-section-length",
       "file_path": ".agents/skills/review-pr/SKILL.md",
       "line": 14,
-      "message": "Section 'Process' is ~535 tokens (max recommended: 500)",
+      "message": "Section 'Process' is ~612 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
@@ -252,18 +252,34 @@
       "severity": "info"
     },
     {
-      "fingerprint": "821e350be6832fa8",
+      "fingerprint": "ba2390e07824a2a3",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 171,
+      "line": 169,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
     {
-      "fingerprint": "faba88067777eed0",
+      "fingerprint": "1ced4e74fc0f9223",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
       "line": 174,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "25a347e6c6bdbbb3",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 177,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "8767e320b5720789",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 182,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
