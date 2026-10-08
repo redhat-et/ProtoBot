@@ -244,18 +244,18 @@
       "severity": "info"
     },
     {
-      "fingerprint": "6bb0df65293ccec4",
+      "fingerprint": "f4bd774cf59c4947",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 169,
+      "line": 168,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
     {
-      "fingerprint": "ef5dc4962edf3339",
+      "fingerprint": "26c22d81c2146cc5",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 174,
+      "line": 172,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
