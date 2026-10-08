@@ -145,26 +145,26 @@ type localWrite struct {
 }
 
 type localSession struct {
-	mu           sync.Mutex
-	identity     BackendIdentity
-	req          OpenRequest
-	scratch      string
-	root         string
-	repo         *gitRepo
-	cancel       context.CancelFunc
-	ctx          context.Context
-	opened       time.Time
-	closed       bool
-	cancelled    bool
-	writes       map[string]localWrite
-	env          []string
-	allow        []NetworkRule
-	cmds         []*exec.Cmd
-	writtenBytes int64
-	writtenFiles int
-	cpuUsed      time.Duration
-	audit        []SandboxAuditEvent
-	auditDir     string
+	mu            sync.Mutex
+	identity      BackendIdentity
+	req           OpenRequest
+	scratch       string
+	root          string
+	repo          *gitRepo
+	cancel        context.CancelFunc
+	ctx           context.Context
+	opened        time.Time
+	closed        bool
+	cancelled     bool
+	writes        map[string]localWrite
+	env           []string
+	allow         []NetworkRule
+	cmds          []*exec.Cmd
+	writtenBytes  int64
+	writtenFiles  int
+	cpuUsed       time.Duration
+	audit         []SandboxAuditEvent
+	auditDir      string
 	upstream      *httptest.Server
 	broker        *httptest.Server
 	brokerSecret  string
@@ -210,6 +210,9 @@ func (s *localSession) Execute(ctx context.Context, req ExecRequest) (ExecResult
 	}
 	if req.Executable == ApprovedFetchName {
 		return s.denyLocked(EventSandboxExec, req.Executable, "Network request is missing from approved-fetch.")
+	}
+	if req.Executable == BurnName || req.Executable == "burn" {
+		return s.burnLocked(ctx, req)
 	}
 	if req.Executable == "sleep" {
 		return s.sleepLocked(ctx, req)
@@ -305,26 +308,88 @@ func (s *localSession) WritePath(ctx context.Context, projectPath string, conten
 
 func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.guardLocked(ctx); err != nil {
+		s.mu.Unlock()
 		return ExecResult{}, err
 	}
 	if len(args) == 0 {
-		return s.denyLocked(EventSandboxGit, "git", "Git command is missing.")
+		res, err := s.denyLocked(EventSandboxGit, "git", "git command is missing")
+		s.mu.Unlock()
+		return res, err
 	}
-	if err := classifyGitArgs(args); err != nil {
-		return s.denyLocked(EventSandboxGit, strings.Join(args, " "), err.Error())
+	if len(s.cmds)+1 > s.limitProcs {
+		err := s.limitLocked("process-count", fmt.Sprintf("%d", s.limitProcs), "process-count limit exceeded")
+		s.mu.Unlock()
+		return ExecResult{Denied: true, Status: -1}, err
 	}
-	res, err := s.repo.run(args...)
+	cleanArgs, err := classifyAndPrepareGitArgs(args)
 	if err != nil {
+		res, denyErr := s.denyLocked(EventSandboxGit, strings.Join(args, " "), err.Error())
+		s.mu.Unlock()
+		return res, denyErr
+	}
+	cmd, stdout, stderr := s.repo.runner.Command(s.ctx, cleanArgs...)
+	if err := cmd.Start(); err != nil {
+		s.mu.Unlock()
 		return ExecResult{}, err
 	}
-	out := ExecResult{Status: res.Status, Stdout: res.Stdout, Stderr: res.Stderr}
+	s.cmds = append(s.cmds, cmd)
+	sessionCtx := s.ctx
+	s.mu.Unlock()
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var waitErr error
+	var cancelled bool
+	var timedOut bool
+	select {
+	case waitErr = <-done:
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		<-done
+		cancelled = true
+	case <-sessionCtx.Done():
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		<-done
+		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
+			timedOut = true
+		} else {
+			cancelled = true
+		}
+	}
+	elapsed := time.Since(start)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cpuUsed += elapsed
+	if timedOut {
+		limitName, limitConfig := s.expiredLimitInfo()
+		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
+	}
+	if cancelled || s.cancelled {
+		s.cancelled = true
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	status := 0
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			status = exitErr.ExitCode()
+		} else {
+			return ExecResult{}, fmt.Errorf("git wait: %w", waitErr)
+		}
+	}
+	out := ExecResult{Status: status, Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
 	if containsSentinelBytes(out.Stdout, out.Stderr) {
 		return s.denyLocked(EventSandboxGit, strings.Join(args, " "), "Git output contained a credential sentinel.")
 	}
 	decision := DecisionAccept
-	if !res.OK() {
+	if status != 0 {
 		decision = DecisionReject
 	}
 	s.appendAudit(SandboxAuditEvent{EventType: EventSandboxGit, Decision: decision, Action: args[0], Target: strings.Join(args, " ")})
@@ -452,7 +517,6 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	s.cmds = append(s.cmds, cmd)
 	sessionCtx := s.ctx
 	s.mu.Unlock()
-	start := time.Now()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	var waitErr error
@@ -473,9 +537,7 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 			cancelled = true
 		}
 	}
-	elapsed := time.Since(start)
 	s.mu.Lock()
-	s.cpuUsed += elapsed
 	if timedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
 		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
@@ -495,6 +557,65 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	}
 	s.appendAudit(SandboxAuditEvent{EventType: EventSandboxExec, Decision: DecisionAccept, Action: "sleep", Executable: req.Executable})
 	return ExecResult{Status: status}, nil
+}
+
+func (s *localSession) burnLocked(ctx context.Context, req ExecRequest) (ExecResult, error) {
+	if req.Digest != "" && req.Digest != BurnDigest {
+		return s.denyLocked(EventSandboxExec, req.Executable, "Executable digest does not match allowlist.")
+	}
+	burnDur := 30 * time.Millisecond
+	if len(req.Args) > 0 {
+		if d, err := time.ParseDuration(req.Args[0]); err == nil {
+			burnDur = d
+		} else if f, err := strconv.ParseFloat(req.Args[0], 64); err == nil {
+			burnDur = time.Duration(f * float64(time.Second))
+		}
+	}
+	sessionCtx := s.ctx
+	s.mu.Unlock()
+	start := time.Now()
+	target := start.Add(burnDur)
+	var timedOut bool
+	var cancelled bool
+	for time.Now().Before(target) {
+		select {
+		case <-ctx.Done():
+			cancelled = true
+			break
+		case <-sessionCtx.Done():
+			if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
+				timedOut = true
+			} else {
+				cancelled = true
+			}
+			break
+		default:
+			for i := 0; i < 50000; i++ {
+				_ = i * i
+			}
+		}
+		if cancelled || timedOut {
+			break
+		}
+	}
+	elapsed := time.Since(start)
+	s.mu.Lock()
+	s.cpuUsed += elapsed
+	if timedOut {
+		limitName, limitConfig := s.expiredLimitInfo()
+		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
+	}
+	if cancelled || s.cancelled {
+		s.cancelled = true
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	s.appendAudit(SandboxAuditEvent{
+		EventType:  EventSandboxExec,
+		Decision:   DecisionAccept,
+		Action:     "burn",
+		Executable: req.Executable,
+	})
+	return ExecResult{Status: 0, Stdout: []byte("burned")}, nil
 }
 
 func (s *localSession) networkLocked(req ExecRequest) (ExecResult, error) {
@@ -752,49 +873,191 @@ func sandboxEnv(scratch string) []string {
 		env = append(env, "TZ=UTC")
 	}
 	env = append(env, "HOME="+scratch)
+	env = append(env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	env = append(env, fixtureIdentity...)
 	return env
 }
 
 func classifyGitArgs(args []string) error {
+	_, err := classifyAndPrepareGitArgs(args)
+	return err
+}
+
+func classifyAndPrepareGitArgs(args []string) ([]string, error) {
 	if len(args) == 0 {
-		return errors.New("Git command is missing.")
+		return nil, errors.New("git command is missing")
 	}
-	var subcommand string
-	var subcmdIdx = -1
-	for i, arg := range args {
-		if arg == "--git-dir" || strings.HasPrefix(arg, "--git-dir=") ||
+	first := args[0]
+	if strings.HasPrefix(first, "-") {
+		return nil, fmt.Errorf("git flag %q is forbidden in the sandbox", first)
+	}
+	subcmd := first
+	subcmdAllowed := false
+	switch subcmd {
+	case "cat-file", "rev-parse", "status", "log", "show", "diff", "remote":
+		subcmdAllowed = true
+	}
+	if !subcmdAllowed {
+		return nil, fmt.Errorf("git subcommand %q is forbidden in the sandbox", subcmd)
+	}
+
+	if subcmd == "remote" {
+		for _, remArg := range args[1:] {
+			if remArg != "-v" && remArg != "--verbose" {
+				return nil, fmt.Errorf("git remote subcommand %q is forbidden in the sandbox", remArg)
+			}
+		}
+		return append([]string{"remote"}, args[1:]...), nil
+	}
+
+	var flags []string
+	var operands []string
+	hasDashDash := false
+	hasEndOfOptions := false
+
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if hasDashDash {
+			if err := validateGitOperand(arg); err != nil {
+				return nil, err
+			}
+			operands = append(operands, arg)
+			continue
+		}
+		if arg == "--" {
+			hasDashDash = true
+			operands = append(operands, arg)
+			continue
+		}
+		if arg == "--end-of-options" {
+			hasEndOfOptions = true
+			flags = append(flags, arg)
+			continue
+		}
+
+		if arg == "--no-index" ||
+			arg == "--output" || strings.HasPrefix(arg, "--output=") || arg == "-o" ||
+			arg == "--config-env" || strings.HasPrefix(arg, "--config-env=") ||
+			arg == "--git-dir" || strings.HasPrefix(arg, "--git-dir=") ||
 			arg == "--work-tree" || strings.HasPrefix(arg, "--work-tree=") ||
 			arg == "-C" || (strings.HasPrefix(arg, "-C") && !strings.HasPrefix(arg, "--")) ||
 			arg == "-c" || (strings.HasPrefix(arg, "-c") && !strings.HasPrefix(arg, "--")) ||
 			arg == "--exec-path" || strings.HasPrefix(arg, "--exec-path=") ||
 			arg == "--namespace" || strings.HasPrefix(arg, "--namespace=") {
-			return fmt.Errorf("git flag %q is forbidden in the sandbox", arg)
+			return nil, fmt.Errorf("git flag %q is forbidden in the sandbox", arg)
 		}
-		if subcmdIdx == -1 {
-			if strings.HasPrefix(arg, "-") {
-				continue
+
+		if strings.HasPrefix(arg, "-") {
+			if err := checkSubcommandFlag(subcmd, arg); err != nil {
+				return nil, err
 			}
-			subcommand = arg
-			subcmdIdx = i
+			flags = append(flags, arg)
+			if flagTakesArg(subcmd, arg) && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				nextArg := args[i]
+				if err := validateFlagArg(subcmd, arg, nextArg); err != nil {
+					return nil, err
+				}
+				flags = append(flags, nextArg)
+			}
+		} else {
+			if err := validateGitOperand(arg); err != nil {
+				return nil, err
+			}
+			operands = append(operands, arg)
 		}
 	}
-	if subcmdIdx == -1 {
-		return errors.New("Git subcommand is missing.")
+
+	result := []string{subcmd}
+	result = append(result, flags...)
+	if !hasEndOfOptions && subcmd != "remote" {
+		result = append(result, "--end-of-options")
 	}
-	switch subcommand {
-	case "cat-file", "rev-parse", "status", "log", "show", "diff":
-		return nil
+	result = append(result, operands...)
+	return result, nil
+}
+
+func checkSubcommandFlag(subcmd, flag string) error {
+	switch subcmd {
 	case "remote":
-		for _, remArg := range args[subcmdIdx+1:] {
-			if remArg != "-v" && remArg != "--verbose" {
-				return fmt.Errorf("git remote subcommand %q is forbidden in the sandbox", remArg)
+		if flag == "-v" || flag == "--verbose" {
+			return nil
+		}
+		return fmt.Errorf("git remote subcommand %q is forbidden in the sandbox", flag)
+	case "cat-file":
+		switch flag {
+		case "-e", "-p", "-t", "-s", "--batch", "--batch-check", "--batch-all-objects":
+			return nil
+		}
+	case "rev-parse":
+		switch flag {
+		case "-q", "--quiet", "--verify", "--short", "--abbrev-ref", "--symbolic-full-name":
+			return nil
+		}
+	case "status":
+		switch flag {
+		case "-s", "--short", "-b", "--branch", "--porcelain", "--porcelain=v1", "--porcelain=v2", "--ignored", "-u", "-unormal", "-uall", "-uno":
+			return nil
+		}
+	case "log":
+		switch flag {
+		case "-n", "--oneline", "--stat", "--graph", "--decorate", "--no-decorate", "-p", "-u", "--patch":
+			return nil
+		}
+		if strings.HasPrefix(flag, "--max-count=") || strings.HasPrefix(flag, "--format=") || strings.HasPrefix(flag, "--pretty=") {
+			return nil
+		}
+		if len(flag) > 1 && flag[0] == '-' {
+			if _, err := strconv.Atoi(flag[1:]); err == nil {
+				return nil
 			}
 		}
-		return nil
-	default:
-		return fmt.Errorf("git subcommand %q is forbidden in the sandbox", subcommand)
+	case "show":
+		switch flag {
+		case "-s", "--stat", "--oneline", "-p", "-u", "--patch":
+			return nil
+		}
+		if strings.HasPrefix(flag, "--format=") || strings.HasPrefix(flag, "--pretty=") {
+			return nil
+		}
+	case "diff":
+		switch flag {
+		case "-p", "-u", "--patch", "--stat", "--numstat", "--shortstat", "--name-only", "--name-status", "--cached", "--staged":
+			return nil
+		}
 	}
+	return fmt.Errorf("git flag %q is forbidden in the sandbox", flag)
+}
+
+func flagTakesArg(subcmd, flag string) bool {
+	if subcmd == "log" && flag == "-n" {
+		return true
+	}
+	return false
+}
+
+func validateFlagArg(subcmd, flag, val string) error {
+	if subcmd == "log" && flag == "-n" {
+		if _, err := strconv.Atoi(val); err != nil {
+			return fmt.Errorf("git flag %q requires numeric argument", flag)
+		}
+		return nil
+	}
+	return nil
+}
+
+func validateGitOperand(op string) error {
+	if op == "--" || op == "--end-of-options" {
+		return nil
+	}
+	if strings.HasPrefix(op, "/") || strings.HasPrefix(op, "~") || filepath.IsAbs(op) {
+		return fmt.Errorf("git operand %q is outside sandbox root", op)
+	}
+	cleaned := filepath.Clean(op)
+	if strings.HasPrefix(cleaned, "..") || strings.HasPrefix(op, "../") || op == ".." || strings.Contains(op, "/../") || strings.HasSuffix(op, "/..") {
+		return fmt.Errorf("git operand %q is outside sandbox root", op)
+	}
+	return nil
 }
 
 func looksLikeIP(dest string) bool {

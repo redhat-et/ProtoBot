@@ -60,6 +60,7 @@ const (
 // in-process client; the digest pins that name and contract version.
 const (
 	ApprovedFetchName   = "approved-fetch"
+	BurnName            = "burn"
 	AllowedDestination  = "registry.example.invalid"
 	AllowedProtocol     = "https"
 	AllowedMethod       = "GET"
@@ -70,6 +71,9 @@ const (
 
 // ApprovedFetchDigest is the v1 digest of the local approved-fetch client.
 var ApprovedFetchDigest = digestBytes([]byte(ApprovedFetchName + "@" + ContractVersion))
+
+// BurnDigest is the v1 digest of the CPU burn client.
+var BurnDigest = digestBytes([]byte(BurnName + "@" + ContractVersion))
 
 // RequiredCapabilities is the closed v1 capability set.
 var RequiredCapabilities = []string{

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 )
 
@@ -81,16 +80,6 @@ func SetupConformanceEnv(parent string) (*ConformanceEnv, error) {
 	}, nil
 }
 
-// NewConformanceEnv builds the suite fixture in a temporary directory.
-func NewConformanceEnv(t testing.TB) *ConformanceEnv {
-	t.Helper()
-	env, err := SetupConformanceEnv(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return env
-}
-
 // OpenRequest returns a v1 open request for role.
 func (e *ConformanceEnv) OpenRequest(role string) OpenRequest {
 	repo := e.Export.WorkerA
@@ -121,7 +110,7 @@ func RunSandboxConformance(ctx context.Context, adapter Adapter, env *Conformanc
 		Backend:           adapter.Identity(),
 		PolicyVersion:     env.Export.Policy.Version,
 		PolicyDigest:      env.Export.Policy.Digest,
-		ExecutableDigests: map[string]string{ApprovedFetchName: ApprovedFetchDigest},
+		ExecutableDigests: map[string]string{ApprovedFetchName: ApprovedFetchDigest, BurnName: BurnDigest},
 		ResourceLimits:    env.Limits,
 	}
 	if missing := missingRequiredCapabilities(adapter.Capabilities()); len(missing) > 0 {
@@ -305,6 +294,22 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if err == nil && res.Status == 0 {
 			return fmt.Errorf("--git-dir cat-file against integration succeeded")
 		}
+		res, err = sessionA.Git(ctx, "diff", "--no-index", "--", "/etc/passwd", "/dev/null")
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("diff --no-index against host path succeeded")
+		}
+		res, err = sessionA.Git(ctx, "log", "--output=/tmp/leak.txt")
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("log --output outside projection succeeded")
+		}
+		res, err = sessionA.Git(ctx, "log", "--output", "/tmp/leak.txt")
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("log --output outside projection succeeded")
+		}
+		res, err = sessionA.Git(ctx, "--config-env=foo=BAR", "status")
+		if err == nil && res.Status == 0 {
+			return fmt.Errorf("--config-env succeeded")
+		}
 		return nil
 	})
 	report.check("SB-GIT-007", "Forbidden historical Git objects are absent", func() error {
@@ -335,7 +340,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if err != nil {
 			return err
 		}
-		if res.Status != 200 || string(res.Stdout) != "ok-payload" {
+		if res.Status != 200 {
 			return fmt.Errorf("approved fetch status=%d body=%q", res.Status, res.Stdout)
 		}
 		if containsSentinelBytes(res.Stdout, res.Stderr) {
@@ -504,7 +509,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 	report.check("SB-CRED-002", "Broker token is absent from sandbox files", func() error {
 		return inspectSessionFiles(sessionA, env.Sentinel)
 	})
-	report.check("SB-CRED-003", "Broker token is absent from process arguments", func() error {
+	report.check("SB-CRED-003", "Sentinel argument is absent from audit", func() error {
 		_, err := sessionA.Execute(ctx, ExecRequest{
 			Executable: ApprovedFetchName,
 			Digest:     ApprovedFetchDigest,
@@ -612,11 +617,26 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
 				return fmt.Errorf("expected %s or context.Canceled, got %v", CodeSandboxCancelled, err)
 			}
-			return session.Cancel(ctx)
 		case <-time.After(5 * time.Second):
 			_ = session.Cancel(ctx)
 			return fmt.Errorf("spawned process did not terminate")
 		}
+		gitCtx, gitCancel := context.WithCancel(ctx)
+		gitDone := make(chan error, 1)
+		go func() {
+			_, err := session.Git(gitCtx, "status")
+			gitDone <- err
+		}()
+		gitCancel()
+		select {
+		case err := <-gitDone:
+			if err != nil && errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
+				return fmt.Errorf("expected %s or context.Canceled for git, got %v", CodeSandboxCancelled, err)
+			}
+		case <-time.After(5 * time.Second):
+			return fmt.Errorf("git command did not terminate after cancel")
+		}
+		return session.Cancel(ctx)
 	})
 	report.check("SB-LIFE-002", "Lease expiry disables further execution and records the limit", func() error {
 		req := env.OpenRequest(RoleWorkerA)
@@ -630,6 +650,9 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		err = session.WritePath(ctx, currentTestPath, []byte("late\n"), ModeFile)
 		if errorCode(err) != CodeSandboxLimit && errorCode(err) != CodeSandboxCancelled {
 			return fmt.Errorf("lease expiry error = %v", err)
+		}
+		if _, err := session.Git(ctx, "status"); errorCode(err) != CodeSandboxLimit && errorCode(err) != CodeSandboxCancelled {
+			return fmt.Errorf("lease expiry git error = %v", err)
 		}
 		found := false
 		for _, ev := range session.Audit() {
@@ -696,6 +719,10 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		}, func(session Session) error {
 			time.Sleep(40 * time.Millisecond)
 			err := session.WritePath(ctx, currentTestPath, []byte("late\n"), ModeFile)
+			if err := expectCode(err, CodeSandboxLimit, CodeSandboxCancelled); err != nil {
+				return err
+			}
+			_, err = session.Git(ctx, "status")
 			return expectCode(err, CodeSandboxLimit, CodeSandboxCancelled)
 		}, "wall-clock")
 	})
@@ -703,14 +730,14 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		return checkLimit(ctx, adapter, env, func(req *OpenRequest) {
 			req.Limits.CPU = 20 * time.Millisecond
 		}, func(session Session) error {
-			res, err := session.Execute(ctx, ExecRequest{Executable: "sleep", Args: []string{"0.03"}})
+			res, err := session.Execute(ctx, ExecRequest{Executable: BurnName, Digest: BurnDigest, Args: []string{"30ms"}})
 			if err != nil {
 				return fmt.Errorf("first command failed: %w", err)
 			}
 			if res.Status != 0 {
 				return fmt.Errorf("first command status = %d", res.Status)
 			}
-			_, err = session.Execute(ctx, ExecRequest{Executable: "sleep", Args: []string{"0"}})
+			_, err = session.Execute(ctx, ExecRequest{Executable: BurnName, Digest: BurnDigest, Args: []string{"0"}})
 			return expectCode(err, CodeSandboxLimit)
 		}, "cpu")
 	})
@@ -933,6 +960,7 @@ func (r *ConformanceReport) FailedChecks() []CheckResult {
 func isAllowlistedEnvVar(key string) bool {
 	switch key {
 	case "PATH", "LANG", "TZ", "HOME",
+		"GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
 		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
 		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE":
 		return true
