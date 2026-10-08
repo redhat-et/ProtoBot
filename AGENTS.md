@@ -166,12 +166,14 @@ must follow these rules:
    `ears-manager artifact put` within an active change set (for each
    registered path the PR creates or modifies or that Rule 4 found
    stale, resolve `artifacts[].id` for that path in
-   `.protobot/project.yaml`, then require the PR's proposed change-set
-   manifest, not any file under `.protobot/change-sets/`, to contain an
-   `artifact_operations` object whose `artifact_id` equals that registry
-   id; treat a digest-only or content change without that proposed
-   operation as a hand edit), that the registered specification artifact
-   and `.protobot/project.yaml` were not edited by hand, and that
+   `.protobot/project.yaml`, then require a change-set manifest the PR
+   adds or modifies under `.protobot/change-sets/` (status proposed —
+   not an already-approved file that merely happens to sit in that
+   directory) to contain an `artifact_operations[]` entry whose
+   `artifact_id` equals that registry id; treat a digest-only or
+   content change without that proposed operation as a hand edit),
+   that the registered specification artifact and
+   `.protobot/project.yaml` were not edited by hand, and that
    `ears-manager check` passes without `artifact.digest_mismatch`.
    Findings should include a registered specification artifact or
    `.protobot/project.yaml` edited by hand, missing `ears-manager artifact
@@ -179,11 +181,13 @@ must follow these rules:
    or when Rule 4 identifies staleness in a registered specification
    artifact, for each registered path the PR creates or modifies or that
    Rule 4 found stale, resolving `artifacts[].id` for that path in
-   `.protobot/project.yaml`, a proposed change-set manifest (not any
-   file under `.protobot/change-sets/`) missing an `artifact_operations`
-   object whose `artifact_id` equals that registry id (treating a
-   digest-only or content change without that proposed operation as a
-   hand edit), and `artifact.digest_mismatch`, not only formatting and
+   `.protobot/project.yaml`, a change-set manifest the PR adds or
+   modifies under `.protobot/change-sets/` (status proposed — not an
+   already-approved file that merely happens to sit in that directory)
+   missing an `artifact_operations[]` entry whose `artifact_id` equals
+   that registry id (treating a digest-only or content change without
+   that proposed operation as a hand edit), and
+   `artifact.digest_mismatch`, not only formatting and
    cross-reference text matching. When Rule 4 identifies staleness in a
    registered specification artifact, raise a staleness finding that
    prescribes `ears-manager artifact put`, not an edit by hand.
