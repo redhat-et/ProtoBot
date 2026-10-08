@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redhat-et/protobot/source-control-manager/internal/gitx"
 )
 
 // LocalAdapter is the deterministic in-process sandbox backend. It passes
@@ -165,6 +167,7 @@ type localSession struct {
 	env           []string
 	allow         []NetworkRule
 	cmds          []*trackedProcess
+	argvLog       [][]string
 	writtenBytes  int64
 	writtenFiles  int
 	cpuUsed       time.Duration
@@ -218,7 +221,7 @@ func (s *localSession) Execute(ctx context.Context, req ExecRequest) (ExecResult
 		return s.denyLocked(EventSandboxExec, req.Executable, "Process argument contains credential sentinel.")
 	}
 	if req.Network != nil {
-		return s.networkLocked(req)
+		return s.networkLocked(ctx, req)
 	}
 	if req.Executable == ApprovedFetchName {
 		return s.denyLocked(EventSandboxExec, req.Executable, "Network request is missing from approved-fetch.")
@@ -345,8 +348,10 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 		s.mu.Unlock()
 		return res, denyErr
 	}
-	cmd, stdout, stderr := s.repo.runner.Command(s.ctx, cleanArgs...)
-	detachCmd(cmd)
+	cmd := s.repo.runner.CommandContext(s.ctx, cleanArgs...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
 		s.mu.Unlock()
@@ -362,6 +367,7 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 	_ = stdinR.Close()
 	tp := &trackedProcess{Cmd: cmd, done: make(chan struct{})}
 	s.cmds = append(s.cmds, tp)
+	s.argvLog = append(s.argvLog, append([]string(nil), cmd.Args...))
 	sessionCtx := s.ctx
 	s.mu.Unlock()
 
@@ -372,23 +378,24 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 		close(tp.done)
 	}()
 	var waitErr error
-	var cancelled bool
-	var timedOut bool
+	var sessionTimedOut bool
+	var sessionCancelled bool
+	var callerCancelled bool
 	select {
 	case waitErr = <-done:
 	case <-ctx.Done():
 		killCmdProcess(cmd)
 		_ = stdinW.Close()
 		<-done
-		cancelled = true
+		callerCancelled = true
 	case <-sessionCtx.Done():
 		killCmdProcess(cmd)
 		_ = stdinW.Close()
 		<-done
 		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
-			timedOut = true
+			sessionTimedOut = true
 		} else {
-			cancelled = true
+			sessionCancelled = true
 		}
 	}
 	elapsed := time.Since(start)
@@ -397,13 +404,16 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 	defer s.mu.Unlock()
 	s.removeCmdLocked(tp)
 	s.cpuUsed += elapsed
-	if timedOut {
+	if sessionTimedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
 		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
 	}
-	if cancelled || s.cancelled {
+	if sessionCancelled || s.cancelled {
 		s.cancelled = true
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if callerCancelled {
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Call context cancelled.")
 	}
 	status := 0
 	if waitErr != nil {
@@ -518,11 +528,7 @@ func (s *localSession) guardLocked(ctx context.Context) error {
 		return fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
 	}
 	if err := ctx.Err(); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return s.limitLocked("wall-clock", s.limitWall.String(), "wall-clock limit exceeded")
-		}
-		s.cancelled = true
-		return fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+		return fail(CodeSandboxCancelled, "Call context cancelled.")
 	}
 	if s.cpuUsed >= s.limitCPU {
 		return s.limitLocked("cpu", s.limitCPU.String(), "cpu limit exceeded")
@@ -540,13 +546,14 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	}
 	cmd := exec.CommandContext(s.ctx, "sleep", args...)
 	cmd.Dir = s.root
-	detachCmd(cmd)
+	gitx.Detach(cmd)
 	cmd.Env = append([]string(nil), s.env...)
 	if err := cmd.Start(); err != nil {
 		return ExecResult{}, err
 	}
 	tp := &trackedProcess{Cmd: cmd, done: make(chan struct{})}
 	s.cmds = append(s.cmds, tp)
+	s.argvLog = append(s.argvLog, append([]string(nil), cmd.Args...))
 	sessionCtx := s.ctx
 	s.mu.Unlock()
 	done := make(chan error, 1)
@@ -555,32 +562,36 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 		close(tp.done)
 	}()
 	var waitErr error
-	var cancelled bool
-	var timedOut bool
+	var sessionTimedOut bool
+	var sessionCancelled bool
+	var callerCancelled bool
 	select {
 	case waitErr = <-done:
 	case <-ctx.Done():
 		killCmdProcess(cmd)
 		<-done
-		cancelled = true
+		callerCancelled = true
 	case <-sessionCtx.Done():
 		killCmdProcess(cmd)
 		<-done
 		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
-			timedOut = true
+			sessionTimedOut = true
 		} else {
-			cancelled = true
+			sessionCancelled = true
 		}
 	}
 	s.mu.Lock()
 	s.removeCmdLocked(tp)
-	if timedOut {
+	if sessionTimedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
 		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
 	}
-	if cancelled || s.cancelled {
+	if sessionCancelled || s.cancelled {
 		s.cancelled = true
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if callerCancelled {
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Call context cancelled.")
 	}
 	status := 0
 	if waitErr != nil {
@@ -611,19 +622,20 @@ func (s *localSession) burnLocked(ctx context.Context, req ExecRequest) (ExecRes
 	s.mu.Unlock()
 	start := time.Now()
 	target := start.Add(burnDur)
-	var timedOut bool
-	var cancelled bool
+	var sessionTimedOut bool
+	var sessionCancelled bool
+	var callerCancelled bool
 burnLoop:
 	for time.Now().Before(target) {
 		select {
 		case <-ctx.Done():
-			cancelled = true
+			callerCancelled = true
 			break burnLoop
 		case <-sessionCtx.Done():
 			if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
-				timedOut = true
+				sessionTimedOut = true
 			} else {
-				cancelled = true
+				sessionCancelled = true
 			}
 			break burnLoop
 		default:
@@ -635,13 +647,16 @@ burnLoop:
 	elapsed := time.Since(start)
 	s.mu.Lock()
 	s.cpuUsed += elapsed
-	if timedOut {
+	if sessionTimedOut {
 		limitName, limitConfig := s.expiredLimitInfo()
 		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
 	}
-	if cancelled || s.cancelled {
+	if sessionCancelled || s.cancelled {
 		s.cancelled = true
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if callerCancelled {
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Call context cancelled.")
 	}
 	s.appendAudit(SandboxAuditEvent{
 		EventType:  EventSandboxExec,
@@ -652,7 +667,7 @@ burnLoop:
 	return ExecResult{Status: 0, Stdout: []byte("burned")}, nil
 }
 
-func (s *localSession) networkLocked(req ExecRequest) (ExecResult, error) {
+func (s *localSession) networkLocked(ctx context.Context, req ExecRequest) (ExecResult, error) {
 	netReq := req.Network
 	if req.Executable != ApprovedFetchName || req.Digest != ApprovedFetchDigest {
 		return s.denyLocked(EventSandboxNetwork, req.Executable, "Network executable is not approved.")
@@ -681,36 +696,78 @@ func (s *localSession) networkLocked(req ExecRequest) (ExecResult, error) {
 	if s.broker == nil {
 		return ExecResult{}, fail(CodeSandboxFailClosed, "Credential broker is unavailable; autonomous execution disabled")
 	}
-	httpReq, err := http.NewRequestWithContext(s.ctx, netReq.Method, s.broker.URL+netReq.Path, nil)
+
+	sessionCtx := s.ctx
+	brokerURL := s.broker.URL
+	sessionToken := s.brokerSecret
+
+	reqCtx, cancelReq := context.WithCancel(ctx)
+	defer cancelReq()
+	stopWatcher := make(chan struct{})
+	defer close(stopWatcher)
+	go func() {
+		select {
+		case <-sessionCtx.Done():
+			cancelReq()
+		case <-stopWatcher:
+		}
+	}()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, netReq.Method, brokerURL+netReq.Path, nil)
 	if err != nil {
 		return ExecResult{}, err
 	}
-	httpReq.Header.Set("X-Sandbox-Session-Token", s.brokerSecret)
+	httpReq.Header.Set("X-Sandbox-Session-Token", sessionToken)
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return errRedirectDenied
 		},
 	}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		if errors.Is(err, errRedirectDenied) || errors.Is(errors.Unwrap(err), errRedirectDenied) {
+
+	s.mu.Unlock()
+	resp, doErr := client.Do(httpReq)
+	var body []byte
+	var bodyErr error
+	if doErr == nil {
+		body, bodyErr = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+	}
+	s.mu.Lock()
+
+	if sessionCtx.Err() != nil {
+		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
+			limitName, limitConfig := s.expiredLimitInfo()
+			return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
+		}
+		s.cancelled = true
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if s.cancelled || s.closed {
+		s.cancelled = true
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if ctx.Err() != nil {
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Call context cancelled.")
+	}
+
+	if doErr != nil {
+		if errors.Is(doErr, errRedirectDenied) || errors.Is(errors.Unwrap(doErr), errRedirectDenied) {
 			return s.denyLocked(EventSandboxNetwork, netReq.Path, "Network redirects are denied.")
 		}
 		var urlErr interface{ Unwrap() error }
-		if errors.As(err, &urlErr) && errors.Is(urlErr.Unwrap(), errRedirectDenied) {
+		if errors.As(doErr, &urlErr) && errors.Is(urlErr.Unwrap(), errRedirectDenied) {
 			return s.denyLocked(EventSandboxNetwork, netReq.Path, "Network redirects are denied.")
 		}
-		if strings.Contains(err.Error(), errRedirectDenied.Error()) {
+		if strings.Contains(doErr.Error(), errRedirectDenied.Error()) {
 			return s.denyLocked(EventSandboxNetwork, netReq.Path, "Network redirects are denied.")
 		}
-		return ExecResult{}, err
+		return ExecResult{}, doErr
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ExecResult{}, err
+	if bodyErr != nil {
+		return ExecResult{}, bodyErr
 	}
+
 	if containsSentinel(resp.Header.Get(sandboxBrokerHeader), resp.Header.Get("X-Echo-Authorization")) || containsSentinelBytes(body) {
 		return s.denyLocked(EventSandboxNetwork, netReq.Path, "Credential sentinel leaked through the broker response.")
 	}
@@ -1027,7 +1084,7 @@ func checkSubcommandFlag(subcmd, flag string) error {
 		return fmt.Errorf("git remote subcommand %q is forbidden in the sandbox", flag)
 	case "cat-file":
 		switch flag {
-		case "-e", "-p", "-t", "-s", "--batch", "--batch-check", "--batch-all-objects":
+		case "-e", "-p", "-t", "-s", "--batch":
 			return nil
 		}
 	case "rev-parse":

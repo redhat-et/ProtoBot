@@ -224,10 +224,8 @@ func (r *Runner) GlobalArgs() []string {
 	}
 }
 
-// Command builds an *exec.Cmd for args using the runner's global args and environment.
-// Stdin is always set to an empty reader. The returned stdout and stderr buffers
-// receive child output when the process runs.
-func (r *Runner) Command(ctx context.Context, args ...string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
+// CommandContext builds an *exec.Cmd for args using the runner's global args and environment.
+func (r *Runner) CommandContext(ctx context.Context, args ...string) *exec.Cmd {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -236,11 +234,7 @@ func (r *Runner) Command(ctx context.Context, args ...string) (*exec.Cmd, *bytes
 	cmd.WaitDelay = 10 * time.Second
 	Detach(cmd)
 	cmd.Env = append([]string(nil), r.env...)
-	cmd.Stdin = bytes.NewReader(nil)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	return cmd, &stdout, &stderr
+	return cmd
 }
 
 // Run runs git with args. It returns an error only when git could not

@@ -294,6 +294,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			{"log", "--output=/tmp/leak.txt"},
 			{"log", "--output", "/tmp/leak.txt"},
 			{"--config-env=foo=BAR", "status"},
+			{"cat-file", "--batch-all-objects"},
 		} {
 			res, err = sessionA.Git(ctx, args...)
 			if errorCode(err) != CodeSandboxDenied && !res.Denied {
@@ -725,8 +726,11 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 		if second.Root() == root {
 			return fmt.Errorf("second sandbox reused the first root")
 		}
-		_, err = second.ReadPath(ctx, "tests/canonical/secret_scratch.go")
-		return expectDenied(err)
+		data, err := second.ReadPath(ctx, "tests/canonical/secret_scratch.go")
+		if err == nil && len(data) > 0 {
+			return fmt.Errorf("prior scratch file is present in second session")
+		}
+		return nil
 	})
 
 	report.check("SB-LIM-001", "Wall-clock limit is enforced and recorded", func() error {

@@ -161,6 +161,7 @@ func TestGitArgValidation(t *testing.T) {
 		{"diff", "/etc/passwd"},
 		{"diff", "../outside"},
 		{"cat-file", "-e", "/etc/passwd"},
+		{"cat-file", "--batch-all-objects"},
 		{"status", "/etc"},
 		{"remote", "add", "origin", "http://evil.com"},
 	}
@@ -291,12 +292,94 @@ func TestProcessArgsExcludeSentinel(t *testing.T) {
 	}
 
 	local := session.(*localSession)
-	for _, cmd := range local.cmds {
-		for _, arg := range cmd.Args {
+	local.mu.Lock()
+	defer local.mu.Unlock()
+	if len(local.argvLog) == 0 {
+		t.Fatalf("expected logged argv from spawned processes, got none")
+	}
+	for _, argv := range local.argvLog {
+		for _, arg := range argv {
 			if strings.Contains(arg, env.Sentinel) {
 				t.Fatalf("process arg %q contains sentinel %q", arg, env.Sentinel)
 			}
 		}
+	}
+}
+
+func TestCallerDeadlineDoesNotRecordSessionWallClockLimit(t *testing.T) {
+	env := NewConformanceEnv(t)
+	session, err := NewLocalAdapter().Open(context.Background(), env.OpenRequest(RoleWorkerA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	shortCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	_, err = session.ReadPath(shortCtx, sharedDocPath)
+	if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected CodeSandboxCancelled or context.DeadlineExceeded, got %v", err)
+	}
+
+	for _, ev := range session.Audit() {
+		if ev.EventType == EventSandboxLimit && ev.LimitName == "wall-clock" {
+			t.Fatalf("caller deadline was spuriously audited as session wall-clock limit: %+v", ev)
+		}
+	}
+
+	// Verify session remains open and operational for subsequent calls
+	data, err := session.ReadPath(context.Background(), sharedDocPath)
+	if err != nil {
+		t.Fatalf("subsequent ReadPath failed after caller deadline: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatalf("expected non-empty data from valid ReadPath")
+	}
+}
+
+func TestNetworkLifecycleCancellation(t *testing.T) {
+	env := NewConformanceEnv(t)
+	session, err := NewLocalAdapter().Open(context.Background(), env.OpenRequest(RoleWorkerA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	fetchReq := ExecRequest{
+		Executable: ApprovedFetchName,
+		Digest:     ApprovedFetchDigest,
+		Network: &NetworkRequest{
+			Destination: AllowedDestination,
+			Protocol:    AllowedProtocol,
+			Method:      AllowedMethod,
+			Path:        AllowedNetworkPath,
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = session.Execute(ctx, fetchReq)
+	if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected %s or context.Canceled, got %v", CodeSandboxCancelled, err)
+	}
+
+	// Verify session was not cancelled by caller context cancellation
+	res, err := session.Execute(context.Background(), fetchReq)
+	if err != nil {
+		t.Fatalf("subsequent fetch failed after caller cancel: %v", err)
+	}
+	if res.Status != 200 {
+		t.Fatalf("expected status 200, got %d", res.Status)
+	}
+
+	// Verify session Cancel cancels network
+	if err := session.Cancel(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = session.Execute(context.Background(), fetchReq)
+	if errorCode(err) != CodeSandboxCancelled {
+		t.Fatalf("expected %s after Cancel(), got %v", CodeSandboxCancelled, err)
 	}
 }
 

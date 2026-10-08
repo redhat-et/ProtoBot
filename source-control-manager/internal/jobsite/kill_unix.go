@@ -7,12 +7,6 @@ import (
 	"syscall"
 )
 
-func detachCmd(cmd *exec.Cmd) {
-	if cmd != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	}
-}
-
 func killCmdProcess(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
 		return
