@@ -91,18 +91,23 @@ Examples of sibling entries for each governed scope listed above:
 When creating or modifying an entry in a governed scope,
 agents must follow these rules:
 
-1. **Match the grammatical form and mood of sibling entries'
-   bold lead-in headings.** Bold lead-in headings must match
-   the grammatical form and mood of sibling entries' bold
-   lead-in headings. A bold lead-in heading that does not
-   match the grammatical form and mood of sibling entries'
-   bold lead-in headings is a defect. Review agents must
-   check that bold lead-in headings match the grammatical
-   form and mood of sibling entries' bold lead-in headings.
-   Findings should include a bold lead-in heading that does
-   not match the grammatical form and mood of sibling
-   entries' bold lead-in headings, not only sibling-entry
-   terminology matching.
+1. **Match a grammatical form and mood already used by a sibling
+   entry's bold lead-in heading.** Bold lead-in headings must
+   match a grammatical form and mood already used by a sibling
+   entry's bold lead-in heading. When sibling entries' bold
+   lead-in headings use more than one grammatical form and mood,
+   any grammatical form and mood already used by a sibling entry
+   in that list or governed collection is permitted; a heading
+   is not required to match every sibling entry's grammatical
+   form and mood when the sibling set is not uniform. A bold
+   lead-in heading that does not match a grammatical form and
+   mood already used by a sibling entry's bold lead-in heading is
+   a defect. Review agents must check that bold lead-in headings
+   match a grammatical form and mood already used by a sibling
+   entry's bold lead-in heading. Findings should include a bold
+   lead-in heading that does not match a grammatical form and
+   mood already used by a sibling entry's bold lead-in heading,
+   not only sibling-entry terminology matching.
 
 2. **Reflect the qualifications of the entry body in bold
    lead-in headings.** Bold lead-in headings must reflect
