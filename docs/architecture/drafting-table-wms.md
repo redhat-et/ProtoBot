@@ -569,6 +569,8 @@ backend.
   change types, work-item lifecycle, and human review.
 - [Validation Rules](validation-rules.md) — Shared authorization,
   concurrency, transition, and rejection semantics.
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution seam; disjoint from this Drafting Table WMS surface.
 - [`ears-manager` CLI Integration Contract](ears-manager-cli.md) — Governed
   specification reads/writes and impact review.
 - [Git and Project-Repository Integration](git-integration.md) — Branch,

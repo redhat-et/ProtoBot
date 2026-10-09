@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -32,6 +33,36 @@ func TestEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 	}
 	if !slices.Contains(env, "GIT_NO_REPLACE_OBJECTS=1") {
 		t.Fatalf("env missing GIT_NO_REPLACE_OBJECTS=1: %q", env)
+	}
+}
+
+func TestEnvironForwardsCallerGitConfigGlobal(t *testing.T) {
+	customGlobal := "GIT_CONFIG_GLOBAL=/custom/path/.gitconfig"
+	customNosystem := "GIT_CONFIG_NOSYSTEM=0"
+	env := Environ([]string{
+		"PATH=/usr/bin",
+		customGlobal,
+		customNosystem,
+	})
+	if !slices.Contains(env, customGlobal) {
+		t.Fatalf("Environ stripped caller GIT_CONFIG_GLOBAL: %q", env)
+	}
+	if !slices.Contains(env, customNosystem) {
+		t.Fatalf("Environ stripped caller GIT_CONFIG_NOSYSTEM: %q", env)
+	}
+
+	root := t.TempDir()
+	runner, err := NewWithEnv(root, []string{customGlobal, customNosystem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runner.Close()
+	cmd := runner.CommandContext(context.Background(), "status")
+	if !slices.Contains(cmd.Env, customGlobal) {
+		t.Fatalf("runner command env missing caller GIT_CONFIG_GLOBAL: %q", cmd.Env)
+	}
+	if !slices.Contains(cmd.Env, customNosystem) {
+		t.Fatalf("runner command env missing caller GIT_CONFIG_NOSYSTEM: %q", cmd.Env)
 	}
 }
 

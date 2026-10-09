@@ -267,11 +267,13 @@ credential brokers is the independent sandbox fallback when OpenShell
 itself is unavailable or incompatible with the target platform.
 
 ProtoBot depends on a backend-neutral execution and sandbox contract,
-not on Fullsend or OpenShell APIs. Fullsend does not replace ProtoBot's
-change-set/WMS control plane, role-projected repositories, dual-worker
-integration, Triage sanitizer, or conformance evidence. A backend that
-cannot pass the contract's isolation, network, and credential acceptance
-tests cannot run autonomous work.
+not on Fullsend or OpenShell APIs
+([Job Site Sandbox Contract](jobsite-sandbox.md)). Fullsend does not
+replace ProtoBot's change-set/WMS control plane, role-projected
+repositories, dual-worker integration, Triage sanitizer, or
+conformance evidence. A backend that cannot pass the contract's
+isolation, network, and credential acceptance tests cannot run
+autonomous work.
 
 OpenCode's model-provider flexibility applies directly to the Drafting
 Table. Job Site harnesses are backend-pluggable and need not use OpenCode;
@@ -324,6 +326,8 @@ ProtoBot's own components need (CLI tools, Go binaries, etc.).
   authorization, transitions, and rejection semantics.
 - [Drafting Table WMS Integration](drafting-table-wms.md) — Backend-neutral
   WMS operations and blocked-work resolution.
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution and sandbox acceptance suite.
 - [Git and Project-Repository Integration](git-integration.md) —
   Project identification, branches, commits, PR preparation, and
   approved specification state.

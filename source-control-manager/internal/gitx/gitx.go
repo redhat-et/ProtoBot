@@ -30,6 +30,8 @@ type Runner struct {
 
 // Opts are the options of one command.
 type Opts struct {
+	// Ctx is the execution context. If nil, context.Background() is used.
+	Ctx context.Context
 	// Stdin is the standard input. Nil means no input.
 	Stdin []byte
 	// Env holds extra environment entries, such as GIT_INDEX_FILE. The
@@ -102,8 +104,9 @@ var fixedEnv = []string{
 // on a program of the user's configuration ends with a failure.
 const Timeout = 10 * time.Minute
 
-// New creates a runner for dir. The caller must call Close.
-func New(dir string) (*Runner, error) {
+// NewWithEnv creates a runner for dir using the specified base environment.
+// The caller must call Close.
+func NewWithEnv(dir string, env []string) (*Runner, error) {
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		return nil, fmt.Errorf("find git: %w", err)
@@ -112,7 +115,12 @@ func New(dir string) (*Runner, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create the empty hooks directory: %w", err)
 	}
-	return &Runner{Root: dir, gitPath: gitPath, hooksDir: hooksDir, env: Environ(os.Environ())}, nil
+	return &Runner{Root: dir, gitPath: gitPath, hooksDir: hooksDir, env: Environ(env)}, nil
+}
+
+// New creates a runner for dir. The caller must call Close.
+func New(dir string) (*Runner, error) {
+	return NewWithEnv(dir, os.Environ())
 }
 
 // Environ returns env without the variables that redirect git, plus the
@@ -142,8 +150,17 @@ func hasPrefix(name string, prefixes []string) bool {
 // controlling terminal, and a short wait for pipes that a grandchild
 // holds after the child exits. The caller must call the cancel function.
 func Command(name string, args ...string) (*exec.Cmd, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
-	cmd := exec.CommandContext(ctx, name, args...)
+	return CommandContext(context.Background(), name, args...)
+}
+
+// CommandContext builds a child process bounded by ctx and Timeout, with no
+// controlling terminal and a short wait for pipes. The caller must call cancel.
+func CommandContext(ctx context.Context, name string, args ...string) (*exec.Cmd, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	subCtx, cancel := context.WithTimeout(ctx, Timeout)
+	cmd := exec.CommandContext(subCtx, name, args...)
 	cmd.WaitDelay = 10 * time.Second
 	Detach(cmd)
 	return cmd, cancel
@@ -207,6 +224,19 @@ func (r *Runner) GlobalArgs() []string {
 	}
 }
 
+// CommandContext builds an *exec.Cmd for args using the runner's global args and environment.
+func (r *Runner) CommandContext(ctx context.Context, args ...string) *exec.Cmd {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	argv := append(r.GlobalArgs(), args...)
+	cmd := exec.CommandContext(ctx, r.gitPath, argv...)
+	cmd.WaitDelay = 10 * time.Second
+	Detach(cmd)
+	cmd.Env = append([]string(nil), r.env...)
+	return cmd
+}
+
 // Run runs git with args. It returns an error only when git could not
 // run at all; a non-zero exit is a Result with that status.
 func (r *Runner) Run(opts Opts, args ...string) (Result, error) {
@@ -214,11 +244,13 @@ func (r *Runner) Run(opts Opts, args ...string) (Result, error) {
 		r.Record(append([]string{"git"}, args...))
 	}
 	argv := append(r.GlobalArgs(), args...)
-	cmd, cancel := Command(r.gitPath, argv...)
+	cmd, cancel := CommandContext(opts.Ctx, r.gitPath, argv...)
 	defer cancel()
 	cmd.Env = append(append([]string(nil), r.env...), opts.Env...)
 	if opts.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(opts.Stdin)
+	} else {
+		cmd.Stdin = bytes.NewReader(nil)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

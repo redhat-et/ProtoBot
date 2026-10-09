@@ -67,6 +67,7 @@ Environmental constraints are listed in a
 | 11 | IdeaBot handoff _(manual, Q4)_ | Pipeline input | IdeaBot | Drafting Table |
 | 12 | Prototype and demo artifacts | Pipeline output | Job Site | TransferBot, stakeholders |
 | 13 | Source Control Manager | MCP tool surface + CLI | Source Control Manager | Drafting Table (TUI and Web), Job Site (registration, Materializer) |
+| 14 | Job Site sandbox contract | Versioned adapter contract with deterministic conformance suite | Sandbox adapters/backends | Job Site |
 
 Most interfaces are described in dedicated sections below.
 The Job Site intake interface and the claim coordinator are
@@ -511,8 +512,10 @@ scope to the handoff boundary — what crosses the line between
 interactive and autonomous work. The Job Site's internal
 components, worker topology, execution backends, and sandbox
 architecture are detailed in the [System
-Components](architecture/components.md#job-site) design document and are
-out of scope for this Sketch.
+Components](architecture/components.md#job-site) design document.
+The backend-neutral sandbox acceptance suite is the
+[Job Site Sandbox Contract](architecture/jobsite-sandbox.md). Worker
+topology and backend internals remain out of scope for this Sketch.
 
 **Pipeline input (what seeds ProtoBot):**
 
@@ -577,6 +580,9 @@ out of scope for this Sketch.
   the specification commit
 - Project repository — source checkout, integration branches,
   merge to main
+- Job Site sandbox contract — backend-neutral isolation, network,
+  credential, limit, cleanup, and audit checks
+  ([Job Site Sandbox Contract](architecture/jobsite-sandbox.md))
 - Source Control Manager — the merge commit of an approved change
   set, for registration and the Materializer
 - Validation Rules — pre-write transition checks
@@ -1001,6 +1007,7 @@ approach.
 | Source Control Manager | MCP tool surface + CLI | MCP tool schemas (JSON Schema) on MCP revision 2026-07-28, dual-era with 2025-11-25 on stdio, and the result envelope and error codes defined in the [SCM contract](architecture/source-control-manager.md) |
 | Specification Toolkit | Agent skill package | Skill manifest + MCP tool schemas (JSON Schema) |
 | Validation Rules | Versioned declarative state-machine ruleset | Deterministic evaluator ([Validation Rules Contract](architecture/validation-rules.md)) |
+| Job Site sandbox contract | Versioned adapter contract | Deterministic conformance suite ([Job Site Sandbox Contract](architecture/jobsite-sandbox.md)) |
 | Drafting Table (TUI) | REPL | Specification Toolkit skills and prompts define the interaction protocol |
 | Drafting Table (Web) | Web GUI | Open gap — Web GUI specification approach not yet established |
 | Project repository | Persistent state | JSON Schema for each `.protobot/` file + `ears-manager` CLI contract |
@@ -1026,6 +1033,8 @@ that contract.
   authorization, transition, rejection, and conformance contract
 - [Drafting Table WMS Integration](architecture/drafting-table-wms.md) —
   Backend-neutral WMS operations and blocked-work resolution
+- [Job Site Sandbox Contract](architecture/jobsite-sandbox.md) —
+  Sandbox acceptance suite
 - [Git and Project-Repository
   Integration](architecture/git-integration.md) — Project
   identification, branches, commits, PR preparation, and approved

@@ -973,6 +973,8 @@ OAuth tokens, hosted session manager, or live cloud services.
   authorization, transitions, and rejection semantics
 - [Drafting Table WMS Integration](drafting-table-wms.md) — Backend-neutral
   request, query, linking, and blocked-resolution operations
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution seam; the Drafting Table does not open Job Site sandboxes
 - [User Interaction Flow](user-interaction-flow.md) — Phase details
   and sequence diagrams
 - [Git and Project-Repository Integration](git-integration.md) —

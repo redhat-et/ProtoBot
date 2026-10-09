@@ -1942,6 +1942,9 @@ these checks, and the transcript has no record for them.
   reads the SCM makes.
 - [Drafting Table WMS Integration](drafting-table-wms.md) — The model
   for a governed boundary with an operation matrix.
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution seam hosted beside this module's Job Site fixture; it does
+  not extend the Drafting Table face.
 - [Validation Rules](validation-rules.md) — The trusted authorization
   context the hosted face reuses.
 - [Drafting Table UX](drafting-table-ux.md) — When the user asks for a

@@ -194,6 +194,22 @@
       "line": 254,
       "message": "Weak language (vagueness): 'correctly' \u2014 Remove 'correctly' \u2014 describe what correct behavior looks like",
       "severity": "info"
+    },
+    {
+      "fingerprint": "bf6aff1c1a975087",
+      "rule_id": "content-section-length",
+      "file_path": "AGENTS.md",
+      "line": 62,
+      "message": "Section 'Specification document hierarchy' is ~543 tokens (max recommended: 500)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "d2b4f8ad13e25933",
+      "rule_id": "content-section-length",
+      "file_path": "docs/architecture.md",
+      "line": 1024,
+      "message": "Section 'Related Documents' is ~514 tokens (max recommended: 500)",
+      "severity": "info"
     }
   ]
 }

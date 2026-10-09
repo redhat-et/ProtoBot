@@ -101,6 +101,8 @@ membership undecided.
   validation, authorization, transition, and rejection contract.
 - [`docs/architecture/drafting-table-wms.md`][drafting-table-wms-doc] —
   backend-neutral Drafting Table WMS operations and fixture.
+- [`docs/architecture/jobsite-sandbox.md`][jobsite-sandbox-doc] —
+  Job Site sandbox contract and local conformance suite.
 - `docs/architecture/user-interaction-flow.md` — phase details,
   sequence diagrams, and testing strategy.
 - `docs/architecture/drafting-table-ux.md` — stable interaction
@@ -119,6 +121,7 @@ membership undecided.
 [agent-harness-doc]: docs/architecture/agent-harness/
 [ears-and-review-doc]: .agents/skills/eliciting-requirements/references/ears-and-review.md
 [drafting-table-wms-doc]: docs/architecture/drafting-table-wms.md
+[jobsite-sandbox-doc]: docs/architecture/jobsite-sandbox.md
 
 ### Rules for creating or modifying specification documents
 

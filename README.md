@@ -73,7 +73,7 @@ source-control-manager/
   internal/{cli,mcpserver,scm,gitx,host,ears,render,...}/
   internal/golden/          # the golden repository fixture, replayed
   internal/testing/         # the gh and ears-manager stubs of the fixture
-  internal/jobsite/         # Worker projection isolation fixture (#78)
+  internal/jobsite/         # Worker projection isolation and sandbox contract (#78, #79)
 wms/
   go.mod
   validation/               # backend-neutral lifecycle evaluator
