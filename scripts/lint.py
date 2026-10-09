@@ -697,10 +697,11 @@ def _get_files(args: argparse.Namespace) -> list[str]:
                 combined.add(line.strip())
         raw = sorted(combined)
 
-    # Exclude entries that resolve to directories (e.g. symlinks
-    # pointing at directories — ``git ls-files`` lists them but
-    # file-oriented tools choke on them).
-    return [f for f in raw if not (REPO_ROOT / f).is_dir()]
+    # Keep only paths that exist as files on disk. ``git ls-files``
+    # includes tracked paths missing from the working tree (unstaged
+    # deletions) and directory symlinks; file-oriented hooks raise
+    # FileNotFoundError on those paths.
+    return [f for f in raw if (REPO_ROOT / f).is_file()]
 
 
 # ── Parity check ───────────────────────────────────────────────
