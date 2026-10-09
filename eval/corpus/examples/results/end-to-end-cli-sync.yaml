@@ -1,0 +1,74 @@
+---
+schema_version: 1
+result_id: end-to-end-cli-sync-local
+fixture_id: cli-sync
+corpus_revision: v1
+run_id: local-schema-example
+recorded_at: "2026-09-29T00:00:00Z"
+stage: end-to-end
+reproducibility:
+  inputs:
+    fixture_id: cli-sync
+    corpus_revision: v1
+    fixture_digest: "sha256:b532e659c6314c51e099f8d30fbe8fc9dfdef7b5866099e99c4879358f5b53ab"
+    projection: end-to-end
+  environment:
+    mode: local
+    hosted_cluster: false
+    external_service_credentials: false
+    models:
+      - role: elicitation
+        name: local-unrun
+      - role: worker-a
+        name: local-unrun
+      - role: worker-b
+        name: local-unrun
+    components:
+      - name: specification-toolkit
+        revision: unrun
+      - name: job-site
+        revision: unrun
+      - name: drafting-table
+        revision: unrun
+      - name: eval-runner
+        revision: schema-v1
+scores:
+  requirements:
+    pass: true
+    summary: >-
+      End-to-end run keeps requirements quality attributable on its
+      own.
+    metrics:
+      coverage: 1.0
+      applicability: 1.0
+      implementability: 1.0
+    per_requirement:
+      - id: REQ-CLI-00001
+        outcome: covered
+        evidence: Golden comparison target for the illustrative run.
+  job_site:
+    pass: true
+    summary: >-
+      End-to-end run keeps Job Site conformance attributable on its
+      own.
+    visible_checks:
+      passed: 1
+      failed: 0
+      total: 1
+    holdout_checks:
+      passed: 1
+      failed: 0
+      total: 1
+  end_to_end:
+    pass: true
+    summary: >-
+      Combined pipeline result. It is not a substitute for the
+      requirements or Job Site scores.
+    attribution:
+      requirements: true
+      job_site: true
+failures: []
+critical_failures: []
+traces:
+  - kind: end-to-end
+    uri: file://eval/corpus/examples/results/end-to-end-cli-sync.yaml

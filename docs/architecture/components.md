@@ -1790,6 +1790,14 @@ This means each component needs:
   full Job Site, or eval gap-closing heuristics without a live
   Dimensioning session.
 
+Project-level requirements and Job Site evaluation use the
+[evaluation corpus contract](evaluation-corpus.md). That contract
+records separately attributable requirements-quality, Job Site
+conformance, and end-to-end outcomes; keeps holdout behavior checks
+out of Worker projections; and validates locally without a hosted
+cluster or external service credentials. It does not replace the
+eliciting-requirements skill corpus.
+
 **Per-component eval surfaces:**
 
 | Component | Key eval questions | Data source |
@@ -1821,10 +1829,12 @@ instrumentation.
   a harness-neutral format is still open.
 - **Eval harness.** How do you run an eval? Feed a component
   recorded inputs and compare outputs against a reference? The
-  Eval Hub and
+  fixture and result contract is the
+  [evaluation corpus](evaluation-corpus.md). The Eval Hub and
   Agent Eval Harness
-  are existing Red Hat eval infrastructure — should ProtoBot use
-  them, or does the component-level eval need something different?
+  are existing Red Hat eval infrastructure — should a live runner
+  use them, or does the component-level eval need something
+  different?
 - **Baseline establishment.** What's the first set of evals to
   build? The Job Site cycle count (how many triage iterations before
   tests pass) is probably the easiest high-signal metric to start
@@ -2175,6 +2185,9 @@ confirmation.
   Command grammar, results, diagnostics, and impact review
 - [Open Design Questions](open-questions.md) — Unresolved design
   questions across all areas
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed
+  results
 - [Related Work](related-work.md) — Red Hat internal projects,
   external factory projects, and lessons learned
 

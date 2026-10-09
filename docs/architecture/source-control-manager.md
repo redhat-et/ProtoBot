@@ -1949,6 +1949,8 @@ these checks, and the transcript has no record for them.
 - [User Interaction Flow](user-interaction-flow.md) — Phase details and
   change types.
 - [Open Design Questions](open-questions.md) — Q21, the Job Site face.
+- [Evaluation Corpus Schema and Result Contract](evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed results.
 - [Related Work](related-work.md) — Fullsend's pre-script, sandbox, and
   post-script model, and Forge's rule that agents never write to
   external systems directly.

@@ -1,0 +1,117 @@
+---
+schema_version: 1
+fixture_id: api-registry
+corpus_revision: v1
+archetype: network-service
+title: Local record-registry HTTP API
+project_description: >-
+  I need a small HTTP API that stores named records on the local
+  machine. A caller should be able to create a record with an id and a
+  body, and later fetch that record by id. Asking for a record that was
+  never created must fail in a way the caller can distinguish from a
+  successful read. This is a local service; it must not require a
+  cluster or cloud credentials.
+visible:
+  vision:
+    purpose: >-
+      Provide a local HTTP registry that stores and returns named
+      records for prototype demonstrations.
+    intended_users:
+      - Developers exercising a server-side API on a local machine
+    desired_outcomes:
+      - A create call stores a record that a later read can return
+      - A missing record is distinguishable from a successful read
+  architecture:
+    external_interfaces:
+      - id: registry-http
+        name: Record registry HTTP API
+        type: network-service
+        spec_approach: OpenAPI
+        description: >-
+          Local HTTP service with create and read operations on named
+          records.
+    persistent_state:
+      - Record store on the local filesystem
+    environmental_constraints:
+      - Listens on a local HTTP port
+      - Requires no external service credentials
+      - Requires no hosted cluster
+  requirements:
+    - id: REQ-API-00001
+      type: event-driven
+      text: >-
+        When a caller creates a record with a new id and a body, the
+        record registry shall store that record.
+      applies_to:
+        interfaces:
+          - registry-http
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+    - id: REQ-API-00002
+      type: event-driven
+      text: >-
+        When a caller reads a stored record by id, the record registry
+        shall return the stored body.
+      applies_to:
+        interfaces:
+          - registry-http
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+    - id: REQ-API-00003
+      type: unwanted-behavior
+      text: >-
+        If a caller reads an id that has no stored record, then the
+        record registry shall refuse the read and shall not return a
+        record body.
+      applies_to:
+        interfaces:
+          - registry-http
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+  interface_runtime:
+    - interface_id: registry-http
+      type: network-service
+      runtime: local-http
+      entry: registry-http
+      credentials: none
+      hosted_cluster: false
+  reference_behavior_checks:
+    - id: VIS-API-00001
+      visibility: worker-visible
+      requirement_ids:
+        - REQ-API-00001
+        - REQ-API-00002
+      interface_id: registry-http
+      description: >-
+        Creating a record and reading it by id returns the stored body.
+      setup: >-
+        Local HTTP server with an empty record store.
+      evidence: >-
+        POST /records yields 201; GET /records/demo returns the posted
+        body.
+holdout:
+  assets:
+    - id: HO-API-00001
+      kind: behavior-check
+      path: holdout/checks.yaml
+      digest: "sha256:254395af45f74ccee33215c4321abd90a4387db9149d7f95cb0ee2188b2727a8"
+      requirement_ids:
+        - REQ-API-00003
+      interface_id: registry-http
+provenance:
+  status: illustrative
+  authors:
+    - protobot-eval-corpus
+  reviewers: []
+  rationale: >-
+    Illustrative network-service archetype for schema validation.
+    Reviewed golden fixtures are out of scope for this contract
+    revision.
+  known_ambiguities:
+    - Record-body media type is unspecified beyond a UTF-8 payload.

@@ -137,3 +137,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^(AGENTS\.md|\.fullsend/harness/review\.yaml)$
+      - id: eval-corpus-schema
+        name: eval-corpus-schema
+        entry: python3 eval/corpus/validate.py
+        language: system
+        pass_filenames: false
+        files: ^(eval/corpus/.+|docs/architecture/evaluation-corpus\.md)$

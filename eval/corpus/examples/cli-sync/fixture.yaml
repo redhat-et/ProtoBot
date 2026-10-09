@@ -1,0 +1,123 @@
+---
+schema_version: 1
+fixture_id: cli-sync
+corpus_revision: v1
+archetype: cli
+title: Local project-sync command-line tool
+project_description: >-
+  I need a command-line tool that copies files from a source directory
+  into a destination directory inside my project. Operators should be
+  able to preview the files that would change without writing anything,
+  and they should be able to apply the copy when they mean to. If the
+  destination is missing or is not a directory, the tool must refuse the
+  run and leave the tree unchanged.
+visible:
+  vision:
+    purpose: >-
+      Give an operator a local command-line tool that copies project
+      files into a destination directory, with a preview that does not
+      write.
+    intended_users:
+      - Local operators validating a copy before applying it
+    desired_outcomes:
+      - A dry-run reports planned paths and writes nothing
+      - An apply copies the planned files
+      - An invalid destination is refused without writes
+  architecture:
+    external_interfaces:
+      - id: cli-sync
+        name: Project-sync CLI
+        type: cli
+        spec_approach: >-
+          Command grammar and typed result contract defined by the CLI
+        description: >-
+          Local process invoked as sync with a source, a destination,
+          and an optional dry-run flag.
+    persistent_state:
+      - Local destination directory inside the project tree
+    environmental_constraints:
+      - Runs as a local process with no hosted cluster
+      - Requires no external service credentials
+  requirements:
+    - id: REQ-CLI-00001
+      type: event-driven
+      text: >-
+        When an operator invokes sync --dry-run with a valid source
+        directory and a destination inside the project, the
+        command-line tool shall report the files that would change
+        and shall not modify the project.
+      applies_to:
+        interfaces:
+          - cli-sync
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+    - id: REQ-CLI-00002
+      type: event-driven
+      text: >-
+        When an operator invokes sync without --dry-run with a valid
+        source directory and a destination inside the project, the
+        command-line tool shall copy the planned files into the
+        destination.
+      applies_to:
+        interfaces:
+          - cli-sync
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+    - id: REQ-CLI-00003
+      type: unwanted-behavior
+      text: >-
+        If the destination is missing or is not a directory, then the
+        command-line tool shall refuse the run and shall not modify
+        the project.
+      applies_to:
+        interfaces:
+          - cli-sync
+      verification:
+        mode: isolated-interface
+      provenance: user-authored
+      created: "2026-09-29T00:00:00Z"
+  interface_runtime:
+    - interface_id: cli-sync
+      type: cli
+      runtime: local-process
+      entry: sync
+      credentials: none
+      hosted_cluster: false
+  reference_behavior_checks:
+    - id: VIS-CLI-00001
+      visibility: worker-visible
+      requirement_ids:
+        - REQ-CLI-00001
+      interface_id: cli-sync
+      description: >-
+        Dry-run lists planned relative paths and leaves the destination
+        digest unchanged.
+      setup: >-
+        Project tree with source/a.txt and an empty destination
+        directory.
+      evidence: >-
+        Exit status 0, stdout contains a.txt, destination digest
+        matches the pre-run digest.
+holdout:
+  assets:
+    - id: HO-CLI-00001
+      kind: behavior-check
+      path: holdout/checks.yaml
+      digest: "sha256:9b6ff7fcd41e6b898978f6e841c4920a2d68f439721a48d113a1b5c5ea72f5fe"
+      requirement_ids:
+        - REQ-CLI-00001
+      interface_id: cli-sync
+provenance:
+  status: illustrative
+  authors:
+    - protobot-eval-corpus
+  reviewers: []
+  rationale: >-
+    Illustrative CLI archetype for schema validation. Reviewed golden
+    fixtures are out of scope for this contract revision.
+  known_ambiguities:
+    - File-copy metadata such as permissions is unspecified.

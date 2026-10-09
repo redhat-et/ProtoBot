@@ -812,7 +812,11 @@ Materializer ── create work item ─→ WMS Backend
 
 Persistent state outlives any single run and requires its own
 interface contract. ProtoBot has eight categories of persistent
-state. The initial project and specification stores use schema
+state. The evaluation corpus under `eval/corpus/` is repository
+evaluation data, not a ninth project store. The
+[evaluation corpus contract](architecture/evaluation-corpus.md)
+states this explicitly.
+The initial project and specification stores use schema
 version 1 (in `.protobot/project.yaml`) and include structured-store
 integrity digests. When a tool encounters data at a version newer
 than its own, it refuses to operate rather than silently corrupting
@@ -978,7 +982,7 @@ incompatible decisions.
 | Prototype outputs: UBI + Hummingbird images | Lightweight, fast-turnaround demo builds on Red Hat certified base images. |
 | Authentication: OAuth 2.1 | ESS-required baseline. MCP/API servers terminate inbound client tokens and use server-owned credentials downstream (Alcove Bridge/Gate pattern). |
 | Credential isolation: Bridge/Gate pattern | Agent processes never see real credentials. Bridges pre-fetch tokens; Gates inject them at the network boundary. |
-| Evaluability from day one | Every agentic component records replayable inputs/outputs and structured traces, enabling component-level testing and measurable improvement. This is an architectural constraint, not retrofitted. |
+| Evaluability from day one | Every agentic component records replayable inputs/outputs and structured traces, enabling component-level testing and measurable improvement. Project-level requirements and Job Site evaluation use the [evaluation corpus contract](architecture/evaluation-corpus.md). This is an architectural constraint, not retrofitted. |
 | No CRDs or operators on Managed Platform Plus (IdeaBot ADR-0021) | Inherited constraint. The Web Drafting Table needs a deployment target that does not depend on CRDs or operators. |
 | Identity: Red Hat SSO / Keycloak (IdeaBot ADR-0012) | Inherited constraint. The OAuth 2.1 issuer for hosted modes is Red Hat SSO (Keycloak). |
 | Prototype scope: not every prototype is a container | The set of supported output types will expand over time. Initial types should support bootstrapping (CLI tools, Go binaries). |
@@ -1048,6 +1052,8 @@ that contract.
   and sequence diagrams
 - [Drafting Table UX](architecture/drafting-table-ux.md) — Stable
   interaction contract for the first local Drafting Table
+- [Evaluation Corpus Schema and Result Contract](architecture/evaluation-corpus.md)
+  — Versioned fixtures, holdout isolation, and stage-attributed results
 - [Open Design Questions](architecture/open-questions.md) — Unresolved
   design questions across all areas
 - [Related Work](architecture/related-work.md) — Red Hat internal projects,

@@ -108,6 +108,8 @@ membership undecided.
   bindings (`opencode.md`, `claude-code.md`, `codex.md`).
 - `docs/architecture/related-work.md` — internal and external
   projects informing the design.
+- [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
+  versioned evaluation fixture schema and result contract.
 - `docs/architecture/open-questions.md` — unresolved design
   questions across all areas.
 - `docs/decisions/` — architecture decision records (ADRs).
@@ -117,6 +119,7 @@ membership undecided.
 [agent-harness-doc]: docs/architecture/agent-harness/
 [ears-and-review-doc]: .agents/skills/eliciting-requirements/references/ears-and-review.md
 [drafting-table-wms-doc]: docs/architecture/drafting-table-wms.md
+[evaluation-corpus-doc]: docs/architecture/evaluation-corpus.md
 
 ### Rules for creating or modifying specification documents
 
