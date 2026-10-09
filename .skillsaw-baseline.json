@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated_by": "skillsaw 0.21.0",
-  "generated_at": "2026-10-08T20:40:05.029169+00:00",
+  "generated_at": "2026-10-09T13:49:59.660691+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -40,14 +40,14 @@
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
       "line": 103,
-      "message": "Section 'Rules for creating or modifying specification documents' is ~1440 tokens (max recommended: 500)",
+      "message": "Section 'Rules for creating or modifying specification documents' is ~1509 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "2838fa04ecdf928f",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
-      "line": 252,
+      "line": 256,
       "message": "Section 'Aligning skills with the specification hierarchy' is ~503 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -271,7 +271,7 @@
       "fingerprint": "faba88067777eed0",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 184,
+      "line": 186,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
@@ -279,7 +279,7 @@
       "fingerprint": "5eabee1f34cead35",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 190,
+      "line": 192,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },

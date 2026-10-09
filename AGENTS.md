@@ -179,7 +179,9 @@ must follow these rules:
    registry id; treat a digest-only or content change without that
    proposed operation as a hand edit), that the registered
    specification artifact and `.protobot/project.yaml` were not edited
-   by hand, and that `ears-manager check` passes without
+   by hand, and that `ears-manager check` (require a checkout or
+   worktree of the recorded PR head before `check`; a working-tree
+   `check` on the base branch is not evidence) passes without
    `artifact.digest_mismatch`. Findings should include a registered
    specification artifact or `.protobot/project.yaml` edited by hand,
    missing `ears-manager artifact put` when a PR creates or modifies a
@@ -199,7 +201,9 @@ must follow these rules:
    `artifact_operations[]` entry whose `artifact_id` equals that
    registry id (treating a digest-only or content change without that
    proposed operation as a hand edit), and
-   `artifact.digest_mismatch`, not only formatting and
+   `artifact.digest_mismatch` (require a checkout or worktree of the
+   recorded PR head before `check`; a working-tree `check` on the base
+   branch is not evidence), not only formatting and
    cross-reference text matching. When Rule 4 identifies staleness in a
    registered specification artifact, raise a staleness finding that
    prescribes `ears-manager artifact put`, not an edit by hand.
