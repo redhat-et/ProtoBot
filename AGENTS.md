@@ -235,6 +235,19 @@ must follow these rules:
    registered specification artifact, raise a staleness finding that
    prescribes `ears-manager artifact put`, not an edit by hand.
 
+7. **Defer hierarchy list updates for new specification documents.**
+   When creating a new specification document under `docs/`, implement
+   the document and its cross-references, but do not add the new file to
+   the `## Specification document hierarchy` list in `AGENTS.md` or
+   update `REVIEW_SPEC_HIERARCHY` in
+   [`.fullsend/harness/review.yaml`][review-harness]. Adding the new
+   file to the `## Specification document hierarchy` list in `AGENTS.md`
+   or updating `REVIEW_SPEC_HIERARCHY` in
+   [`.fullsend/harness/review.yaml`][review-harness] is reserved for
+   manual human pull requests.
+
+[review-harness]: .fullsend/harness/review.yaml
+
 ## Agent skills
 
 ### Rules for creating or modifying skill files
