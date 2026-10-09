@@ -20,8 +20,12 @@ SKIPPED=0
 # Track test fixture files created in the repo so they can be
 # cleaned up even if the script is interrupted.
 CREATED_FILES=()
+STAGED_FILES=()
 
 cleanup() {
+    for f in "${STAGED_FILES[@]}"; do
+        git -C "${REPO_ROOT}" restore --staged -- "${f}" 2>/dev/null || true
+    done
     for f in "${CREATED_FILES[@]}"; do
         rm -f "${f}"
     done
@@ -362,6 +366,87 @@ elif [[ "${lint_ears_rc}" -ne 0 ]] && echo "${lint_ears_clean}" | grep -qF "depe
 else
     echo "FAIL  go-vet-ears-manager: expected go-vet success or dependency-resolution diagnostic (exit ${lint_ears_rc})"
     echo "${lint_ears_output}" | tail -8 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+
+# ── Unstaged deletions ─────────────────────────────────────
+
+echo ""
+echo "── Unstaged deletions ────────────────────────────────"
+
+# --all-files previously passed tracked-but-missing paths to
+# file-oriented hooks, which crashed with FileNotFoundError.
+# Incremental mode shares the same existence filter in _get_files.
+# A staged add with an unstaged working-tree deletion is the
+# scenario that crashed check-docstring-first and debug-statements.
+dummy_del="tests/lint/fixtures/_test_unstaged_deletion.py"
+dummy_del_path="${REPO_ROOT}/${dummy_del}"
+printf '%s\n' '"""Temporary fixture for unstaged-deletion lint coverage."""' \
+    > "${dummy_del_path}"
+CREATED_FILES+=("${dummy_del_path}")
+git -C "${REPO_ROOT}" add -- "${dummy_del}"
+STAGED_FILES+=("${dummy_del}")
+rm -f "${dummy_del_path}"
+
+get_files_rc=0
+get_files_output="$(python3 - "${LINT}" "${dummy_del}" <<'PY'
+import argparse
+import importlib.util
+import sys
+
+lint_path, dummy = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location("lintmod", lint_path)
+mod = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(mod)
+all_files = mod._get_files(argparse.Namespace(files=None, all_files=True))
+incremental = mod._get_files(argparse.Namespace(files=None, all_files=False))
+sentinel = "scripts/lint.py"
+if sentinel not in all_files:
+    print(f"expected tracked file missing from --all-files: {sentinel}")
+    sys.exit(1)
+if dummy in all_files:
+    print(f"deleted path still collected by --all-files: {dummy}")
+    sys.exit(1)
+if dummy in incremental:
+    print(f"deleted path still collected incrementally: {dummy}")
+    sys.exit(1)
+print("omitted")
+PY
+)" || get_files_rc=$?
+
+# Incremental mode shares _get_files with --all-files. A staged add
+# with an unstaged working-tree deletion still appears in
+# ``git diff --cached --diff-filter=ACMR``, so this run would crash
+# python hooks if the deleted .py path were still passed through.
+# Full-tree --all-files is not invoked here because in-place fixers
+# would rewrite the working tree; collection coverage is above.
+lint_del_output="$(python3 "${LINT}" 2>&1)" || true
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_del_clean="$(echo "${lint_del_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+
+git -C "${REPO_ROOT}" restore --staged -- "${dummy_del}" 2>/dev/null || true
+rm -f "${dummy_del_path}"
+
+unstaged_ok=true
+if [[ "${get_files_rc}" -ne 0 ]] || ! echo "${get_files_output}" | grep -qF "omitted"; then
+    echo "FAIL  unstaged-deletion-filter: _get_files still collected the deleted path"
+    echo "${get_files_output}" | tail -8 | sed 's/^/    /'
+    unstaged_ok=false
+elif echo "${lint_del_clean}" | grep -qF "FileNotFoundError"; then
+    echo "FAIL  unstaged-deletion-filter: lint.py raised FileNotFoundError"
+    echo "${lint_del_output}" | tail -8 | sed 's/^/    /'
+    unstaged_ok=false
+elif echo "${lint_del_clean}" | grep -qF "${dummy_del}"; then
+    echo "FAIL  unstaged-deletion-filter: deleted path still reached a hook"
+    echo "${lint_del_output}" | tail -8 | sed 's/^/    /'
+    unstaged_ok=false
+fi
+
+if ${unstaged_ok}; then
+    echo "PASS  unstaged-deletion-filter: missing tracked files are ignored"
+    PASS=$((PASS + 1))
+else
     FAIL=$((FAIL + 1))
 fi
 
