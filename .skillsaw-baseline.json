@@ -1,7 +1,7 @@
 {
   "version": "1",
-  "generated_by": "skillsaw 0.20.0",
-  "generated_at": "2026-09-23T19:14:36.445798+00:00",
+  "generated_by": "skillsaw 0.21.0",
+  "generated_at": "2026-10-09T13:49:59.660691+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -28,90 +28,122 @@
       "severity": "info"
     },
     {
+      "fingerprint": "bf6aff1c1a975087",
+      "rule_id": "content-section-length",
+      "file_path": "AGENTS.md",
+      "line": 62,
+      "message": "Section 'Specification document hierarchy' is ~524 tokens (max recommended: 500)",
+      "severity": "info"
+    },
+    {
       "fingerprint": "4c499c070d057873",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
-      "line": 53,
-      "message": "Section 'Rules for creating or modifying specification documents' is ~507 tokens (max recommended: 500)",
+      "line": 103,
+      "message": "Section 'Rules for creating or modifying specification documents' is ~1509 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "2838fa04ecdf928f",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
-      "line": 155,
+      "line": 256,
       "message": "Section 'Aligning skills with the specification hierarchy' is ~503 tokens (max recommended: 500)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "782e3175c3a8fb24",
+      "rule_id": "content-section-length",
+      "file_path": ".agents/skills/review-pr/SKILL.md",
+      "line": 14,
+      "message": "Section 'Process' is ~766 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "ee68cd1b8b951b5f",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 46,
-      "message": "Section 'External Interface Inventory' is ~525 tokens (max recommended: 500)",
+      "line": 47,
+      "message": "Section 'External Interface Inventory' is ~577 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "211c7a998fb971f8",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 215,
-      "message": "Section '`ears-manager` CLI' is ~830 tokens (max recommended: 500)",
+      "line": 225,
+      "message": "Section '`ears-manager` CLI' is ~945 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "3ac90286aaf16fdd",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 287,
-      "message": "Section 'WMS Adapter API' is ~655 tokens (max recommended: 500)",
+      "line": 304,
+      "message": "Section 'WMS Adapter API' is ~754 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "39bd5528950f9ce2",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 431,
-      "message": "Section 'Job Site Handoff Boundary' is ~800 tokens (max recommended: 500)",
+      "line": 506,
+      "message": "Section 'Job Site Handoff Boundary' is ~828 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "7a47180e53e905ba",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 611,
-      "message": "Section 'Governed tool integrations' is ~760 tokens (max recommended: 500)",
+      "line": 693,
+      "message": "Section 'Governed tool integrations' is ~1224 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "118f4daf88827566",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 818,
-      "message": "Section 'Environmental Constraints' is ~516 tokens (max recommended: 500)",
+      "line": 965,
+      "message": "Section 'Environmental Constraints' is ~634 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
-      "fingerprint": "d03d5a34ac818422",
+      "fingerprint": "47ad33e462f5231a",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 24,
+      "line": 69,
       "message": "Unlinked path reference: 'docs/vision.md' \u2014 consider wrapping in link syntax [docs/vision.md](docs/vision.md)",
       "severity": "info"
     },
     {
-      "fingerprint": "517491998fa8cb38",
+      "fingerprint": "34956d561909f4c1",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 25,
+      "line": 70,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "c00433faf64ec552",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 71,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "48d1852b65875421",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 73,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
     {
       "fingerprint": "54f428cdc6d515d2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 27,
+      "line": 74,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -119,7 +151,7 @@
       "fingerprint": "ebe6f96b1ce209bd",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 29,
+      "line": 76,
       "message": "Unlinked path reference: 'docs/architecture/components.md' \u2014 consider wrapping in link syntax [docs/architecture/components.md](docs/architecture/components.md)",
       "severity": "info"
     },
@@ -127,7 +159,7 @@
       "fingerprint": "26f8f76319c9adfd",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 35,
+      "line": 84,
       "message": "Unlinked path reference: 'docs/architecture/user-interaction-flow.md' \u2014 consider wrapping in link syntax [docs/architecture/user-interaction-flow.md](docs/architecture/user-interaction-flow.md)",
       "severity": "info"
     },
@@ -135,7 +167,7 @@
       "fingerprint": "c4cf96f3ec3152a2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 37,
+      "line": 86,
       "message": "Unlinked path reference: 'docs/architecture/drafting-table-ux.md' \u2014 consider wrapping in link syntax [docs/architecture/drafting-table-ux.md](docs/architecture/drafting-table-ux.md)",
       "severity": "info"
     },
@@ -143,7 +175,7 @@
       "fingerprint": "dfe8e903debd7a70",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 42,
+      "line": 91,
       "message": "Unlinked path reference: 'docs/architecture/related-work.md' \u2014 consider wrapping in link syntax [docs/architecture/related-work.md](docs/architecture/related-work.md)",
       "severity": "info"
     },
@@ -151,7 +183,7 @@
       "fingerprint": "fac138a385b101b2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 44,
+      "line": 93,
       "message": "Unlinked path reference: 'docs/architecture/open-questions.md' \u2014 consider wrapping in link syntax [docs/architecture/open-questions.md](docs/architecture/open-questions.md)",
       "severity": "info"
     },
@@ -159,7 +191,7 @@
       "fingerprint": "61dde6b158f12c87",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 67,
+      "line": 111,
       "message": "Unlinked path reference: 'docs/architecture/components.md' \u2014 consider wrapping in link syntax [docs/architecture/components.md](docs/architecture/components.md)",
       "severity": "info"
     },
@@ -167,7 +199,7 @@
       "fingerprint": "85e506936b75ec55",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 68,
+      "line": 112,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -175,7 +207,7 @@
       "fingerprint": "dfb22c7918b88aef",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 75,
+      "line": 119,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -183,15 +215,79 @@
       "fingerprint": "bcc45982044b09c4",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 76,
+      "line": 120,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "38050468be7598ab",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 151,
+      "message": "Unlinked path reference: 'docs/vision.md' \u2014 consider wrapping in link syntax [docs/vision.md](docs/vision.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "38050468be7598ab",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 151,
+      "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "1a20aa9e1ffa13ae",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 152,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "a01406964699dc7f",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 153,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "63bd2803c46cc0d2",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 169,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "f4bd774cf59c4947",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 181,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "faba88067777eed0",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 186,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
+      "severity": "info"
+    },
+    {
+      "fingerprint": "5eabee1f34cead35",
+      "rule_id": "content-unlinked-internal-reference",
+      "file_path": "AGENTS.md",
+      "line": 192,
+      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
     {
       "fingerprint": "c7c574a4623b9f21",
       "rule_id": "content-weak-language",
       "file_path": "docs/vision.md",
-      "line": 254,
+      "line": 260,
       "message": "Weak language (vagueness): 'correctly' \u2014 Remove 'correctly' \u2014 describe what correct behavior looks like",
       "severity": "info"
     }
