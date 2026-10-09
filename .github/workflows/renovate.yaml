@@ -43,7 +43,7 @@ jobs:
 
       - name: Run Renovate
         # https://github.com/renovatebot/github-action
-        uses: renovatebot/github-action@1cd96b855fee0da6f230617e89dbff0e06ea393a  # v46.3.5
+        uses: renovatebot/github-action@6d26fcf0275dc65624cbc3d51fe78bc773f98321  # v46.3.6
         with:
           configurationFile: .github/renovate-config.js
           token: ${{ steps.get-token.outputs.token }}
