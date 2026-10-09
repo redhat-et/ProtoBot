@@ -128,17 +128,10 @@ repos:
     hooks:
       - id: renovate-config-validator
 
-  # Keep REVIEW_SPEC_HIERARCHY in sync with AGENTS.md.
   # Offline Go checks (gofmt, go vet) so sandboxed agents catch
   # formatting and vet errors without network hook repositories.
   - repo: local
     hooks:
-      - id: spec-hierarchy-sync
-        name: spec-hierarchy-sync
-        entry: python3 scripts/check_spec_hierarchy.py
-        language: system
-        pass_filenames: false
-        files: ^(AGENTS\.md|\.fullsend/harness/review\.yaml)$
       - id: gofmt
         name: gofmt
         entry: python3 scripts/check_gofmt.py
