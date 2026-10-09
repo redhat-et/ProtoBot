@@ -497,16 +497,10 @@ _REGISTRY: dict[str, dict[str, Any]] = {
             },
         },
     },
-    # ── Local: spec hierarchy sync, gofmt, go vet ──────────────
+    # ── Local: gofmt, go vet ──────────────────────────────
     "local": {
         "installer": "system",
         "hooks": {
-            "spec-hierarchy-sync": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/check_spec_hierarchy.py"],
-                "pass_filenames": False,
-                "default_files": r"^(AGENTS\.md|\.fullsend/harness/review\.yaml)$",
-            },
             "gofmt": {
                 "cmd": "python3",
                 "fixed_args": ["scripts/check_gofmt.py"],

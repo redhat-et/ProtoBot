@@ -262,179 +262,43 @@ assert_lint \
     nonzero \
     "zizmor"
 
-# ── Spec hierarchy sync ─────────────────────────────────────
+# ── Spec document independence ──────────────────────────────
 
 echo ""
-echo "── Spec hierarchy sync ─────────────────────────────────"
+echo "── Spec document independence ──────────────────────────"
 
-# Compare two fixture files via the checker CLI (not lint.py
-# --files): the hook always reads the canonical repo paths, so
-# drift cases have to be exercised against temp copies.
-assert_hierarchy() {
-    local label="$1"
-    local agents_content="$2"
-    local review_content="$3"
-    local expect_rc="$4"  # 0 or nonzero
-    local expect_str="${5:-}"
+# Adding a new docs/ specification (and touching AGENTS.md, as an
+# authoring agent would) must not invoke the retired
+# spec-hierarchy-sync hook or demand a REVIEW_SPEC_HIERARCHY
+# update in the protected review harness.
+dummy_spec="docs/architecture/_test_lint_new_spec.md"
+dummy_path="${REPO_ROOT}/${dummy_spec}"
+printf '%s\n' '# Test specification' '' \
+    'Temporary specification document used by the lint independence test.' \
+    > "${dummy_path}"
+CREATED_FILES+=("${dummy_path}")
 
-    local tmp
-    tmp="$(mktemp -d)"
-    printf '%s\n' "${agents_content}" > "${tmp}/AGENTS.md"
-    printf '%s\n' "${review_content}" > "${tmp}/review.yaml"
-
-    local rc=0
-    local output
-    output="$(python3 "${REPO_ROOT}/scripts/check_spec_hierarchy.py" \
-        --agents "${tmp}/AGENTS.md" \
-        --review "${tmp}/review.yaml" 2>&1)" || rc=$?
-    rm -rf "${tmp}"
-
-    local ok=true
-    if [[ "${expect_rc}" == "0" ]] && [[ "${rc}" -ne 0 ]]; then
-        echo "FAIL  ${label}: expected exit 0, got ${rc}"
-        echo "  actual output (last 5 lines):"
-        echo "${output}" | tail -5 | sed 's/^/    /'
-        ok=false
-    elif [[ "${expect_rc}" != "0" ]] && [[ "${rc}" -eq 0 ]]; then
-        echo "FAIL  ${label}: expected non-zero exit, got 0"
-        ok=false
-    fi
-    if [[ -n "${expect_str}" ]] && ! echo "${output}" | grep -qF "${expect_str}"; then
-        echo "FAIL  ${label}: expected output to contain '${expect_str}'"
-        echo "  actual output (last 5 lines):"
-        echo "${output}" | tail -5 | sed 's/^/    /'
-        ok=false
-    fi
-    if ${ok}; then
-        echo "PASS  ${label}"
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-    fi
-}
-
-# Fixtures use ANSI-C quoting so backticks stay literal (markdown code).
-# shellcheck disable=SC2016
-_HIERARCHY_AGENTS_OK=$'# Title
-
-## Specification document hierarchy
-
-Intro mentioning `docs/` membership.
-
-- `docs/vision.md` — project Vision (purpose, users,
-  outcomes).
-- [`docs/architecture/git-integration.md`][git-integration-doc] — git.
-- `docs/decisions/` — ADRs.
-
-[git-integration-doc]: docs/architecture/git-integration.md
-
-### Other section
-
-- `docs/not-in-hierarchy.md` — must be ignored.
-'
-
-_HIERARCHY_REVIEW_OK='env:
-    sandbox:
-        REVIEW_SPEC_HIERARCHY: "docs/vision.md,docs/architecture/git-integration.md,docs/decisions/"
-'
-
-assert_hierarchy \
-    "hierarchy-match" \
-    "${_HIERARCHY_AGENTS_OK}" \
-    "${_HIERARCHY_REVIEW_OK}" \
-    0
-
-assert_hierarchy \
-    "hierarchy-order-independent" \
-    "${_HIERARCHY_AGENTS_OK}" \
-    'env:
-    sandbox:
-        REVIEW_SPEC_HIERARCHY: "docs/decisions/,docs/vision.md,docs/architecture/git-integration.md"
-' \
-    0
-
-# Future hierarchy addition left out of review.yaml.
-# shellcheck disable=SC2016
-_HIERARCHY_AGENTS_NEW=$'# Title
-
-## Specification document hierarchy
-
-Intro mentioning `docs/` membership.
-
-- `docs/vision.md` — project Vision (purpose, users,
-  outcomes).
-- [`docs/architecture/git-integration.md`][git-integration-doc] — git.
-- `docs/decisions/` — ADRs.
-- `docs/architecture/new.md` — new.
-
-[git-integration-doc]: docs/architecture/git-integration.md
-
-### Other section
-
-- `docs/not-in-hierarchy.md` — must be ignored.
-'
-
-assert_hierarchy \
-    "hierarchy-missing-from-review" \
-    "${_HIERARCHY_AGENTS_NEW}" \
-    "${_HIERARCHY_REVIEW_OK}" \
-    nonzero \
-    "docs/architecture/new.md"
-
-assert_hierarchy \
-    "hierarchy-extra-in-review" \
-    "${_HIERARCHY_AGENTS_OK}" \
-    'env:
-    sandbox:
-        REVIEW_SPEC_HIERARCHY: "docs/vision.md,docs/architecture/git-integration.md,docs/decisions/,docs/extra.md"
-' \
-    nonzero \
-    "docs/extra.md"
-
-assert_hierarchy \
-    "hierarchy-missing-heading" \
-    $'# Title
-
-- `docs/vision.md` — vision.
-' \
-    "${_HIERARCHY_REVIEW_OK}" \
-    nonzero \
-    "Specification document hierarchy"
-
-assert_hierarchy \
-    "hierarchy-missing-key" \
-    "${_HIERARCHY_AGENTS_OK}" \
-    'env:
-    sandbox:
-        TIMEOUT_SECONDS: "2700"
-' \
-    nonzero \
-    "REVIEW_SPEC_HIERARCHY"
-
-# Canonical repo files must already be in sync.
-hierarchy_rc=0
-hierarchy_output="$(python3 "${REPO_ROOT}/scripts/check_spec_hierarchy.py" 2>&1)" || hierarchy_rc=$?
-if [[ "${hierarchy_rc}" -eq 0 ]]; then
-    echo "PASS  hierarchy-real-files: AGENTS.md matches review.yaml"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  hierarchy-real-files: expected exit 0, got ${hierarchy_rc}"
-    echo "${hierarchy_output}" | tail -5 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# lint.py must wire the local hook when AGENTS.md is in the file set.
-lint_hier_rc=0
-lint_hier_output="$(python3 "${LINT}" --files AGENTS.md 2>&1)" || lint_hier_rc=$?
+lint_spec_rc=0
+lint_spec_output="$(python3 "${LINT}" --files "${dummy_spec}" AGENTS.md 2>&1)" || lint_spec_rc=$?
 # shellcheck disable=SC2001  # regex substitution requires sed
-lint_hier_clean="$(echo "${lint_hier_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_hier_rc}" -eq 0 ]] && echo "${lint_hier_clean}" | grep -qE "✓ spec-hierarchy-sync( |$)"; then
-    echo "PASS  hierarchy-lint-wiring: lint.py runs spec-hierarchy-sync"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  hierarchy-lint-wiring: spec-hierarchy-sync did not pass (exit ${lint_hier_rc})"
-    echo "${lint_hier_output}" | tail -8 | sed 's/^/    /'
+lint_spec_clean="$(echo "${lint_spec_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+rm -f "${dummy_path}"
+
+if echo "${lint_spec_clean}" | grep -qE "spec-hierarchy-sync|REVIEW_SPEC_HIERARCHY"; then
+    echo "FAIL  spec-doc-independence: retired hook or REVIEW_SPEC_HIERARCHY mentioned"
+    echo "${lint_spec_output}" | tail -8 | sed 's/^/    /'
     FAIL=$((FAIL + 1))
+elif echo "${lint_spec_clean}" | grep -qF "check_spec_hierarchy.py"; then
+    echo "FAIL  spec-doc-independence: retired checker still invoked"
+    echo "${lint_spec_output}" | tail -8 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+elif [[ "${lint_spec_rc}" -ne 0 ]]; then
+    echo "FAIL  spec-doc-independence: lint failed on new spec without review.yaml (exit ${lint_spec_rc})"
+    echo "${lint_spec_output}" | tail -8 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+else
+    echo "PASS  spec-doc-independence: new spec does not demand review.yaml update"
+    PASS=$((PASS + 1))
 fi
 
 # ── Go formatting and vet ───────────────────────────────────
