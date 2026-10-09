@@ -24,7 +24,7 @@ agents running via GitHub workflows that create or modify any file
 under `.github/workflows/` are rejected by GitHub at push time.
 Agents must follow these rules:
 
-1. **Workflow file restrictions.** Fullsend agents running via
+1. **Restrict workflow file modifications.** Fullsend agents running via
    GitHub workflows must not create or modify any file under
    `.github/workflows/`. Local coding agents may create or modify
    files under `.github/workflows/`, except as restricted by
@@ -76,6 +76,33 @@ later, agents must follow these rules:
    check this restatement. Findings should include
    intra-entry terminology drift, not only sibling-entry
    terminology matching.
+
+### Rules for creating or modifying bold lead-in headings
+
+When creating or modifying an entry in a governed scope,
+agents must follow these rules:
+
+1. **Match the grammatical form and mood of sibling entries'
+   bold lead-in headings.** Numbered rules in `AGENTS.md`
+   must use imperative verb phrases matching sibling
+   entries' bold lead-in headings. A bold lead-in heading
+   that does not match the grammatical form and mood of
+   sibling entries' bold lead-in headings is a defect.
+   Review agents must check this grammatical form and
+   mood. Findings should include grammatical form and
+   mood drift within the same list or governed collection,
+   not only sibling-entry terminology matching.
+
+2. **Reflect the qualifications of the entry body in bold
+   lead-in headings.** Bold lead-in headings must reflect
+   the qualifications of the entry body. A bold lead-in
+   heading that does not reflect the qualifications of
+   the entry body is a defect. Review agents must check
+   that bold lead-in headings reflect the qualifications
+   of the entry body. Findings should include a bold
+   lead-in heading that does not reflect the
+   qualifications of the entry body, not only
+   sibling-entry terminology matching.
 
 Examples of sibling entries for each governed scope listed above:
 
