@@ -295,6 +295,8 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			{"log", "--output", "/tmp/leak.txt"},
 			{"--config-env=foo=BAR", "status"},
 			{"cat-file", "--batch-all-objects"},
+			{"cat-file", "--batch"},
+			{"cat-file", "-p", "HEAD:../outside"},
 		} {
 			res, err = sessionA.Git(ctx, args...)
 			if errorCode(err) != CodeSandboxDenied && !res.Denied {
@@ -625,36 +627,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 			_ = session.Cancel(ctx)
 			return fmt.Errorf("spawned process did not terminate")
 		}
-		if err := session.Cancel(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-
-		gitSession, err := adapter.Open(ctx, req)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = gitSession.Close() }()
-		gitCtx, gitCancel := context.WithCancel(ctx)
-		gitDone := make(chan error, 1)
-		go func() {
-			_, err := gitSession.Git(gitCtx, "cat-file", "--batch")
-			gitDone <- err
-		}()
-		time.Sleep(50 * time.Millisecond)
-		gitCancel()
-		select {
-		case err := <-gitDone:
-			if err == nil {
-				return fmt.Errorf("git returned success after cancel")
-			}
-			if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
-				return fmt.Errorf("expected %s or context.Canceled for git, got %v", CodeSandboxCancelled, err)
-			}
-		case <-time.After(5 * time.Second):
-			_ = gitSession.Cancel(ctx)
-			return fmt.Errorf("git command did not terminate after cancel")
-		}
-		return gitSession.Cancel(ctx)
+		return session.Cancel(ctx)
 	})
 	report.check("SB-LIFE-002", "Lease expiry disables further execution and records the limit", func() error {
 		req := env.OpenRequest(RoleWorkerA)

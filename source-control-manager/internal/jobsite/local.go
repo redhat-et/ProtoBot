@@ -92,17 +92,21 @@ func (a *LocalAdapter) Open(ctx context.Context, req OpenRequest) (Session, erro
 	var wallDeadline, leaseDeadline time.Time
 	if req.Limits.WallClock > 0 {
 		wallDeadline = now.Add(req.Limits.WallClock)
-	} else {
-		wallDeadline = now
 	}
 	if req.Lease > 0 {
 		leaseDeadline = now.Add(req.Lease)
 	}
 	deadline := wallDeadline
-	if !leaseDeadline.IsZero() && leaseDeadline.Before(deadline) {
+	if !leaseDeadline.IsZero() && (deadline.IsZero() || leaseDeadline.Before(deadline)) {
 		deadline = leaseDeadline
 	}
-	sessionCtx, cancel := context.WithDeadline(ctx, deadline)
+	var sessionCtx context.Context
+	var cancel context.CancelFunc
+	if !deadline.IsZero() {
+		sessionCtx, cancel = context.WithDeadline(ctx, deadline)
+	} else {
+		sessionCtx, cancel = context.WithCancel(ctx)
+	}
 
 	brokerSecret := "session-secret-" + digestBytes([]byte(req.TraceID+"/"+req.Role+"/"+req.SourceCommit)) // pragma: allowlist secret
 
@@ -348,23 +352,15 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 		s.mu.Unlock()
 		return res, denyErr
 	}
-	cmd := s.repo.runner.CommandContext(s.ctx, cleanArgs...)
+	cmd := s.repo.runner.CommandContext(context.Background(), cleanArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	stdinR, stdinW, err := os.Pipe()
-	if err != nil {
-		s.mu.Unlock()
-		return ExecResult{}, fmt.Errorf("git stdin pipe: %w", err)
-	}
-	defer func() { _ = stdinW.Close() }()
-	cmd.Stdin = stdinR
+	cmd.Stdin = bytes.NewReader(nil)
 	if err := cmd.Start(); err != nil {
-		_ = stdinR.Close()
 		s.mu.Unlock()
 		return ExecResult{}, err
 	}
-	_ = stdinR.Close()
 	tp := &trackedProcess{Cmd: cmd, done: make(chan struct{})}
 	s.cmds = append(s.cmds, tp)
 	s.argvLog = append(s.argvLog, append([]string(nil), cmd.Args...))
@@ -378,25 +374,16 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 		close(tp.done)
 	}()
 	var waitErr error
-	var sessionTimedOut bool
-	var sessionCancelled bool
 	var callerCancelled bool
 	select {
 	case waitErr = <-done:
 	case <-ctx.Done():
 		killCmdProcess(cmd)
-		_ = stdinW.Close()
 		<-done
 		callerCancelled = true
 	case <-sessionCtx.Done():
 		killCmdProcess(cmd)
-		_ = stdinW.Close()
 		<-done
-		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
-			sessionTimedOut = true
-		} else {
-			sessionCancelled = true
-		}
 	}
 	elapsed := time.Since(start)
 
@@ -404,15 +391,19 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 	defer s.mu.Unlock()
 	s.removeCmdLocked(tp)
 	s.cpuUsed += elapsed
-	if sessionTimedOut {
-		limitName, limitConfig := s.expiredLimitInfo()
-		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
-	}
-	if sessionCancelled || s.cancelled {
+
+	if sessionCtx.Err() != nil {
+		if limitName, limitConfig, ok := s.expiredLimit(); ok {
+			return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
+		}
 		s.cancelled = true
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
 	}
-	if callerCancelled {
+	if s.cancelled || s.closed {
+		s.cancelled = true
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if callerCancelled || ctx.Err() != nil {
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Call context cancelled.")
 	}
 	status := 0
@@ -474,6 +465,7 @@ func (s *localSession) Close() error {
 		return nil
 	}
 	s.closed = true
+	s.cancelled = true
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -501,14 +493,23 @@ func (s *localSession) Close() error {
 	return err
 }
 
-func (s *localSession) expiredLimitInfo() (string, string) {
+func (s *localSession) expiredLimit() (string, string, bool) {
 	now := time.Now()
-	if !s.leaseDeadline.IsZero() && !now.Before(s.leaseDeadline) {
-		if s.wallDeadline.IsZero() || !s.leaseDeadline.After(s.wallDeadline) {
-			return "lease", s.limitLease.String()
+	leaseExpired := !s.leaseDeadline.IsZero() && !now.Before(s.leaseDeadline)
+	wallExpired := !s.wallDeadline.IsZero() && !now.Before(s.wallDeadline)
+	if leaseExpired && wallExpired {
+		if s.leaseDeadline.Before(s.wallDeadline) {
+			return "lease", s.limitLease.String(), true
 		}
+		return "wall-clock", s.limitWall.String(), true
 	}
-	return "wall-clock", s.limitWall.String()
+	if leaseExpired {
+		return "lease", s.limitLease.String(), true
+	}
+	if wallExpired {
+		return "wall-clock", s.limitWall.String(), true
+	}
+	return "", "", false
 }
 
 func (s *localSession) guardLocked(ctx context.Context) error {
@@ -520,8 +521,7 @@ func (s *localSession) guardLocked(ctx context.Context) error {
 	}
 	if err := s.ctx.Err(); err != nil {
 		s.cancelled = true
-		if errors.Is(err, context.DeadlineExceeded) {
-			limitName, limitConfig := s.expiredLimitInfo()
+		if limitName, limitConfig, ok := s.expiredLimit(); ok {
 			_ = s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
 			return fail(CodeSandboxLimit, limitName+" limit exceeded")
 		}
@@ -544,7 +544,7 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	if len(args) == 0 {
 		args = []string{"1"}
 	}
-	cmd := exec.CommandContext(s.ctx, "sleep", args...)
+	cmd := exec.Command("sleep", args...)
 	cmd.Dir = s.root
 	gitx.Detach(cmd)
 	cmd.Env = append([]string(nil), s.env...)
@@ -562,8 +562,6 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 		close(tp.done)
 	}()
 	var waitErr error
-	var sessionTimedOut bool
-	var sessionCancelled bool
 	var callerCancelled bool
 	select {
 	case waitErr = <-done:
@@ -574,23 +572,22 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	case <-sessionCtx.Done():
 		killCmdProcess(cmd)
 		<-done
-		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
-			sessionTimedOut = true
-		} else {
-			sessionCancelled = true
-		}
 	}
 	s.mu.Lock()
 	s.removeCmdLocked(tp)
-	if sessionTimedOut {
-		limitName, limitConfig := s.expiredLimitInfo()
-		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
-	}
-	if sessionCancelled || s.cancelled {
+
+	if sessionCtx.Err() != nil {
+		if limitName, limitConfig, ok := s.expiredLimit(); ok {
+			return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
+		}
 		s.cancelled = true
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
 	}
-	if callerCancelled {
+	if s.cancelled || s.closed {
+		s.cancelled = true
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if callerCancelled || ctx.Err() != nil {
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Call context cancelled.")
 	}
 	status := 0
@@ -601,6 +598,10 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 		} else {
 			return ExecResult{}, waitErr
 		}
+	}
+	if status != 0 {
+		s.appendAudit(SandboxAuditEvent{EventType: EventSandboxExec, Decision: DecisionReject, Action: "sleep", Executable: req.Executable})
+		return ExecResult{Status: status}, fmt.Errorf("sleep exited with status %d", status)
 	}
 	s.appendAudit(SandboxAuditEvent{EventType: EventSandboxExec, Decision: DecisionAccept, Action: "sleep", Executable: req.Executable})
 	return ExecResult{Status: status}, nil
@@ -622,8 +623,6 @@ func (s *localSession) burnLocked(ctx context.Context, req ExecRequest) (ExecRes
 	s.mu.Unlock()
 	start := time.Now()
 	target := start.Add(burnDur)
-	var sessionTimedOut bool
-	var sessionCancelled bool
 	var callerCancelled bool
 burnLoop:
 	for time.Now().Before(target) {
@@ -632,11 +631,6 @@ burnLoop:
 			callerCancelled = true
 			break burnLoop
 		case <-sessionCtx.Done():
-			if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
-				sessionTimedOut = true
-			} else {
-				sessionCancelled = true
-			}
 			break burnLoop
 		default:
 			for i := 0; i < 50000; i++ {
@@ -647,15 +641,18 @@ burnLoop:
 	elapsed := time.Since(start)
 	s.mu.Lock()
 	s.cpuUsed += elapsed
-	if sessionTimedOut {
-		limitName, limitConfig := s.expiredLimitInfo()
-		return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
-	}
-	if sessionCancelled || s.cancelled {
+	if sessionCtx.Err() != nil {
+		if limitName, limitConfig, ok := s.expiredLimit(); ok {
+			return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
+		}
 		s.cancelled = true
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
 	}
-	if callerCancelled {
+	if s.cancelled || s.closed {
+		s.cancelled = true
+		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Sandbox session is cancelled.")
+	}
+	if callerCancelled || ctx.Err() != nil {
 		return ExecResult{Denied: true, Status: -1}, fail(CodeSandboxCancelled, "Call context cancelled.")
 	}
 	s.appendAudit(SandboxAuditEvent{
@@ -736,8 +733,7 @@ func (s *localSession) networkLocked(ctx context.Context, req ExecRequest) (Exec
 	s.mu.Lock()
 
 	if sessionCtx.Err() != nil {
-		if errors.Is(sessionCtx.Err(), context.DeadlineExceeded) {
-			limitName, limitConfig := s.expiredLimitInfo()
+		if limitName, limitConfig, ok := s.expiredLimit(); ok {
 			return ExecResult{Denied: true, Status: -1}, s.limitLocked(limitName, limitConfig, limitName+" limit exceeded")
 		}
 		s.cancelled = true
@@ -1084,7 +1080,7 @@ func checkSubcommandFlag(subcmd, flag string) error {
 		return fmt.Errorf("git remote subcommand %q is forbidden in the sandbox", flag)
 	case "cat-file":
 		switch flag {
-		case "-e", "-p", "-t", "-s", "--batch":
+		case "-e", "-p", "-t", "-s":
 			return nil
 		}
 	case "rev-parse":
@@ -1151,8 +1147,21 @@ func validateGitOperand(op string) error {
 	if strings.HasPrefix(op, "/") || strings.HasPrefix(op, "~") || filepath.IsAbs(op) {
 		return fmt.Errorf("git operand %q is outside sandbox root", op)
 	}
-	cleaned := filepath.Clean(op)
-	if strings.HasPrefix(cleaned, "..") || strings.HasPrefix(op, "../") || op == ".." || strings.Contains(op, "/../") || strings.HasSuffix(op, "/..") {
+	if strings.ContainsAny(op, "\\\x00") {
+		return fmt.Errorf("git operand %q contains invalid characters", op)
+	}
+	pathPart := op
+	if _, path, ok := strings.Cut(op, ":"); ok {
+		pathPart = path
+	}
+	if strings.HasPrefix(pathPart, "/") || strings.HasPrefix(pathPart, "~") || filepath.IsAbs(pathPart) {
+		return fmt.Errorf("git operand %q is outside sandbox root", op)
+	}
+	if _, err := canonicalPath(pathPart); err != nil || hasGitComponent(pathPart) {
+		return fmt.Errorf("git operand %q contains invalid path: %w", op, err)
+	}
+	cleaned := filepath.Clean(pathPart)
+	if strings.HasPrefix(cleaned, "..") || strings.HasPrefix(pathPart, "../") || pathPart == ".." || strings.Contains(pathPart, "/../") || strings.HasSuffix(pathPart, "/..") {
 		return fmt.Errorf("git operand %q is outside sandbox root", op)
 	}
 	return nil

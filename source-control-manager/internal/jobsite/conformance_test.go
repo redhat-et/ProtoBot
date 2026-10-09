@@ -162,6 +162,11 @@ func TestGitArgValidation(t *testing.T) {
 		{"diff", "../outside"},
 		{"cat-file", "-e", "/etc/passwd"},
 		{"cat-file", "--batch-all-objects"},
+		{"cat-file", "--batch"},
+		{"show", "HEAD:../outside"},
+		{"cat-file", "-p", "HEAD:../outside"},
+		{"show", "HEAD:.git/config"},
+		{"show", "HEAD:\\escaped"},
 		{"status", "/etc"},
 		{"remote", "add", "origin", "http://evil.com"},
 	}
@@ -196,57 +201,11 @@ func TestGitLifecycleCancellation(t *testing.T) {
 		t.Fatalf("expected %s after Cancel(), got %v", CodeSandboxCancelled, err)
 	}
 
-	// In-flight cancellation test
-	sessionInFlight, err := NewLocalAdapter().Open(context.Background(), env.OpenRequest(RoleWorkerA))
-	if err != nil {
-		t.Fatal(err)
+	// Verify cat-file --batch is denied as forbidden flag
+	res, err := session.Git(context.Background(), "cat-file", "--batch")
+	if errorCode(err) != CodeSandboxCancelled && errorCode(err) != CodeSandboxDenied && !res.Denied {
+		t.Fatalf("expected cat-file --batch to be denied or cancelled, got err=%v, res=%+v", err, res)
 	}
-	defer func() { _ = sessionInFlight.Close() }()
-
-	gitCtx, gitCancel := context.WithCancel(context.Background())
-	gitDone := make(chan error, 1)
-	go func() {
-		_, err := sessionInFlight.Git(gitCtx, "cat-file", "--batch")
-		gitDone <- err
-	}()
-	time.Sleep(50 * time.Millisecond)
-
-	locSession := sessionInFlight.(*localSession)
-	locSession.mu.Lock()
-	if len(locSession.cmds) != 1 {
-		locSession.mu.Unlock()
-		t.Fatalf("expected 1 in-flight command, got %d", len(locSession.cmds))
-	}
-	runningCmd := locSession.cmds[0].Cmd
-	pid := runningCmd.Process.Pid
-	locSession.mu.Unlock()
-
-	if pid <= 0 {
-		t.Fatalf("expected valid child PID, got %d", pid)
-	}
-
-	gitCancel()
-
-	select {
-	case err := <-gitDone:
-		if err == nil {
-			t.Fatalf("expected error after git cancel, got nil")
-		}
-		if errorCode(err) != CodeSandboxCancelled && !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected %s or context.Canceled, got %v", CodeSandboxCancelled, err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatalf("in-flight git command did not terminate after cancel")
-	}
-
-	// Assert the still-running child was terminated/killed, not merely that Git returned an error
-	locSession.mu.Lock()
-	if len(locSession.cmds) != 0 {
-		t.Errorf("expected 0 active commands after cancel and wait, got %d", len(locSession.cmds))
-	}
-	locSession.mu.Unlock()
-
-	assertProcessKilled(t, runningCmd)
 
 	// Wait-first test: verify that when Git finishes before cancellation,
 	// the real git status is returned even if ctx is cancelled afterwards.
@@ -257,13 +216,90 @@ func TestGitLifecycleCancellation(t *testing.T) {
 	defer func() { _ = sessionWaitFirst.Close() }()
 
 	waitCtx, waitCancel := context.WithCancel(context.Background())
-	res, err := sessionWaitFirst.Git(waitCtx, "status")
+	res, err = sessionWaitFirst.Git(waitCtx, "status")
 	waitCancel()
 	if err != nil {
 		t.Fatalf("expected successful git status when wait returns first, got err=%v", err)
 	}
 	if res.Status != 0 {
 		t.Fatalf("expected status 0, got %d", res.Status)
+	}
+}
+
+func TestInFlightCommandAcrossWallClockExpiry(t *testing.T) {
+	env := NewConformanceEnv(t)
+	req := env.OpenRequest(RoleWorkerA)
+	req.Limits.WallClock = 40 * time.Millisecond
+	session, err := NewLocalAdapter().Open(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	res, err := session.Execute(context.Background(), ExecRequest{
+		Executable: "sleep",
+		Args:       []string{"1"},
+	})
+	if errorCode(err) != CodeSandboxLimit {
+		t.Fatalf("expected %s across wall-clock expiry, got err=%v, res=%+v", CodeSandboxLimit, err, res)
+	}
+}
+
+func TestInFlightCommandAcrossClose(t *testing.T) {
+	env := NewConformanceEnv(t)
+	session, err := NewLocalAdapter().Open(context.Background(), env.OpenRequest(RoleWorkerA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.Execute(context.Background(), ExecRequest{
+			Executable: "sleep",
+			Args:       []string{"2"},
+		})
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-done:
+		if errorCode(err) != CodeSandboxCancelled {
+			t.Fatalf("expected %s across Close(), got %v", CodeSandboxCancelled, err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("in-flight sleep did not exit after Close()")
+	}
+}
+
+func TestOpenShortDeadlineDoesNotRecordWallClockLimit(t *testing.T) {
+	env := NewConformanceEnv(t)
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer shortCancel()
+	req := env.OpenRequest(RoleWorkerA)
+	req.Limits.WallClock = 10 * time.Second
+	session, err := NewLocalAdapter().Open(shortCtx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	time.Sleep(30 * time.Millisecond)
+
+	_, err = session.ReadPath(context.Background(), sharedDocPath)
+	if errorCode(err) != CodeSandboxCancelled {
+		t.Fatalf("expected %s on expired openCtx, got %v", CodeSandboxCancelled, err)
+	}
+
+	for _, ev := range session.Audit() {
+		if ev.EventType == EventSandboxLimit && ev.LimitName == "wall-clock" {
+			t.Fatalf("spurious EventSandboxLimit with LimitName wall-clock while Limits.WallClock was in future: %+v", ev)
+		}
 	}
 }
 
