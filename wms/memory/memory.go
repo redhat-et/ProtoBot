@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
+	"github.com/redhat-et/protobot/wms/adapter"
 	"github.com/redhat-et/protobot/wms/validation"
 )
 
@@ -34,7 +34,7 @@ func (m *Memory) Execute(call CallRequest) Result {
 	// The wire carries operation names as strings; they enter the typed
 	// Operation vocabulary here, once, at the adapter boundary.
 	operation := validation.Operation(call.Operation)
-	if !slices.Contains(adapterOperations, operation) {
+	if !adapter.IsAdapterOperation(operation) {
 		return rejectedResult(call.Operation, unauthorizedRejection(call.Operation, call.WorkItemID, ""))
 	}
 	authorization, ok := m.gate.Resolve(call.ActorContextRef)
