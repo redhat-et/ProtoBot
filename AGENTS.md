@@ -18,13 +18,18 @@
 
 ## Workflow files and CI boundaries
 
-Autonomous agent GitHub App tokens lack `workflows: write`
-permissions. Commits that create or modify any file under
-`.github/workflows/` are rejected by GitHub at push time.
+Fullsend agents running via GitHub workflows use GitHub App tokens
+that lack `workflows: write` permissions. Commits from Fullsend
+agents running via GitHub workflows that create or modify any file
+under `.github/workflows/` are rejected by GitHub at push time.
 Agents must follow these rules:
 
-1. **Do not create or modify workflow files.** Agents must not
-   create or modify any file under `.github/workflows/`.
+1. **Workflow file restrictions.** Fullsend agents running via
+   GitHub workflows must not create or modify any file under
+   `.github/workflows/`. Local coding agents may create or modify
+   files under `.github/workflows/`, except as restricted by
+   Rule 2, when the requested change requires it and the user has
+   authorized the change.
 
 2. **Defer CI integration for new modules.** When implementing an issue
    that introduces a new Go module, package, or tool, implement the
