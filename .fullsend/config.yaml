@@ -36,6 +36,7 @@ agents:
     - name: fix
       runtime: pi
       model: google-vertex/gemini-3.8-flash
+      source: harness/fix.yaml
     - name: prioritize
       runtime: pi
       model: google-vertex/gemini-3.8-flash

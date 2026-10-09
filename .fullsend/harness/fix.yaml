@@ -1,0 +1,11 @@
+---
+base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.44.0/harness/fix.yaml#sha256=80b421397c2d382a9ac1f5b18ea54350e2bc00195959cbda88d5b2b77ee4bc4f"
+
+# Raise the fix budget to match the review overlay so multi-module
+# Go verification is not killed mid-run. TIMEOUT_SECONDS must equal
+# timeout_minutes * 60.
+timeout_minutes: 45
+
+env:
+    sandbox:
+        TIMEOUT_SECONDS: "2700"
