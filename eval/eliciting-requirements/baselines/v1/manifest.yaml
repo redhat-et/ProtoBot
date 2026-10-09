@@ -75,7 +75,9 @@ run:
     regression: 613
   observed_cost: unavailable from the CLI adapter
   observed_results: results.yaml
-  human_calibration: pending independent expert review
+  human_calibration: >-
+    pending independent expert review; sample recorded in
+    calibration/v1/ before scoring
 case_baseline:
   source_of_truth: dataset/*/*/annotations.yaml and reference.md
   scoring: semantic properties, not exact output text

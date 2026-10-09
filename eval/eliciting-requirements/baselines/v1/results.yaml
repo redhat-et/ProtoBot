@@ -33,7 +33,10 @@ case_outputs:
   findings: deterministic judges reported no failures in the recorded runs
 calibration:
   status: pending
+  sample_path: eval/eliciting-requirements/calibration/v1/sample.yaml
+  artifact_path: eval/eliciting-requirements/calibration/v1/artifact.yaml
   required_action: >-
-    An independent requirements expert must review a sample of generated
-    packages and record agreement, disagreements, and judge adjustments before
-    this snapshot is promoted as a trusted baseline.
+    Two independent reviewers must score the recorded sample, compute
+    agreement with the deterministic and semantic judges, and complete
+    adjudication before this snapshot is promoted as a trusted baseline.
+    The sample and reviewer slots are already recorded; scores are not.

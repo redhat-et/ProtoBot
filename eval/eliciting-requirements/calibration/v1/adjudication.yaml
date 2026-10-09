@@ -1,0 +1,18 @@
+---
+calibration_id: v1
+status: pending-scores
+note: >-
+  Adjudication starts after both reviewers score and agreement is
+  computed. Notes identify rubric, judge, skill, or corpus
+  corrections. Confirmed failures are added to dataset/regression/
+  before the skill changes or a new baseline is promoted.
+notes: []
+rubric_corrections: []
+judge_corrections: []
+skill_corrections: []
+corpus_corrections: []
+# Confirmed failures route to regression_additions in dataset/regression/ until
+# a harness config executes dataset/held-out/.
+regression_additions: []
+# Interim: empty until a harness runner executes dataset/held-out/.
+held_out_additions: []
