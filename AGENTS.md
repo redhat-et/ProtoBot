@@ -94,20 +94,25 @@ agents must follow these rules:
 1. **Match a grammatical form and mood already used by a sibling
    entry's bold lead-in heading.** Bold lead-in headings must
    match a grammatical form and mood already used by a sibling
-   entry's bold lead-in heading. When sibling entries' bold
-   lead-in headings use more than one grammatical form and mood,
-   any grammatical form and mood already used by a sibling entry
-   in that list or governed collection is permitted; a heading
-   is not required to match every sibling entry's grammatical
-   form and mood when the sibling set is not uniform. A bold
-   lead-in heading that does not match a grammatical form and
-   mood already used by a sibling entry's bold lead-in heading is
-   a defect. Review agents must check that bold lead-in headings
-   match a grammatical form and mood already used by a sibling
-   entry's bold lead-in heading. Findings should include a bold
-   lead-in heading that does not match a grammatical form and
-   mood already used by a sibling entry's bold lead-in heading,
-   not only sibling-entry terminology matching.
+   entry's bold lead-in heading when at least one sibling bold
+   lead-in heading exists. When sibling entries' bold lead-in
+   headings use more than one grammatical form and mood, any
+   grammatical form and mood already used by a sibling entry in
+   that list or governed collection is permitted. When no
+   sibling bold lead-in heading exists, any grammatical form and
+   mood is permitted; do not treat the heading as a defect on
+   grammatical-form grounds. A bold lead-in heading that does
+   not match a grammatical form and mood already used by a
+   sibling entry's bold lead-in heading when at least one
+   sibling bold lead-in heading exists is a defect. Review
+   agents must check that bold lead-in headings match a
+   grammatical form and mood already used by a sibling entry's
+   bold lead-in heading when at least one sibling bold lead-in
+   heading exists. Findings should include a bold lead-in
+   heading that does not match a grammatical form and mood
+   already used by a sibling entry's bold lead-in heading when
+   at least one sibling bold lead-in heading exists, not only
+   sibling-entry terminology matching.
 
 2. **Reflect the qualifications of the entry body in bold
    lead-in headings.** Bold lead-in headings must reflect
