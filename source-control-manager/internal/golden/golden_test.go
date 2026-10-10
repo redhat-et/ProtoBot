@@ -132,6 +132,8 @@ func mainLine(d *driver) {
 	d.bind("m2", d.upstreamCommit("CHANGELOG.md", "# Changes\n", "Add a changelog"))
 	d.callStep("7-publish-stale")
 	d.callStep("7-refresh")
+	d.callStep("7-repo-state")
+	d.assertRefs(map[string]string{"refs/heads/main": "m2"})
 	d.callStep("7-publish-base-stale")
 	d.earsStep("7-change-set-update")
 	impact := d.earsStep("7-impact")
@@ -424,7 +426,17 @@ var negativeChecks = []check{
 			// touch: the approved manifest of CS-00001.
 			{"n34-9-commit-edit", func() { d.appendLine(".protobot/change-sets/cs-00001.yaml", "# A direct edit.") }},
 			// A record added to a store that the change set does not touch.
-			{"n34-9-commit-add", func() { d.write(".protobot/requirements/REQ-FIX-00001.yaml", "id: REQ-FIX-00001\n") }},
+			{"n34-9-commit-add", func() {
+				d.write(".protobot/requirements/REQ-FIX-00001.yaml", strings.Join([]string{
+					"id: REQ-FIX-00001",
+					"type: ubiquitous",
+					"text: The system shall remain valid.",
+					"applies_to:", "  scopes:", "    - fixture",
+					"verification:", "  mode: isolated-interface",
+					"provenance: user-authored",
+					"created: \"2026-09-21T09:00:00Z\"",
+				}, "\n")+"\n")
+			}},
 		}
 		for _, c := range cases {
 			d.restore("after-6")
@@ -476,7 +488,7 @@ var negativeChecks = []check{
 		if staged := d.git(d.clone(), "diff", "--cached", "--name-only"); staged != "README.md" {
 			d.t.Fatalf("staged %q, want README.md", staged)
 		}
-		d.assertCommitPaths("c4", ".protobot/change-sets/cs-00002.yaml", ".protobot/project.yaml", "docs/vision.md")
+		d.assertCommitPaths("c4", ".protobot/project.yaml", "docs/vision.md")
 	}},
 	{"scm-5 default branch", "after-6", func(d *driver) {
 		d.git(d.clone(), "checkout", "--quiet", "main")

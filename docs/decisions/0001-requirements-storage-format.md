@@ -149,11 +149,12 @@ noise from unrelated records.
 **Supplementary rendered summary.** For change sets that touch
 many requirements, `ears-manager change-set compare` and
 `ears-manager impact` produce structured output suitable for
-posting as a PR comment. This rendered summary shows the
-before/after for each changed requirement and the applicable
-requirement set in a human-readable table, supplementing the
-raw file diffs. Whether this summary is posted automatically
-(via CI) or on demand (via a Drafting Table action) is a
+posting as a PR comment. This rendered summary shows changed
+requirements and the applicable requirement set in a human-readable
+table, supplementing the raw file diffs. A compare result may include
+optional `before` and `after` values; neither the current binary nor
+the PR renderer is required to emit them. Whether this summary is posted
+automatically (via CI) or on demand (via a Drafting Table action) is a
 UX decision outside this ADR's scope.
 
 **[Amended September 2026]** That UX decision is now made: the
@@ -161,6 +162,11 @@ Drafting Table renders the summary into the pull-request body when
 the pull request is created or updated, and CI is not required to
 post it ([Git and Project-Repository
 Integration](../architecture/git-integration.md#title-and-body)).
+
+**[Amended October 2026]** Earlier wording made `before` and `after`
+values mandatory for changed requirements. The compare contract instead
+makes them optional, and the PR renderer need not emit them
+(see the [`change-set compare` contract][cli-compare]).
 
 **Normalization rules.** `ears-manager` enforces canonical
 serialization on every write to keep diffs stable across
@@ -443,5 +449,6 @@ serialized and organized on disk.
 
 [q7]: ../architecture/open-questions.md#q7-requirements-storage-format
 [phase2]: ../architecture/user-interaction-flow.md#phase-2-dimensioning
+[cli-compare]: ../architecture/ears-manager-cli.md#change-set-compare
 [em]: ../architecture/components.md#ears-manager
 [csm]: ../architecture/components.md#content-storage-model

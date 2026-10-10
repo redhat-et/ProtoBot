@@ -1,11 +1,12 @@
-// Command earsstub stands in for ears-manager in the repository fixture,
-// until the command set of issue #110 exists. It implements the subset of
-// the #30 contract that the fixture drives: project init, change-set
-// create, show, update, and compare, artifact put, impact, and check, with
-// #30's envelopes and exit statuses. It reports artifact.digest_mismatch
-// for a registered path whose content does not match its digest, and
-// project.store_digest_mismatch for a structured store whose records do
-// not match its store_digests entry, which every governed write updates.
+// Command earsstub provides deterministic ears-manager behavior for the
+// repository fixture. It implements the subset of the #30 contract that
+// the fixture drives: project init, change-set create, show, update, and
+// compare, artifact put, impact, and check, with #30's envelopes and exit
+// statuses. The separate real-binary replay uses SCM_FIXTURE_EARS_MANAGER.
+// It reports artifact.digest_mismatch for a registered path whose content
+// does not match its digest, and project.store_digest_mismatch for a
+// structured store whose records do not match its store_digests entry,
+// which every governed write updates.
 //
 // EARS_STUB_CONTROL may name a JSON file whose "extra_paths" map adds paths
 // to the change-set show result of a change set, so the fixture can hand
@@ -72,14 +73,12 @@ type Artifact struct {
 	Owner  string `yaml:"owner" json:"owner"`
 }
 
-// Op is a manifest operation. The stub records the content digest of an
-// artifact write, so every write with new content changes the manifest.
+// Op is a manifest operation.
 type Op struct {
 	Action        string `yaml:"action" json:"action"`
 	RequirementID string `yaml:"requirement_id,omitempty" json:"requirement_id,omitempty"`
 	InterfaceID   string `yaml:"interface_id,omitempty" json:"interface_id,omitempty"`
 	ArtifactID    string `yaml:"artifact_id,omitempty" json:"artifact_id,omitempty"`
-	Digest        string `yaml:"digest,omitempty" json:"-"`
 }
 
 // Assessment is an impact disposition.
@@ -725,27 +724,9 @@ func (s *stub) changeSetCompare() (any, *failure) {
 	if !ok {
 		return nil, fail(4, "change_set.not_found", "Change set "+id+" was not found.")
 	}
-	// An artifact revision carries the registry digests before and after.
-	before := map[string]string{}
-	if baseProject := s.projectAt(m.BaseCommit); baseProject != nil {
-		for _, a := range baseProject.Artifacts {
-			before[a.ID] = a.Digest
-		}
-	}
-	after := map[string]string{}
-	for _, a := range p.Artifacts {
-		after[a.ID] = a.Digest
-	}
 	changed := []map[string]string{}
 	for _, op := range m.ArtifactOperations {
-		entry := map[string]string{"action": op.Action, "artifact_id": op.ArtifactID}
-		if digest, ok := before[op.ArtifactID]; ok {
-			entry["before"] = digest
-		}
-		if digest, ok := after[op.ArtifactID]; ok {
-			entry["after"] = digest
-		}
-		changed = append(changed, entry)
+		changed = append(changed, map[string]string{"action": op.Action, "artifact_id": op.ArtifactID})
 	}
 	for _, op := range m.Operations {
 		changed = append(changed, map[string]string{"action": op.Action, "requirement_id": op.RequirementID})
@@ -815,14 +796,14 @@ func (s *stub) artifactPut() (any, []string, *failure) {
 	recorded := false
 	for i := range m.ArtifactOperations {
 		if m.ArtifactOperations[i].ArtifactID == artifactID {
-			m.ArtifactOperations[i].Digest = entry.Digest
 			recorded = true
 		}
 	}
 	if !recorded {
-		m.ArtifactOperations = append(m.ArtifactOperations, Op{Action: action, ArtifactID: artifactID, Digest: entry.Digest})
+		m.ArtifactOperations = append(m.ArtifactOperations, Op{Action: action, ArtifactID: artifactID})
 	}
-	changed := []string{rel, ".protobot/project.yaml", s.manifestPath(p, id)}
+	manifestPath := s.manifestPath(p, id)
+	changed := []string{rel, ".protobot/project.yaml", manifestPath}
 	projection := s.loadProjection()
 	classified := false
 	for _, c := range projection.Paths {
@@ -838,7 +819,7 @@ func (s *stub) artifactPut() (any, []string, *failure) {
 		}
 		changed = append(changed, ".protobot/projection.yaml")
 	}
-	if err := s.saveYAML(s.manifestPath(p, id), m); err != nil {
+	if err := s.saveYAML(manifestPath, m); err != nil {
 		return nil, nil, fail(6, "io.write_failed", "The manifest cannot be written.")
 	}
 	if err := s.saveProjectWithStores(p); err != nil {

@@ -930,7 +930,9 @@ but #33 refused it, and the SCM keeps that refusal
      `base_commit`" row, and the retry is `refresh-branch`; and
    - `BASE_COMMIT_STALE` when `<remote>/<default>` is reachable from
      `HEAD` but differs from `base_commit`: the default branch was
-     merged in, and `change-set update --base-commit` did not run.
+     merged in, and `change-set update --base-commit` did not run. Its
+     message directs the caller to run `repo_state` after `refresh` and
+     before applying the suggested update or running `check`.
    `ears-manager check` reports the same three base conditions for every
    proposed change set so CI can refuse a stale `base_commit` before merge
    ([`check`](ears-manager-cli.md#check)).
@@ -991,8 +993,11 @@ change-set show`, `change-set compare`, and `impact`, in #34's order:
 
 1. A heading with the change-set ID, then the intent and the
    `base_commit`.
-2. The changed set: every `add`, `revise`, and `retire` operation with
-   its requirement ID, and for a revision the text before and after.
+2. The changed set: every requirement operation with its requirement ID.
+   A changed entry (requirement, interface, or artifact) may include
+   `before` and `after` values when `change-set compare` supplies them; each
+   field is optional, and neither the current binary nor the PR renderer is
+   required to emit them.
 3. The interface and artifact operations, when the change set has any.
 4. The impact assessment: every candidate with its disposition, its
    rationale, and its origin, `mechanical` or `semantic`, or a note
@@ -1075,10 +1080,14 @@ match runs on the intent and again on the text as rendered.
    and classify each conflicting file as #34's failure table does: a
    change-set manifest or index file, a requirement record, another
    registered artifact, or another path.
-6. Return the new default head as `base_commit_update`. The role then
-   runs #34's [refresh sequence][refresh-seq]: `ears-manager change-set
-   update --base-commit <default head>`, `impact`, a reviewed
-   `change-set update --impact-file -`, `check`, and `commit`.
+6. Return the new default head as `base_commit_update`. Before applying
+   it through `ears-manager`, the role calls `repo_state`. That read
+   fetches the canonical remote and fast-forwards the local default
+   branch, which `ears-manager` continues to use according to its
+   existing local-default-ref precedence. The role then runs #34's
+   [refresh sequence][refresh-seq]: `ears-manager change-set update
+   --base-commit <default head>`, `impact`, a reviewed `change-set
+   update --impact-file -`, `check`, and `commit`.
 
 When nothing needs a merge, `refresh` returns `outcome: unchanged`.
 
@@ -1584,7 +1593,7 @@ write happened returns `mutation: unknown` and `retry: reconcile`.
 | `NOTHING_TO_PUBLISH` | `publish` | The branch has no commit that the default branch lacks | — | `never` |
 | `BASE_NOT_ON_DEFAULT` | `publish` | `base_commit` is not on the canonical default branch, or the remote has no default branch | — | `user` |
 | `DEFAULT_MOVED` | `publish` | The default branch moved since `base_commit` | Default branch has moved since `base_commit` | `refresh-branch` |
-| `BASE_COMMIT_STALE` | `publish` | The default branch was merged in, and `base_commit` was not updated | — | `revise` |
+| `BASE_COMMIT_STALE` | `publish` | The default branch was merged in, and `base_commit` was not updated; the message directs the caller to run `repo_state` after `refresh` and before the suggested update or `check` | — | `revise` |
 | `PR_MERGED` | `publish` | The pull request is merged | — | `never` |
 | `PR_CLOSED` | `publish` | The pull request is closed without a merge | — | `user` |
 | `AMBIGUOUS_PULL_REQUEST` | `publish` | More than one pull request matches the branch; `repo_state` reports it as a state instead | — | `user` |
@@ -1605,6 +1614,11 @@ Two #34 rows are outside the SCM: "Merge refused by branch
 protection", because the user merges; and "Merge succeeded,
 registration failed", which registration owns, with `approved_merge`
 giving the same merge commit on every retry.
+
+For `BASE_COMMIT_STALE`, `error.details.next` remains the suggested
+`ears-manager change-set update` command; it is not the complete refresh
+sequence. The caller first runs `repo_state` after `refresh` so the local
+default branch reflects the fetched canonical remote head.
 
 ---
 
@@ -1807,7 +1821,7 @@ also stages nothing ([`commit`](#commit)).
 | 4 | The driver edits `docs/vision.md` directly; `commit` | `SPEC_DIGEST_MISMATCH`: nothing is staged and no commit is created. The details name `docs/vision.md` with `ears-manager`'s diagnostics, and name `git checkout -- docs/vision.md` as the discard that the user runs. `ears-manager check` reports `artifact.digest_mismatch` for record `vision`. |
 | 5 | The driver runs the discard, which restores the committed `docs/vision.md` and so drops the step-3 write too; `ears-manager artifact put` for the Vision again; `commit` | Exactly one commit, of the two artifacts, the manifest, and `project.yaml`. The subject is `spec(CS-00002): <intent>`, and the trailer is `Change-Set: CS-00002`. |
 | 6 | `publish` | `origin` has `cs/00002-<slug>` at the same commit, and `main` is unchanged. The `gh` stub records one `pr create` whose standard input is `<rendered:CS-00002>`: the intent, `base_commit`, every changed operation, every impact disposition with origin and rationale, `implementation_required`, and the file list. |
-| 7 | The second clone pushes an unrelated commit to `main`; `publish`; `refresh`; `publish`; #34's refresh sequence: `ears-manager change-set update --base-commit`, `impact`, a reviewed `change-set update --impact-file -`, and `check`; `commit`; `publish` | The first `publish` fails with `DEFAULT_MOVED`. `refresh` adds a merge commit with two parents and returns the new `main` head. The second `publish` fails with `BASE_COMMIT_STALE`. After the update, `commit` records the manifest and `project.yaml`, whose change-set store digest the update changed, and `publish` pushes and updates the pull request. The manifest's `base_commit` equals the new `main` head. `git log --walk-reflogs` shows no rebase, and the branch's first commit is unchanged. |
+| 7 | The second clone pushes an unrelated commit to `main`; `publish`; `refresh`; `repo_state`; `publish`; #34's refresh sequence: `ears-manager change-set update --base-commit`, `impact`, a reviewed `change-set update --impact-file -`, and `check`; `commit`; `publish` | The first `publish` fails with `DEFAULT_MOVED`. `refresh` adds a merge commit with two parents and returns the new `main` head. `repo_state` fetches and fast-forwards the local `main` to that canonical remote head before the change-set update and check. The second `publish` fails with `BASE_COMMIT_STALE`. After the update, `commit` records the manifest and `project.yaml`, whose change-set store digest the update changed, and `publish` pushes and updates the pull request. The manifest's `base_commit` equals the new `main` head. `git log --walk-reflogs` shows no rebase, and the branch's first commit is unchanged. |
 | 8 | The second clone merges `cs/00002-<slug>`; `register-approved-change-set` with `CS-00002`, twice; `publish`; `repo_state`; a write to the merged manifest through `ears-manager` | `main` of `origin` is a merge commit with two parents. The registration stub records one call with `CS-00002`, that merge commit, the materialization key, and the registration idempotency key; the second run records no new call and returns the first result. `publish` fails with `PR_MERGED`. `repo_state` fast-forwards the local `main` to the merge commit, and the write to the merged manifest is then refused. |
 
 ### Negative checks
@@ -1820,7 +1834,7 @@ after step 6. The first table holds #34's nine negative checks.
 | Force push: `publish` with a `force` field | `INVALID_REQUEST`; no command runs, and the remote branch is unchanged |
 | Amend a pushed commit: `commit` with an `amend` field | `INVALID_REQUEST`; the pushed commit and `HEAD` are unchanged |
 | Stage an unregistered file: the driver creates `notes.txt`, then `commit`, then `commit` with a `paths` field | `NOTHING_TO_COMMIT`, then `INVALID_REQUEST`; `notes.txt` stays untracked |
-| Edit, add, delete, or rename a structured record outside `ears-manager`: `ears-manager artifact put` for the Vision, then the driver edits the approved manifest `.protobot/change-sets/cs-00001.yaml`, then `commit`; again, with the driver adding `.protobot/requirements/REQ-FIX-00001.yaml` instead | `SPEC_DIGEST_MISMATCH` each time, naming the store, `.protobot/change-sets` and then `.protobot/requirements`, the second time with the added record in `untracked`; no commit is created |
+| Edit, add, delete, or rename a structured record outside `ears-manager`: `ears-manager artifact put` for the Vision, then the driver edits the approved manifest `.protobot/change-sets/cs-00001.yaml`, then `commit`; again, with the driver adding a valid `.protobot/requirements/REQ-FIX-00001.yaml` instead | `SPEC_DIGEST_MISMATCH` each time, naming the store, `.protobot/change-sets` and then `.protobot/requirements`, the second time with the added record in `untracked`; no commit is created |
 | Create or write a `wi/` branch: `branch_init` with `branch_prefix: "wi/"` in a copy of the state before step 1, and `branch_resume` with `WI-00042` | `RESERVED_PREFIX` and `INVALID_REQUEST`; no `wi/` ref exists |
 | Write under `.protobot/attestations/`: the driver creates a file there, then `commit` | `NOTHING_TO_COMMIT`; the path is absent from every commit and from `origin` |
 | Push to the default branch, in either `review_mode`: the driver checks out `main`, then `publish`; again with `review_mode: multi-player` | `NOT_A_CHANGE_SET_BRANCH` before any command runs; `main` of `origin` is unchanged |
@@ -1845,7 +1859,7 @@ The second table tests the SCM's own boundary.
 | A credential in the remote URL: the driver sets the URL of `origin` with a token as the user name and no password, then `repo_state` | `REMOTE_CREDENTIAL_IN_URL`, naming `origin`; no result holds the URL or the planted `PROTOBOT-FIXTURE-TOKEN` |
 | A redirected push: the driver sets `remote.origin.pushurl` to another bare repository, then `publish` | `REMOTE_PUSH_REDIRECTED`; neither repository receives a push |
 | A conflicting refresh: the second clone pushes a conflicting change to `docs/vision.md` on `main`, then `refresh` | `MERGE_CONFLICT`, classifying `docs/vision.md` as a registered artifact; `HEAD`, the index, and the working tree are unchanged, and no merge is in progress |
-| Uncommitted work before a push: `ears-manager artifact put`, then `publish` | `UNCOMMITTED_CHANGES`, naming the artifact, the manifest, and `project.yaml`; nothing is pushed |
+| Uncommitted work before a push: repeat `ears-manager artifact put` for an artifact operation already recorded by this change set, then `publish` | `UNCOMMITTED_CHANGES`, naming `.protobot/project.yaml` and the artifact path; the unchanged manifest is not named, and nothing is pushed |
 | A trailer in the body: `commit` with a body line `Change-Set: CS-00009` | `INVALID_REQUEST`; no commit |
 | A closing keyword in the intent: `ears-manager change-set update` sets the intent to `Fixes #1`, then `commit` | `UNSAFE_TEXT`; no commit |
 | A hosted call with a Gate context for `CS-00009` | `UNAUTHORIZED_ACTION`; no command runs |

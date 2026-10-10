@@ -508,6 +508,9 @@ Each structured diagnostic has this shape:
 `path`, `record_id`, and `field` are optional. Codes are stable identifiers,
 not localized prose. Implementations may add diagnostic codes, but they must
 not change the meaning of an existing code within schema version `1`.
+For `artifact.digest_mismatch`, `path` names `.protobot/project.yaml`, where
+the registered artifact digest is stored; `record_id` identifies the artifact
+whose content did not match that digest.
 
 ---
 
@@ -671,6 +674,15 @@ explicit.
 | `change-set update` | `--change-set CS-ID` plus metadata, `--base-commit`, or complete impact assessment | `before`, `after`, `assessment_status`, and `changed_paths` in the result | `change_set.not_proposed`, `change_set.base_mismatch`, `change_set.invalid_base`, `change_set.invalid_impact`, `git.read_failed`, or validation diagnostics |
 | `change-set compare` | `--change-set CS-ID` and optional `--against` full commit (deferred to follow-on scope) | Deterministic comparison report described below | `change_set.not_found`, `change_set.invalid_base`, or read/validation diagnostics |
 
+The successful `change-set show` `data` object has six keys: `change_set`,
+`status`, `changed_count`, `applicable_count`, `manifest_path`, and `paths`.
+`change_set` is the complete manifest; `status` is `proposed` or `approved`;
+`changed_count` counts the requirement, interface, and artifact operations in
+the manifest; `applicable_count` counts impact-assessment entries whose
+disposition is `applicable`; `manifest_path` is its root-relative path; and
+`paths` is the exact root-relative file set described above, including the
+manifest path.
+
 `change-set create` allocates the next sequence number, cuts and checks out
 the change-set branch, and writes the manifest on it, with the default-branch
 head as `base_commit` and as `impact_assessment_base_commit`. A creation that
@@ -758,10 +770,15 @@ Then it applies the ancestry rule:
 - `change-set update --base-commit X` is accepted when `X` is an ancestor of
   `HEAD` and the recorded `base_commit` is an ancestor of `X`. After the
   refresh merge, `X` is the default-branch head that the merge brought in.
-  So `base_commit` moves forward along the change-set branch, never back or
-  sideways. A new `base_commit` makes the impact assessment `stale` until a
-  reviewed `change-set update --impact-file` records the assessment against
-  the new base ([Impact review protocol](#impact-review-protocol)).
+  After `refresh`, the caller must run the Source Control Manager's
+  `repo_state` before applying the suggested update or running `check`; that
+  read fast-forwards the local default branch to the fetched canonical remote
+  head. This preserves `ears-manager`'s existing local-default-ref precedence;
+  `ears-manager` still never fetches. So `base_commit` moves
+  forward along the change-set branch, never back or sideways. A new
+  `base_commit` makes the impact assessment `stale` until a reviewed
+  `change-set update --impact-file` records the assessment against the new
+  base ([Impact review protocol](#impact-review-protocol)).
 
 `change_set.base_mismatch`, status `5`, and `mutation: "none"` refuse a write
 in each of these cases:
@@ -988,8 +1005,11 @@ refreshes and re-reviews state rather than revising record content. A proposed
 `base_commit` that is not reachable from the default-branch head returns
 status `4` as `BASE_NOT_ON_DEFAULT`. `DEFAULT_MOVED` and `BASE_COMMIT_STALE`
 return status `5`, and the diagnostic names the recorded base and the current
-default-branch head. Approved manifests are checked against their stored
-historical assessment. `check` never repairs files.
+default-branch head. If a Source Control Manager `publish` failure includes an
+`error.details.next` suggested command, it is not the full sequence: after
+`refresh`, run `repo_state` first, then apply the suggested command and
+complete impact review before running `check`. Approved manifests are checked
+against their stored historical assessment. `check` never repairs files.
 
 The class of a `project.` or `schema.` code, not its prefix, decides its
 status:
@@ -1046,7 +1066,10 @@ carries no diagnostics. A diagnostic arrives in `error.diagnostics`.
 `change-set compare` is deterministic and read-only. It compares the
 proposed change set with its `base_commit` by default; `--against` is used for
 an explicit immutable comparison revision (deferred to follow-on scope; passing
-`--against` is rejected with `change_set.invalid_base`). Its result contains:
+`--against` is rejected with `change_set.invalid_base`). Each `changed` entry
+may contain `before` and `after` values. Each field is optional, and neither
+the current binary nor the PR renderer is required to emit it. Its result
+contains:
 
 ```json
 {
@@ -1061,8 +1084,9 @@ an explicit immutable comparison revision (deferred to follow-on scope; passing
 }
 ```
 
-The arrays contain stable IDs and before/after values where applicable. The
-report distinguishes a finding from a command failure: a duplicate,
+The arrays contain stable IDs. When a `changed` entry includes `before` or
+`after`, those fields hold the corresponding values; either can be omitted.
+The report distinguishes a finding from a command failure: a duplicate,
 conflict, or dependency cycle is returned as analysis data so the agent and
 user can decide how to revise the proposal. A malformed record or unreadable
 base is a non-zero failure. The PR body renderer consumes this result without

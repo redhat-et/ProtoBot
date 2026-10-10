@@ -3,15 +3,19 @@
 // through it.
 //
 // The command and envelope shapes are those of
-// docs/architecture/ears-manager-cli.md. Where that contract leaves a
-// field name open, this package names the field it reads:
+// docs/architecture/ears-manager-cli.md. The full `change-set show` contract
+// has six data keys: `change_set`, `status`, `changed_count`,
+// `applicable_count`, `manifest_path`, and `paths`. The SCM consumes four:
+// `change_set`, `status`, `manifest_path`, and `paths`.
 //
-//   - `change-set show` data: `change_set` (the manifest), `status`
-//     (`proposed` or `approved`), `manifest_path`, and `paths`, the exact
-//     file set of the change set, its manifest included.
-//   - `check`: status 4 with `artifact.digest_mismatch` diagnostics that
-//     carry the mismatching `path`, and status 5 for an incomplete or
-//     stale impact assessment.
+//   - `paths` is the exact file set of the change set, its manifest included.
+//   - `check`: status 4 with `artifact.digest_mismatch` diagnostics whose
+//     `path` names the registry file `.protobot/project.yaml`, and status 5
+//     for an incomplete or stale impact assessment.
+//   - `.protobot/projection.yaml` entries use `path` and `class`; the SCM
+//     parses those names when identifying change-set-owned classifications.
+//   - `change-set compare` entries may include `before` and `after`. Both
+//     fields are optional; the current CLI and PR renderer need not emit them.
 package ears
 
 import (
@@ -228,6 +232,8 @@ func (c *Client) ShowChangeSet(id, at string) (*Show, *Call, *result.Failure) {
 }
 
 // Changed is one entry of the `changed` list of `change-set compare`.
+// Before and After are optional result fields and remain raw JSON because
+// compare values may have different shapes.
 type Changed struct {
 	Action        string          `json:"action"`
 	RequirementID string          `json:"requirement_id"`

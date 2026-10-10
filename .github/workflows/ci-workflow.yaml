@@ -218,6 +218,10 @@ jobs:
         with:
           go-version-file: source-control-manager/go.mod
 
+      - name: Build ears-manager for the real-binary replay
+        run: CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ears-manager ./cmd/ears-manager
+        working-directory: ears-manager
+
       - name: Check formatting
         run: |
           files="$(gofmt -l source-control-manager)" || exit $?
@@ -239,6 +243,12 @@ jobs:
       - name: Run tests, the golden repository fixture included
         run: go test ./...
         working-directory: source-control-manager
+
+      - name: Replay the golden repository fixture against real ears-manager
+        run: go test -count=1 -v ./internal/golden
+        working-directory: source-control-manager
+        env:
+          SCM_FIXTURE_EARS_MANAGER: ${{ github.workspace }}/ears-manager/ears-manager
 
       - name: Build static binary
         run: CGO_ENABLED=0 go build -trimpath -buildvcs=false -o source-control-manager ./cmd/source-control-manager

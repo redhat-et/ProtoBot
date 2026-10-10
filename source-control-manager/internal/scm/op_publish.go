@@ -133,7 +133,9 @@ func (c *call) publish() (*outcome, *result.Failure) {
 		return nil, result.Fail(result.DefaultMoved, "The default branch moved since the change set's base.", baseDetails()...)
 	}
 	if defaultHead != base {
-		return nil, result.Fail(result.BaseCommitStale, "The default branch was merged in, and base_commit was not updated.",
+		return nil, result.Fail(result.BaseCommitStale,
+			"The default branch was merged in, and base_commit was not updated. "+
+				"After refresh, run repo_state before the suggested change-set update or check.",
 			baseDetails(jsonx.F("next", []string{"ears-manager", "--output", "json", "change-set", "update",
 				"--change-set", c.csID, "--base-commit", defaultHead}))...)
 	}

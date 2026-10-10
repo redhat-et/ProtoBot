@@ -492,6 +492,41 @@ func (d *driver) earsStep(step string) map[string]any {
 	if want := int(em["exit"].(float64)); status != want {
 		d.t.Fatalf("%s: ears-manager exited %d, want %d: %v", step, status, want, doc)
 	}
+	if want, ok := s["mutation_paths"]; ok {
+		wantPaths, ok := want.([]any)
+		if !ok {
+			d.t.Fatalf("%s: mutation_paths must be an array, got %T", step, want)
+		}
+		mutation, ok := doc["mutation"].(map[string]any)
+		if !ok {
+			d.t.Fatalf("%s: expected mutation object, got %T", step, doc["mutation"])
+		}
+		gotPaths, ok := mutation["paths"].([]any)
+		if !ok {
+			d.t.Fatalf("%s: expected mutation.paths array, got %T", step, mutation["paths"])
+		}
+		sortedPaths := func(name string, paths []any) []any {
+			values := make([]string, len(paths))
+			for i, path := range paths {
+				value, ok := path.(string)
+				if !ok {
+					d.t.Fatalf("%s: %s[%d] must be a string, got %T", step, name, i, path)
+				}
+				values[i] = value
+			}
+			sort.Strings(values)
+			sorted := make([]any, len(values))
+			for i, value := range values {
+				sorted[i] = value
+			}
+			return sorted
+		}
+		wantPaths = sortedPaths("mutation_paths", wantPaths)
+		gotPaths = sortedPaths("mutation.paths", gotPaths)
+		if err := d.match(step+".mutation.paths", wantPaths, gotPaths); err != nil {
+			d.t.Fatalf("%v: %v", err, doc)
+		}
+	}
 	return doc
 }
 

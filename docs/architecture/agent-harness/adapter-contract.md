@@ -1258,10 +1258,13 @@ cut of `ears-manager change-set create`
 - The manifest, the Toolkit skills at a pinned commit in
   `.agents/skills/`, one maintenance skill `review-pr`, the guard, and
   the binding under test.
-- `ears-manager` on `PATH`. Until its implementation exists, a
-  recording stub with #30's command grammar answers with the envelopes
-  of #30's [golden fixture](../ears-manager-cli.md#golden-fixture) and
-  writes the files the real CLI would write.
+- `ears-manager` on `PATH`. This adapter-binding fixture uses a
+  recording stub with #30's command grammar for deterministic recorded
+  behavior: it answers with the envelopes of #30's [golden
+  fixture](../ears-manager-cli.md#golden-fixture) and writes the files
+  the real CLI would write. The separate SCM repository-fixture replay
+  can use the built binary via `SCM_FIXTURE_EARS_MANAGER`
+  ([SCM fixture][scm-fixture]).
 - `source-control-manager` on `PATH`, which the binding starts as the
   `scm` server.
 - A recording `wms` stub that reports one blocked work item. The
@@ -1304,7 +1307,7 @@ repository state.
 | 11 | Start a new session, without continuing, through the entry point | A new session ID. The resume reads present `CS-00003`, its branch, and the step-5 requirement and Vision as uncommitted drafts. No call reads an earlier session. |
 | 12 | Push a commit to the default branch of `origin` from outside the session, then continue the session through the entry point | The resume reads run again and present `CS-00003`, its branch, and `base_commit` from governed reads and `repo_state`, not from the conversation. The summary makes no claim about the default branch; step 14 detects the move. |
 | 13 | Start a session with the `wms` stub stopped | The summary marks blocked work as unavailable. Drafting continues. No `wms` call succeeds. |
-| 14 | The user approves and asks for a commit and a pull request | Only `scm` tools and `ears-manager` shell operations run. `commit` makes one commit in #34's message format. `publish` fetches and fails with `DEFAULT_MOVED`, because the default branch moved since `base_commit` (step 12), as #34's [failure table](../git-integration.md#failure-behavior) states. The role runs `refresh`, which adds a merge commit, then, in #34's [refresh sequence](../git-integration.md#refreshing-from-the-default-branch), `change-set update --base-commit` with the head that `refresh` returned, `impact`, a reviewed `change-set update --impact-file -` that records any new disposition, and `check --change-set CS-00003`, and runs `commit` again, so the manifest's `base_commit` equals the new default-branch head and the assessment is complete. `publish` pushes the branch to `origin`. The `gh` stub records one `pr create` whose `--repo` is the canonical repository, `--base` is `main`, and `--head` is `cs/00003-<slug>`, and whose body on standard input is the SCM's rendering. No merge and no other call follows the handoff. |
+| 14 | The user approves and asks for a commit and a pull request | Only `scm` tools and `ears-manager` shell operations run. `commit` makes one commit in #34's message format. `publish` fetches and fails with `DEFAULT_MOVED`, because the default branch moved since `base_commit` (step 12), as #34's [failure table](../git-integration.md#failure-behavior) states. The role runs `refresh`, which adds a merge commit, then `repo_state` to fetch and fast-forward the local default branch to the canonical remote head. In #34's [refresh sequence](../git-integration.md#refreshing-from-the-default-branch), it then runs `change-set update --base-commit` with the head that `refresh` returned, `impact`, a reviewed `change-set update --impact-file -` that records any new disposition, and `check --change-set CS-00003`, and runs `commit` again, so the manifest's `base_commit` equals the new default-branch head and the assessment is complete. `publish` pushes the branch to `origin`. The `gh` stub records one `pr create` whose `--repo` is the canonical repository, `--base` is `main`, and `--head` is `cs/00003-<slug>`, and whose body on standard input is the SCM's rendering. No merge and no other call follows the handoff. |
 | 15 | Export every session | Each export names the role, the model, and the harness version, and holds the adapter line and every tool call with its status and error text. |
 
 A session started in one bound harness and resumed in another, at step
