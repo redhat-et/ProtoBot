@@ -1,0 +1,17 @@
+---
+calibration_id: v1
+status: pending-scores
+method:
+  score_agreement: percent-and-cohens-kappa
+  critical_flags: exact-match
+  judges:
+    - deterministic
+    - semantic
+note: >-
+  Computed after both reviewers score every sampled case. False-ready
+  flags are compared independently of aggregate score. Deterministic
+  and semantic judge comparison uses per-case harness findings from
+  the recorded run IDs; those findings are not fabricated here.
+reviewer_reviewer: null
+reviewer_deterministic_judges: null
+reviewer_semantic_judges: null

@@ -1,0 +1,199 @@
+---
+# Fill only after reviewer identities are recorded in sample.yaml.
+calibration_id: v1
+status: pending-scores
+scoring_rule: property-based-reference
+critical_failure_rule: >-
+  Any false-ready result is a critical failure regardless of
+  aggregate score. Set both false_ready and critical_failure to true
+  in that case; do not leave a high semantic_quality score as the
+  effective result.
+reviewers:
+  - id: reviewer-a
+    identity: pending-maintainer-assignment
+    scored_at: null
+    cases:
+      - id: case-001-ubiquitous
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-002-event-driven
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-003-state-driven
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-004-optional-feature
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-005-unwanted-behavior
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-006-complex-splitting
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-007-rough-api
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-008-vague-ui
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-011-conflicting-set
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-012-host-independent
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-023-ready-complete
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-014-uncertainty
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-015-implementation-temptation
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-020-referent-and-vacuous
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-024-ready-regression
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+  - id: reviewer-b
+    identity: pending-maintainer-assignment
+    scored_at: null
+    cases:
+      - id: case-001-ubiquitous
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-002-event-driven
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-003-state-driven
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-004-optional-feature
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-005-unwanted-behavior
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-006-complex-splitting
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-007-rough-api
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-008-vague-ui
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-011-conflicting-set
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-012-host-independent
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-023-ready-complete
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-014-uncertainty
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-015-implementation-temptation
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-020-referent-and-vacuous
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""
+      - id: case-024-ready-regression
+        semantic_quality: null
+        review_discipline: null
+        critical_failure: null
+        false_ready: null
+        notes: ""

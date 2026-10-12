@@ -1,0 +1,158 @@
+---
+# Recorded before scoring. Do not add reviewer scores to this file.
+calibration_id: v1
+baseline_id: v1
+status: sample-recorded-pending-scoring
+selected_at: "2026-10-07"
+selected_before_scoring: true
+selector:
+  role: code-agent
+  issue: 63
+  note: >-
+    Sample membership and reviewer slots are recorded before any
+    scoring. Independent human identities remain pending maintainer
+    assignment.
+scoring_rule: property-based-reference
+critical_failure_rule: >-
+  Any false-ready result is a critical failure regardless of
+  aggregate score.
+reviewers:
+  - id: reviewer-a
+    identity: pending-maintainer-assignment
+    assigned_at: null
+    status: unassigned
+  - id: reviewer-b
+    identity: pending-maintainer-assignment
+    assigned_at: null
+    status: unassigned
+required_coverage:
+  ears_patterns:
+    - ubiquitous
+    - event-driven
+    - state-driven
+    - optional feature
+    - unwanted behavior
+    - complex
+  dimensions:
+    - complex-pattern-splitting
+    - false-ready-rejection
+    - readiness-contract:implementability
+    - readiness-contract:verification
+    - consistency-analysis
+    - implementation-leakage
+    - uncertainty
+    - host-independence
+    - controlled-language
+  partitions:
+    - development
+    - regression
+  readiness_values:
+    - needs_clarification
+    - ready_for_review
+cases:
+  - id: case-001-ubiquitous
+    partition: development
+    path: dataset/cases/case-001-ubiquitous
+    covers:
+      - ears-pattern:ubiquitous
+    critical_false_ready: false
+  - id: case-002-event-driven
+    partition: development
+    path: dataset/cases/case-002-event-driven
+    covers:
+      - ears-pattern:event-driven
+    critical_false_ready: false
+  - id: case-003-state-driven
+    partition: development
+    path: dataset/cases/case-003-state-driven
+    covers:
+      - ears-pattern:state-driven
+    critical_false_ready: false
+  - id: case-004-optional-feature
+    partition: development
+    path: dataset/cases/case-004-optional-feature
+    covers:
+      - ears-pattern:optional feature
+    critical_false_ready: false
+  - id: case-005-unwanted-behavior
+    partition: development
+    path: dataset/cases/case-005-unwanted-behavior
+    covers:
+      - ears-pattern:unwanted behavior
+    critical_false_ready: false
+  - id: case-006-complex-splitting
+    partition: development
+    path: dataset/cases/case-006-complex-splitting
+    covers:
+      - ears-pattern:complex
+      - ears-pattern:unwanted behavior
+      - complex-pattern-splitting
+    critical_false_ready: false
+  - id: case-007-rough-api
+    partition: development
+    path: dataset/cases/case-007-rough-api
+    covers:
+      - ears-pattern:event-driven
+      - implementation-leakage
+      - false-ready-rejection
+    critical_false_ready: false
+  - id: case-008-vague-ui
+    partition: development
+    path: dataset/cases/case-008-vague-ui
+    covers:
+      - false-ready-rejection
+    critical_false_ready: true
+  - id: case-011-conflicting-set
+    partition: development
+    path: dataset/cases/case-011-conflicting-set
+    covers:
+      - ears-pattern:event-driven
+      - consistency-analysis
+    critical_false_ready: false
+  - id: case-012-host-independent
+    partition: development
+    path: dataset/cases/case-012-host-independent
+    covers:
+      - ears-pattern:complex
+      - host-independence
+      - readiness-contract:implementability
+      - readiness-contract:verification
+    critical_false_ready: false
+  - id: case-023-ready-complete
+    partition: development
+    path: dataset/cases/case-023-ready-complete
+    covers:
+      - ears-pattern:complex
+      - readiness-contract:implementability
+      - readiness-contract:verification
+    critical_false_ready: false
+  - id: case-014-uncertainty
+    partition: regression
+    path: dataset/regression/case-014-uncertainty
+    covers:
+      - uncertainty
+      - false-ready-rejection
+    critical_false_ready: true
+  - id: case-015-implementation-temptation
+    partition: regression
+    path: dataset/regression/case-015-implementation-temptation
+    covers:
+      - ears-pattern:event-driven
+      - implementation-leakage
+      - false-ready-rejection
+    critical_false_ready: true
+  - id: case-020-referent-and-vacuous
+    partition: regression
+    path: dataset/regression/case-020-referent-and-vacuous
+    covers:
+      - controlled-language
+      - false-ready-rejection
+    critical_false_ready: true
+  - id: case-024-ready-regression
+    partition: regression
+    path: dataset/regression/case-024-ready-regression
+    covers:
+      - ears-pattern:complex
+      - readiness-contract:implementability
+      - readiness-contract:verification
+    critical_false_ready: false
