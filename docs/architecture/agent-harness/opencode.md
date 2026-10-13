@@ -53,7 +53,7 @@ Table harness are not version pins.
 | Touch point | Kind | Disposition |
 | --- | --- | --- |
 | `eval/eliciting-requirements/scripts/run-opencode.sh` | Executable | Requires `opencode --version` 2.x; rejects a missing binary and 1.x; invokes `opencode run --standalone --model … --format json --auto` from the case workspace |
-| `eval/eliciting-requirements/scripts/run-opencode_test.sh` | Test | Mocks 1.18.30, 2.0.28, a missing binary, and an unparseable version |
+| `eval/eliciting-requirements/scripts/run-opencode_test.sh` | Test | Mocks 1.18.30, 2.0.28, 3.0.0, a noisy version stream, a missing binary, and an unparseable version; verifies CLI flags, bwrap sandbox argv, and fallback |
 | `eval/eliciting-requirements/{eval,eval-regression}.yaml` | Config | Call the wrapper; they do not pin a binary |
 | This binding and the adapter contract | Spec | Designed against OpenCode 2.0.28; 1.18.30 notes are historical |
 | `docs/architecture.md` strawman, overview, components, UX | Spec | Name OpenCode as the first harness; not install paths |
@@ -545,7 +545,7 @@ harness commands. For OpenCode:
 
 | Fixture need | OpenCode v2 |
 | --- | --- |
-| List discovered skills (step 1) | Skill directories under `.agents/skills/`, `.claude/skills/`, and `.opencode/skills/`; v2 dropped `opencode debug skill`. The replay endpoint still records `<available_skills>` |
+| List discovered skills (step 1) | Open gap until #77; v2 dropped `opencode debug skill` and has no command to list discovered skills before a session. The `<available_skills>` system prompt block verified at the replay endpoint is a later binding check (steps 2 and 4), not a substitute for step 1 |
 | Headless turn in the role (steps 2 to 14) | `opencode run --standalone --agent drafting-table --format json "/drafting-table"`; add `--continue` or `--session <id>` to continue |
 | Headless turn outside the role (steps 2, 7, 9) | `opencode run --standalone --agent build --format json` with a message |
 | Resolved native rules | `opencode debug agents` and `opencode debug config` |

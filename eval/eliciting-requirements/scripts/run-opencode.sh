@@ -2,7 +2,7 @@
 # Run the eliciting-requirements skill through OpenCode v2.
 #
 # ProtoBot requires OpenCode v2 (@opencode/cli). This wrapper rejects a
-# missing binary and any 1.x (or older) version before it writes config
+# missing binary and any non-2.x version before it writes config
 # or invokes the CLI. v2 `run` has no `--dir` flag and uses cwd/PWD as
 # the project directory; `--standalone` keeps each case off the v2
 # background service.
@@ -17,27 +17,31 @@ require_opencode_v2() {
     exit 1
   fi
 
-  local version_text version_string major
-  version_text="$(opencode --version 2>&1)" || {
+  local raw_version_text version_text version_string="" major=""
+  raw_version_text="$(opencode --version 2>&1)" || {
     printf '%s\n' \
       "error: opencode --version failed." \
       "ProtoBot requires OpenCode v2; v1.x is not supported." \
-      "output: ${version_text}" >&2
+      "output: ${raw_version_text}" >&2
     exit 1
   }
 
-  if [[ "${version_text}" =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+  version_text="${raw_version_text}"
+  while [[ "${version_text}" =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; do
     version_string="${BASH_REMATCH[0]}"
     major="${BASH_REMATCH[1]}"
-  else
+    version_text="${version_text#*"${version_string}"}"
+  done
+
+  if [[ -z "${version_string}" ]]; then
     printf '%s\n' \
       "error: could not parse an OpenCode version from:" \
-      "${version_text}" \
+      "${raw_version_text}" \
       "ProtoBot requires OpenCode v2; v1.x is not supported." >&2
     exit 1
   fi
 
-  if (( major < 2 )); then
+  if (( major != 2 )); then
     printf '%s\n' \
       "error: OpenCode ${version_string} is not v2." \
       "ProtoBot requires OpenCode v2 and rejects v1.x." >&2
