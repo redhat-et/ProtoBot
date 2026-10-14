@@ -170,8 +170,12 @@ This document adds a `repository` block for the Git-facing fields:
 ([Persistent State](../architecture.md#project-configuration-protobot)).
 The Drafting Table reads it and commits it; it is not meant to edit
 it, and the guard refuses such an edit on the calls it checks. A
-fail-open write can rewrite its digests, which the later checks then
-trust ([File-source arguments][fail-open]).
+fail-open write that also rewrites the digest in
+`.protobot/project.yaml` fails `ears-manager check` unless a proposed
+change set records an artifact operation for that artifact. Coordinated
+edits across the artifact, digest, and manifest still pass without
+invoking `artifact put`: the check verifies the operation record
+([File-source arguments][fail-open]).
 The registry cannot record a digest for `project.yaml` itself, so
 `ears-manager check` validates that file structurally instead.
 

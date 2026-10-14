@@ -414,6 +414,42 @@ func TestSelfHostingRetargetedDefaultBranchFailsCheck(t *testing.T) {
 	}
 }
 
+func TestSelfHostingForgedBaseCommitDefaultBranchFailsCheck(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+
+	git(t, root, "checkout", "-b", "evil")
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		config.Repository.DefaultBranch = "evil"
+	})
+	git(t, root, "add", ".protobot/project.yaml")
+	git(t, root, "commit", "-m", "forged default branch commit")
+	forgedBase := gitOutput(t, root, "rev-parse", "HEAD")
+
+	rewriteRegisteredArtifact(t, root, "architecture", "# Forged Architecture\n")
+	manifestPath := filepath.Join(root, ".protobot", "change-sets", "cs-00001.yaml")
+	var changeSet records.ChangeSet
+	if err := storage.ReadFile(manifestPath, &changeSet); err != nil {
+		t.Fatal(err)
+	}
+	changeSet.BaseCommit = forgedBase
+	changeSet.ImpactAssessmentBaseCommit = forgedBase
+	data, err := storage.Encode(changeSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	if code != 3 || stderr != "" || jsonString(t, stdout, "error", "code") != "project.invalid_configuration" {
+		t.Fatalf("forged base_commit retarget = code %d stdout %s stderr %s", code, stdout, stderr)
+	}
+}
+
 func TestSelfHostingApprovedRegistryMatchesDefaultBranchWithoutOperations(t *testing.T) {
 	root := newSelfHostingCheckout(t)
 	t.Chdir(root)

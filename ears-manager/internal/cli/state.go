@@ -1222,34 +1222,12 @@ func commitPathDigest(root, commit, relative string) (string, bool, *commandFail
 	}
 	digest, err := specvalidation.CanonicalTextDigest(data)
 	if err != nil {
+		// Non-canonical or malformed commit blobs cannot produce a canonical text
+		// digest; return an empty digest with present=true so the caller treats
+		// the artifact content as changed and requires an operation.
 		return "", true, nil
 	}
 	return digest, true, nil
-}
-
-func readCommitProjectConfigFile(root, commit string) ([]byte, bool, *commandFailure) {
-	path := filepath.ToSlash(revisionConfigPath)
-	listed, failure := listRevisionTree(root, commit, []string{path})
-	if failure != nil {
-		return nil, false, failure
-	}
-	entries := exactTreeEntries(listed, []string{path})
-	if len(entries) == 0 {
-		return nil, false, nil
-	}
-	entry := entries[0]
-	if entry.mode != treeModeRegular && entry.mode != treeModeExecutable {
-		return nil, false, ioFailure("git.read_failed", "The default-branch project configuration is not a regular file.")
-	}
-	contents, failure := readRevisionBlobs(root, []treeEntry{entry})
-	if failure != nil {
-		return nil, false, failure
-	}
-	data, ok := contents[entry.object]
-	if !ok {
-		return nil, false, ioFailure("git.read_failed", "The default-branch project configuration could not be read.")
-	}
-	return data, true, nil
 }
 
 func isProjectInitialization(snapshot specvalidation.Snapshot) bool {
@@ -1257,7 +1235,7 @@ func isProjectInitialization(snapshot specvalidation.Snapshot) bool {
 }
 
 func defaultBranchArtifactEntries(root, commit string, snapshot specvalidation.Snapshot) ([]records.ArtifactEntry, *commandFailure) {
-	data, present, failure := readCommitProjectConfigFile(root, commit)
+	data, present, failure := readCommitFile(root, commit, revisionConfigPath)
 	if failure != nil {
 		return nil, failure
 	}
@@ -1275,44 +1253,61 @@ func defaultBranchArtifactEntries(root, commit string, snapshot specvalidation.S
 }
 
 func defaultBranchCandidateRefs(root string, repository records.RepositoryConfig) ([]string, *commandFailure) {
+	remotes, failure := canonicalRemoteNames(root, repository.CanonicalRemote)
+	if failure != nil {
+		return nil, failure
+	}
 	var candidates []string
-	remotes, _ := canonicalRemoteNames(root, repository.CanonicalRemote)
 	for _, remote := range remotes {
 		output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/remotes/"+remote+"/").Output()
-		if err == nil {
-			for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-				if ref := strings.TrimSpace(line); ref != "" {
-					candidates = append(candidates, ref)
-				}
-			}
+		if err != nil {
+			return nil, ioFailure("git.read_failed", fmt.Sprintf("Git could not read remote-tracking refs for remote %s.", remote))
 		}
-	}
-	output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/heads/").Output()
-	if err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 			if ref := strings.TrimSpace(line); ref != "" {
 				candidates = append(candidates, ref)
 			}
 		}
 	}
+	output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/heads/").Output()
+	if err != nil {
+		return nil, ioFailure("git.read_failed", "Git could not read local branch refs.")
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if ref := strings.TrimSpace(line); ref != "" {
+			candidates = append(candidates, ref)
+		}
+	}
 	return candidates, nil
 }
 
 // approvedRepositoryConfig returns the repository configuration from the approved
-// default-branch tree. When change sets exist, it reads the configuration from the
-// recorded base commit of the change sets. If the working tree retargets
-// repository.default_branch, it fails closed with project.invalid_configuration.
+// default-branch tree. It resolves candidate refs (canonical remote-tracking refs
+// and local branches that are not HEAD), reads the configuration from the ref's
+// commit, and fails closed with project.invalid_configuration if the working tree
+// retargets repository.default_branch. If no approved configuration can be resolved,
+// it fails closed with project.default_branch_unresolved, except for the documented
+// project-initialization case.
 func approvedRepositoryConfig(root string, snapshot specvalidation.Snapshot) (records.RepositoryConfig, *commandFailure) {
-	for _, document := range snapshot.ChangeSets {
-		base := strings.TrimSpace(document.Value.BaseCommit)
-		if !fullCommitID(base) || !commitExists(root, base) {
+	head, failure := currentCommit(root)
+	if failure != nil {
+		return records.RepositoryConfig{}, failure
+	}
+	candidates, failure := defaultBranchCandidateRefs(root, snapshot.Config.Repository)
+	if failure != nil {
+		return records.RepositoryConfig{}, failure
+	}
+	for _, ref := range candidates {
+		output, err := gitCommand("-C", root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output()
+		if err != nil {
 			continue
 		}
-		data, present, failure := readCommitFile(root, base, revisionConfigPath)
-		if failure != nil {
-			return records.RepositoryConfig{}, failure
+		commit := strings.ToLower(strings.TrimSpace(string(output)))
+		if head != "" && commit == head {
+			continue
 		}
-		if !present {
+		data, present, failure := readCommitFile(root, commit, revisionConfigPath)
+		if failure != nil || !present {
 			continue
 		}
 		var config records.ProjectConfig
@@ -1330,37 +1325,10 @@ func approvedRepositoryConfig(root string, snapshot specvalidation.Snapshot) (re
 		return config.Repository, nil
 	}
 
-	head, _ := currentCommit(root)
-	candidates, _ := defaultBranchCandidateRefs(root, snapshot.Config.Repository)
-	for _, ref := range candidates {
-		output, err := gitCommand("-C", root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output()
-		if err != nil {
-			continue
-		}
-		commit := strings.ToLower(strings.TrimSpace(string(output)))
-		if head != "" && commit == head {
-			continue
-		}
-		data, present, failure := readCommitFile(root, commit, revisionConfigPath)
-		if failure != nil || !present {
-			continue
-		}
-		var config records.ProjectConfig
-		if _, err := storage.DecodeFields(data, &config); err != nil {
-			continue
-		}
-		approvedBranch := strings.TrimSpace(config.Repository.DefaultBranch)
-		if approvedBranch == "" {
-			continue
-		}
-		workingBranch := strings.TrimSpace(snapshot.Config.Repository.DefaultBranch)
-		if workingBranch != "" && workingBranch != approvedBranch {
-			return records.RepositoryConfig{}, projectFailure("project.invalid_configuration", fmt.Sprintf("Working-tree repository.default_branch %q differs from approved default branch %q.", workingBranch, approvedBranch))
-		}
-		return config.Repository, nil
+	if isProjectInitialization(snapshot) {
+		return snapshot.Config.Repository, nil
 	}
-
-	return snapshot.Config.Repository, nil
+	return records.RepositoryConfig{}, projectFailure("project.default_branch_unresolved", "Approved repository default branch configuration could not be resolved.")
 }
 
 func proposedArtifactIDs(snapshot specvalidation.Snapshot, proposed map[string]bool) map[string]bool {

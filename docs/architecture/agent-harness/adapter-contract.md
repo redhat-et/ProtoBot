@@ -870,11 +870,10 @@ validates structurally
 write that changes a registered path and also rewrites its digest in
 `project.yaml` passes the pre-stage digest comparison and CI path
 ownership, and fails `ears-manager check` unless a proposed change set
-records an artifact operation for that artifact. Coordinated edits to
-the artifact,
-digest, and manifest still pass: the check verifies the operation record
-and does not prove that `artifact put` was invoked. The Codex row admits
-such a write. Wherever this contract says the later checks catch an
+records an artifact operation for that artifact. Coordinated edits to the
+artifact, digest, and manifest still pass: the check verifies the operation
+record and does not prove that `artifact put` was invoked. The Codex row
+admits such a write. Wherever this contract says the later checks catch an
 unauthorized persistent edit, that holds for edits that leave the registry
 intact or omit the operation record; the coordinated compound edit is a
 recorded gap, and review of the pull request is the remaining check.
