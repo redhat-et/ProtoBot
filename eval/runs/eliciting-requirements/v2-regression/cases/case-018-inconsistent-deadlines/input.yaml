@@ -1,0 +1,14 @@
+---
+prompt: |
+  Evaluate this requirement set as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  R1: When a valid report request arrives, the report service shall return the
+  report within 1 second.
+
+  R2: When a valid report request arrives, the report service shall return the
+  report within 5 seconds.
+
+  Both requirements claim to apply to the same service boundary and workload.

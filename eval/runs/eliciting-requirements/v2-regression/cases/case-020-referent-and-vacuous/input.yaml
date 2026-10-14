@@ -1,0 +1,9 @@
+---
+prompt: |
+  Evaluate these existing statements as a requirements elicitor. Return the
+  complete portable Requirements Elicitation Package in your final response.
+  Also write the same markdown package to artifacts/result.md. Do not consult a
+  reference answer.
+
+  R1: When a request is complete, it shall process it appropriately.
+  R2: While no authenticated user exists, the user shall see their dashboard.

@@ -1,0 +1,10 @@
+---
+prompt: |
+  Evaluate this interface request as a requirements elicitor. Return the
+  complete portable Requirements Elicitation Package in your final response.
+  Also write the same markdown package to artifacts/result.md. Do not consult a
+  reference answer.
+
+  When an operator invokes `sync --dry-run` with a valid project path, the
+  command-line tool shall report the files that would change and shall not
+  modify the project. The dry-run option is defined as preview-only behavior.

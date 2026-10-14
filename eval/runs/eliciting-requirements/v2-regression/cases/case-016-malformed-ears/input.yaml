@@ -1,0 +1,11 @@
+---
+prompt: |
+  Evaluate these existing statements as a requirements elicitor. Return the
+  complete portable Requirements Elicitation Package in your final response.
+  Also write the same markdown package to artifacts/result.md. Do not consult a
+  reference answer.
+
+  Q1: When, the system shall respond.
+  Q2: While the user clicks Submit, the portal shall display the dashboard.
+  Q3: Where an administrator deletes an account, then the account system shall
+  erase all data.

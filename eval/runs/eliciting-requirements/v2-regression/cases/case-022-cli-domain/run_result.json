@@ -1,0 +1,10 @@
+{
+  "exit_code": 0,
+  "duration_s": 156.9,
+  "token_usage": null,
+  "cost_usd": null,
+  "num_turns": null,
+  "per_model_usage": null,
+  "per_model_turns": null,
+  "permission_denials": []
+}

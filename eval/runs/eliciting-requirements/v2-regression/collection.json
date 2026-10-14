@@ -1,0 +1,46 @@
+{
+  "case-013-duplicate-and-gap": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-014-uncertainty": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-015-implementation-temptation": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-016-malformed-ears": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-017-retry-and-idempotence": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-018-inconsistent-deadlines": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-019-intentional-exception": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-020-referent-and-vacuous": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-021-passive-and-instructions": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-022-cli-domain": {
+    "artifacts": 1,
+    "_modified": 1
+  },
+  "case-024-ready-regression": {
+    "artifacts": 1,
+    "_modified": 1
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "exit_code": 0,
+  "duration_s": 1687.3,
+  "wall_clock_s": 1687.2,
+  "cost_usd": null,
+  "token_usage": null,
+  "num_turns": null,
+  "per_model_usage": null,
+  "per_model_turns": null,
+  "permission_denials": [],
+  "num_cases": 11,
+  "model": "anthropic/claude-sonnet-4-6",
+  "agent": "cli",
+  "agent_version": "",
+  "execution_mode": "case",
+  "eval_params": {
+    "execution_mode": "case",
+    "max_budget_usd": 4.0,
+    "timeout_s": 1200,
+    "skill": "eliciting-requirements",
+    "skill_args": "{prompt}"
+  },
+  "per_case": {
+    "case-013-duplicate-and-gap": {
+      "exit_code": 0,
+      "duration_s": 175.3,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-014-uncertainty": {
+      "exit_code": 0,
+      "duration_s": 111.5,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-015-implementation-temptation": {
+      "exit_code": 0,
+      "duration_s": 160.7,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-016-malformed-ears": {
+      "exit_code": 0,
+      "duration_s": 165.4,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-017-retry-and-idempotence": {
+      "exit_code": 0,
+      "duration_s": 154.7,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-018-inconsistent-deadlines": {
+      "exit_code": 0,
+      "duration_s": 138.6,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-019-intentional-exception": {
+      "exit_code": 0,
+      "duration_s": 126.2,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-020-referent-and-vacuous": {
+      "exit_code": 0,
+      "duration_s": 143.5,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-021-passive-and-instructions": {
+      "exit_code": 0,
+      "duration_s": 178.5,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-022-cli-domain": {
+      "exit_code": 0,
+      "duration_s": 156.9,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    },
+    "case-024-ready-regression": {
+      "exit_code": 0,
+      "duration_s": 176.0,
+      "token_usage": null,
+      "cost_usd": null,
+      "num_turns": null,
+      "per_model_usage": null,
+      "per_model_turns": null,
+      "permission_denials": []
+    }
+  }
+}

@@ -1,0 +1,10 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  When a profile save is requested, the profile service shall persist the
+  profile. If the network fails, it shall retry as needed until the save
+  succeeds.

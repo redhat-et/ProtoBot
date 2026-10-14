@@ -1,0 +1,10 @@
+---
+prompt: |
+  Evaluate this source request as a requirements elicitor. Return the complete
+  portable Requirements Elicitation Package in your final response. Also write
+  the same markdown package to artifacts/result.md. Do not consult a reference
+  answer.
+
+  The report probably should show a warning when it may be stale, but the
+  product owner has not decided how old is stale or whether the warning is
+  mandatory.
