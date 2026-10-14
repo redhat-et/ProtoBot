@@ -81,8 +81,14 @@ Examples of sibling entries for each governed scope listed above:
 
 - **Numbered rules in `AGENTS.md`:** the other numbered
   rules in that same list.
-- **Specification documents under `docs/`:** every other
-  governed Markdown document under `docs/`.
+- **Specification documents under `docs/`:** the other governed
+  Markdown documents directly in the same directory as the
+  entry, excluding subdirectories and parent directories (for
+  example, the other ADRs in `docs/decisions/`).
+  Cross-document coverage is checked
+  through "Rules for creating or modifying specification
+  documents", not by reading every governed Markdown document
+  under `docs/` first.
 - **Skill files under `.agents/skills/`:** every other
   skill file under `.agents/skills/`.
 
