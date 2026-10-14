@@ -1061,6 +1061,10 @@ func changeSetApprovedAt(root string, refs []string, manifestPath string) (bool,
 }
 
 func proposedChangeSetIDs(root string, snapshot specvalidation.Snapshot) (map[string]bool, *commandFailure) {
+	repository, failure := approvedRepositoryConfig(root, snapshot)
+	if failure != nil {
+		return nil, failure
+	}
 	proposed := make(map[string]bool, len(snapshot.ChangeSets))
 	// The refs are resolved at the first change set, so a project without
 	// change sets never needs a resolvable default branch.
@@ -1071,7 +1075,7 @@ func proposedChangeSetIDs(root string, snapshot specvalidation.Snapshot) (map[st
 		}
 		if refs == nil {
 			var failure *commandFailure
-			if refs, failure = resolveDefaultBranchRefs(root, snapshot.Config.Repository); failure != nil {
+			if refs, failure = resolveDefaultBranchRefs(root, repository); failure != nil {
 				return nil, failure
 			}
 		}
@@ -1089,9 +1093,13 @@ func proposedChangeSetIDs(root string, snapshot specvalidation.Snapshot) (map[st
 // Source Control Manager publish conditions that check also reports for
 // each proposed change set. Approved manifests are exempt.
 const (
-	codeBaseNotOnDefault         = "BASE_NOT_ON_DEFAULT"
-	codeDefaultMoved             = "DEFAULT_MOVED"
-	codeBaseCommitStale          = "BASE_COMMIT_STALE"
+	codeBaseNotOnDefault = "BASE_NOT_ON_DEFAULT"
+	codeDefaultMoved     = "DEFAULT_MOVED"
+	codeBaseCommitStale  = "BASE_COMMIT_STALE"
+)
+
+// Registered artifact operation validation diagnostic codes reported by check.
+const (
 	codeArtifactOperationMissing = "artifact.operation_missing"
 	codeArtifactUnregistered     = "artifact.unregistered"
 )
@@ -1105,11 +1113,15 @@ const (
 // an operation. The check verifies the operation record; it does not prove
 // that ears-manager artifact put was invoked.
 func checkRegisteredArtifactOperations(root string, snapshot specvalidation.Snapshot, proposed map[string]bool) *commandFailure {
-	targetHead, failure := defaultBranchHead(root, snapshot.Config.Repository)
+	repository, failure := approvedRepositoryConfig(root, snapshot)
 	if failure != nil {
 		return failure
 	}
-	defaultArtifacts, failure := defaultBranchArtifactEntries(root, targetHead)
+	targetHead, failure := defaultBranchHead(root, repository)
+	if failure != nil {
+		return failure
+	}
+	defaultArtifacts, failure := defaultBranchArtifactEntries(root, targetHead, snapshot)
 	if failure != nil {
 		return failure
 	}
@@ -1215,16 +1227,140 @@ func commitPathDigest(root, commit, relative string) (string, bool, *commandFail
 	return digest, true, nil
 }
 
-func defaultBranchArtifactEntries(root, commit string) ([]records.ArtifactEntry, *commandFailure) {
-	data, present, failure := readCommitFile(root, commit, revisionConfigPath)
-	if failure != nil || !present {
+func readCommitProjectConfigFile(root, commit string) ([]byte, bool, *commandFailure) {
+	path := filepath.ToSlash(revisionConfigPath)
+	listed, failure := listRevisionTree(root, commit, []string{path})
+	if failure != nil {
+		return nil, false, failure
+	}
+	entries := exactTreeEntries(listed, []string{path})
+	if len(entries) == 0 {
+		return nil, false, nil
+	}
+	entry := entries[0]
+	if entry.mode != treeModeRegular && entry.mode != treeModeExecutable {
+		return nil, false, ioFailure("git.read_failed", "The default-branch project configuration is not a regular file.")
+	}
+	contents, failure := readRevisionBlobs(root, []treeEntry{entry})
+	if failure != nil {
+		return nil, false, failure
+	}
+	data, ok := contents[entry.object]
+	if !ok {
+		return nil, false, ioFailure("git.read_failed", "The default-branch project configuration could not be read.")
+	}
+	return data, true, nil
+}
+
+func isProjectInitialization(snapshot specvalidation.Snapshot) bool {
+	return len(snapshot.ChangeSets) == 0 || (len(snapshot.ChangeSets) == 1 && snapshot.ChangeSets[0].Value.ID == "CS-00001")
+}
+
+func defaultBranchArtifactEntries(root, commit string, snapshot specvalidation.Snapshot) ([]records.ArtifactEntry, *commandFailure) {
+	data, present, failure := readCommitProjectConfigFile(root, commit)
+	if failure != nil {
 		return nil, failure
+	}
+	if !present {
+		if isProjectInitialization(snapshot) {
+			return nil, nil
+		}
+		return nil, ioFailure("git.read_failed", "The default-branch project configuration could not be read.")
 	}
 	var config records.ProjectConfig
 	if _, err := storage.DecodeFields(data, &config); err != nil {
 		return nil, ioFailure("git.read_failed", "The default-branch project configuration could not be decoded.")
 	}
 	return config.Artifacts, nil
+}
+
+func defaultBranchCandidateRefs(root string, repository records.RepositoryConfig) ([]string, *commandFailure) {
+	var candidates []string
+	remotes, _ := canonicalRemoteNames(root, repository.CanonicalRemote)
+	for _, remote := range remotes {
+		output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/remotes/"+remote+"/").Output()
+		if err == nil {
+			for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+				if ref := strings.TrimSpace(line); ref != "" {
+					candidates = append(candidates, ref)
+				}
+			}
+		}
+	}
+	output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/heads/").Output()
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			if ref := strings.TrimSpace(line); ref != "" {
+				candidates = append(candidates, ref)
+			}
+		}
+	}
+	return candidates, nil
+}
+
+// approvedRepositoryConfig returns the repository configuration from the approved
+// default-branch tree. When change sets exist, it reads the configuration from the
+// recorded base commit of the change sets. If the working tree retargets
+// repository.default_branch, it fails closed with project.invalid_configuration.
+func approvedRepositoryConfig(root string, snapshot specvalidation.Snapshot) (records.RepositoryConfig, *commandFailure) {
+	for _, document := range snapshot.ChangeSets {
+		base := strings.TrimSpace(document.Value.BaseCommit)
+		if !fullCommitID(base) || !commitExists(root, base) {
+			continue
+		}
+		data, present, failure := readCommitFile(root, base, revisionConfigPath)
+		if failure != nil {
+			return records.RepositoryConfig{}, failure
+		}
+		if !present {
+			continue
+		}
+		var config records.ProjectConfig
+		if _, err := storage.DecodeFields(data, &config); err != nil {
+			return records.RepositoryConfig{}, ioFailure("git.read_failed", "The approved project configuration could not be decoded.")
+		}
+		approvedBranch := strings.TrimSpace(config.Repository.DefaultBranch)
+		if approvedBranch == "" {
+			continue
+		}
+		workingBranch := strings.TrimSpace(snapshot.Config.Repository.DefaultBranch)
+		if workingBranch != "" && workingBranch != approvedBranch {
+			return records.RepositoryConfig{}, projectFailure("project.invalid_configuration", fmt.Sprintf("Working-tree repository.default_branch %q differs from approved default branch %q.", workingBranch, approvedBranch))
+		}
+		return config.Repository, nil
+	}
+
+	head, _ := currentCommit(root)
+	candidates, _ := defaultBranchCandidateRefs(root, snapshot.Config.Repository)
+	for _, ref := range candidates {
+		output, err := gitCommand("-C", root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output()
+		if err != nil {
+			continue
+		}
+		commit := strings.ToLower(strings.TrimSpace(string(output)))
+		if head != "" && commit == head {
+			continue
+		}
+		data, present, failure := readCommitFile(root, commit, revisionConfigPath)
+		if failure != nil || !present {
+			continue
+		}
+		var config records.ProjectConfig
+		if _, err := storage.DecodeFields(data, &config); err != nil {
+			continue
+		}
+		approvedBranch := strings.TrimSpace(config.Repository.DefaultBranch)
+		if approvedBranch == "" {
+			continue
+		}
+		workingBranch := strings.TrimSpace(snapshot.Config.Repository.DefaultBranch)
+		if workingBranch != "" && workingBranch != approvedBranch {
+			return records.RepositoryConfig{}, projectFailure("project.invalid_configuration", fmt.Sprintf("Working-tree repository.default_branch %q differs from approved default branch %q.", workingBranch, approvedBranch))
+		}
+		return config.Repository, nil
+	}
+
+	return snapshot.Config.Repository, nil
 }
 
 func proposedArtifactIDs(snapshot specvalidation.Snapshot, proposed map[string]bool) map[string]bool {
@@ -1285,7 +1421,11 @@ func checkProposedBaseFreshness(root string, snapshot specvalidation.Snapshot, p
 	if len(proposed) == 0 {
 		return nil
 	}
-	targetHead, failure := defaultBranchHead(root, snapshot.Config.Repository)
+	repository, failure := approvedRepositoryConfig(root, snapshot)
+	if failure != nil {
+		return failure
+	}
+	targetHead, failure := defaultBranchHead(root, repository)
 	if failure != nil {
 		return failure
 	}

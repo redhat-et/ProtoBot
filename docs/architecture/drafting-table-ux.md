@@ -169,8 +169,8 @@ the harness guard enforces this on the calls it checks, and a call
 without a guard decision is limited as
 [What the harness layer stops](agent-harness/adapter-contract.md#what-the-harness-layer-stops)
 records.
-`ears-manager check` validates well-formedness and proposed `base_commit`
-freshness as a CI gate before merge.
+`ears-manager check` validates well-formedness, proposed `base_commit`
+freshness, and registered artifact operations as a CI gate before merge.
 
 ### WMS lifecycle state
 

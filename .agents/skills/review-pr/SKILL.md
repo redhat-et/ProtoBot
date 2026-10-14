@@ -29,8 +29,7 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   change set records an `artifact_operations[]` entry whose `artifact_id`
   equals the registered artifact ID, and that `ears-manager check` passes
   without `artifact.operation_missing`, `artifact.unregistered`, or
-  `artifact.digest_mismatch`. Issue #255 moved this verification into
-  `ears-manager check`.
+  `artifact.digest_mismatch`.
   - Require a checkout or worktree of the recorded PR head before
     `ears-manager check`; do not treat a `check` pass on the base branch as
     evidence.
@@ -42,6 +41,10 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
     for creating or modifying specification documents" in `AGENTS.md`
     identifies staleness in a registered specification artifact, is a
     finding.
+  - `artifact.operation_missing`, `artifact.unregistered`, or
+    `artifact.digest_mismatch` reported by `ears-manager check` (require a
+    checkout or worktree of the recorded PR head before `check`; a
+    working-tree `check` on the base branch is not evidence) is a finding.
   - When Rule 4 of "Rules for creating or modifying specification documents"
     in `AGENTS.md` identifies staleness in a registered specification artifact,
     raise a staleness finding that prescribes `ears-manager artifact put`, not

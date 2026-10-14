@@ -306,6 +306,14 @@ func TestSelfHostingHandEditedRegisteredArtifactFailsCheckWithoutOperation(t *te
 		t.Fatalf("diagnostic did not name artifact architecture: %s", stdout)
 	}
 
+	scopedCode, scopedStdout, scopedStderr := runCLI(nil, "--output", "json", "check", "--change-set", "CS-00001")
+	if scopedCode != 4 || scopedStderr != "" || jsonString(t, scopedStdout, "error", "code") != "artifact.operation_missing" {
+		t.Fatalf("scoped check hand-edited artifact = code %d stdout %s stderr %s", scopedCode, scopedStdout, scopedStderr)
+	}
+	if !hasDiagnostic(t, scopedStdout, "artifact.operation_missing", "artifacts[id=architecture]") {
+		t.Fatalf("scoped check omitted artifact.operation_missing for architecture: %s", scopedStdout)
+	}
+
 	humanCode, _, humanStderr := runCLI(nil, "check")
 	if humanCode != 4 || !strings.Contains(humanStderr, "error[artifact.operation_missing]:") {
 		t.Fatalf("human check = exit %d stderr %q", humanCode, humanStderr)
@@ -339,6 +347,71 @@ func TestSelfHostingProposedArtifactOperationPassesCheck(t *testing.T) {
 	assertSuccess(t, code, stdout, stderr)
 	code, stdout, stderr = runCLI(nil, "--output", "json", "check", "--change-set", "CS-00001")
 	assertSuccess(t, code, stdout, stderr)
+}
+
+func TestSelfHostingRegisteredArtifactPathChangeRequiresOperation(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+
+	content := readTestFile(t, root, "docs/architecture.md")
+	writeTestFile(t, root, "docs/architecture-copy.md", content)
+	git(t, root, "add", "docs/architecture-copy.md")
+	git(t, root, "commit", "-m", "commit architecture copy on main")
+
+	git(t, root, "checkout", "-b", "pr/retarget-path")
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "change-set", "create",
+		"--intent", "Retarget architecture path",
+		"--implementation-required", "false",
+		"--implementation-rationale", "Path retarget.",
+		"--created", "2026-10-14T20:00:00Z",
+	)
+	assertSuccess(t, code, stdout, stderr)
+
+	code, stdout, stderr = runCLI([]byte("[]"), "--output", "json", "change-set", "update",
+		"--change-set", "CS-00002",
+		"--impact-file", "-",
+	)
+	assertSuccess(t, code, stdout, stderr)
+
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		for index, artifact := range config.Artifacts {
+			if artifact.ID == "architecture" {
+				config.Artifacts[index].Path = "docs/architecture-copy.md"
+			}
+		}
+	})
+	appendSharedProjection(t, root, "docs/architecture-copy.md")
+
+	code, stdout, stderr = runCLI(nil, "--output", "json", "check")
+	if code != 4 || stderr != "" || jsonString(t, stdout, "error", "code") != "artifact.operation_missing" {
+		t.Fatalf("path change without operation = code %d stdout %s stderr %s", code, stdout, stderr)
+	}
+	if !hasDiagnostic(t, stdout, "artifact.operation_missing", "artifacts[id=architecture]") {
+		t.Fatalf("check omitted artifact.operation_missing for architecture: %s", stdout)
+	}
+
+	addProposedArtifactOperation(t, root, "CS-00002", "revise", "architecture")
+	code, stdout, stderr = runCLI(nil, "--output", "json", "check")
+	assertSuccess(t, code, stdout, stderr)
+}
+
+func TestSelfHostingRetargetedDefaultBranchFailsCheck(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+	git(t, root, "checkout", "-b", "evil")
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		config.Repository.DefaultBranch = "evil"
+	})
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	if code != 3 || stderr != "" || jsonString(t, stdout, "error", "code") != "project.invalid_configuration" {
+		t.Fatalf("retargeted default branch = code %d stdout %s stderr %s", code, stdout, stderr)
+	}
 }
 
 func TestSelfHostingApprovedRegistryMatchesDefaultBranchWithoutOperations(t *testing.T) {
