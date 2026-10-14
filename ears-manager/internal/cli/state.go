@@ -979,16 +979,17 @@ func defaultBranchRefs(root string, repository records.RepositoryConfig) ([]stri
 	return refs, nil
 }
 
-// canonicalRemoteNames returns, in name order, the remotes whose fetch URL,
-// with userinfo removed, equals the canonical remote. The fetch URL is the
-// first configured url of a remote; the rule is the one the Source Control
-// Manager uses to find its remote. A remote whose name is not a valid ref
-// name has no remote-tracking refs, so it is left out.
-func canonicalRemoteNames(root, canonicalRemote string) ([]string, *commandFailure) {
+func canonicalRemoteURLMatches(url1, url2 string) bool {
+	u1 := strings.TrimSuffix(withoutUserinfo(strings.TrimSpace(url1)), ".git")
+	u2 := strings.TrimSuffix(withoutUserinfo(strings.TrimSpace(url2)), ".git")
+	return u1 != "" && u1 == u2
+}
+
+func configuredRemoteURLs(root string) (map[string]string, *commandFailure) {
 	output, err := gitCommand("-C", root, "config", "-z", "--get-regexp", `^remote\..+\.url$`).Output()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return nil, nil
+		return map[string]string{}, nil
 	}
 	if err != nil {
 		return nil, ioFailure("git.read_failed", "Git could not read the remotes of the repository.")
@@ -1004,9 +1005,22 @@ func canonicalRemoteNames(root, canonicalRemote string) ([]string, *commandFailu
 			fetchURLs[name] = value
 		}
 	}
+	return fetchURLs, nil
+}
+
+// canonicalRemoteNames returns, in name order, the remotes whose fetch URL,
+// with userinfo removed, equals the canonical remote. The fetch URL is the
+// first configured url of a remote; the rule is the one the Source Control
+// Manager uses to find its remote. A remote whose name is not a valid ref
+// name has no remote-tracking refs, so it is left out.
+func canonicalRemoteNames(root, canonicalRemote string) ([]string, *commandFailure) {
+	fetchURLs, failure := configuredRemoteURLs(root)
+	if failure != nil {
+		return nil, failure
+	}
 	names := make([]string, 0, len(fetchURLs))
 	for name, fetchURL := range fetchURLs {
-		if specvalidation.ValidGitRefName(name) && withoutUserinfo(fetchURL) == canonicalRemote {
+		if specvalidation.ValidGitRefName(name) && canonicalRemoteURLMatches(fetchURL, canonicalRemote) {
 			names = append(names, name)
 		}
 	}
@@ -1252,77 +1266,196 @@ func defaultBranchArtifactEntries(root, commit string, snapshot specvalidation.S
 	return config.Artifacts, nil
 }
 
-func defaultBranchCandidateRefs(root string, repository records.RepositoryConfig) ([]string, *commandFailure) {
-	remotes, failure := canonicalRemoteNames(root, repository.CanonicalRemote)
+type selfConsistentBranch struct {
+	ref        string
+	branchName string
+	config     records.ProjectConfig
+}
+
+func evaluateCandidate(root, ref, shortName, remote string, isRemote bool, remoteURL string) (*selfConsistentBranch, *commandFailure) {
+	output, err := gitCommand("-C", root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output()
+	if err != nil {
+		return nil, nil
+	}
+	commit := strings.ToLower(strings.TrimSpace(string(output)))
+	data, present, failure := readCommitFile(root, commit, revisionConfigPath)
 	if failure != nil {
 		return nil, failure
 	}
-	var candidates []string
-	for _, remote := range remotes {
-		output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/remotes/"+remote+"/").Output()
-		if err != nil {
-			return nil, ioFailure("git.read_failed", fmt.Sprintf("Git could not read remote-tracking refs for remote %s.", remote))
+	if !present {
+		return nil, nil
+	}
+	var config records.ProjectConfig
+	if _, err := storage.DecodeFields(data, &config); err != nil {
+		return nil, nil
+	}
+	branchName := strings.TrimSpace(config.Repository.DefaultBranch)
+	if branchName == "" {
+		return nil, nil
+	}
+	if shortName != "" {
+		if shortName != branchName {
+			return nil, nil
 		}
-		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-			if ref := strings.TrimSpace(line); ref != "" {
-				candidates = append(candidates, ref)
-			}
+	} else if isRemote {
+		refTarget, err := gitCommand("-C", root, "rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+branchName+"^{commit}").Output()
+		if err != nil || strings.ToLower(strings.TrimSpace(string(refTarget))) != commit {
+			return nil, nil
+		}
+	} else {
+		return nil, nil
+	}
+	if isRemote {
+		if !canonicalRemoteURLMatches(remoteURL, config.Repository.CanonicalRemote) {
+			return nil, nil
 		}
 	}
-	output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/heads/").Output()
+	return &selfConsistentBranch{
+		ref:        ref,
+		branchName: branchName,
+		config:     config,
+	}, nil
+}
+
+func checkedOutRef(root string) string {
+	output, err := gitCommand("-C", root, "symbolic-ref", "--quiet", "HEAD").Output()
 	if err != nil {
-		return nil, ioFailure("git.read_failed", "Git could not read local branch refs.")
+		return ""
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		if ref := strings.TrimSpace(line); ref != "" {
-			candidates = append(candidates, ref)
-		}
-	}
-	return candidates, nil
+	return strings.TrimSpace(string(output))
 }
 
 // approvedRepositoryConfig returns the repository configuration from the approved
-// default-branch tree. It resolves candidate refs (canonical remote-tracking refs
-// and local branches that are not HEAD), reads the configuration from the ref's
-// commit, and fails closed with project.invalid_configuration if the working tree
-// retargets repository.default_branch. If no approved configuration can be resolved,
-// it fails closed with project.default_branch_unresolved, except for the documented
-// project-initialization case.
+// default-branch tree. It loads the configuration only from self-consistent
+// default-branch refs (ref short name equals that tree's repository.default_branch),
+// preferring a canonical remote-tracking ref or refs/remotes/<remote>/HEAD, then
+// the local default-branch ref, and skipping HEAD. If the working tree retargets
+// repository.default_branch, or if multiple conflicting self-consistent default
+// branch names are resolved, it fails closed with project.invalid_configuration.
+// If no approved configuration can be resolved, it fails closed with
+// project.default_branch_unresolved, except for the documented project-initialization
+// case.
 func approvedRepositoryConfig(root string, snapshot specvalidation.Snapshot) (records.RepositoryConfig, *commandFailure) {
 	head, failure := currentCommit(root)
 	if failure != nil {
 		return records.RepositoryConfig{}, failure
 	}
-	candidates, failure := defaultBranchCandidateRefs(root, snapshot.Config.Repository)
+	headRef := checkedOutRef(root)
+
+	remoteURLs, failure := configuredRemoteURLs(root)
 	if failure != nil {
 		return records.RepositoryConfig{}, failure
 	}
-	for _, ref := range candidates {
-		output, err := gitCommand("-C", root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output()
+
+	remoteNames := make([]string, 0, len(remoteURLs))
+	for name := range remoteURLs {
+		if specvalidation.ValidGitRefName(name) {
+			remoteNames = append(remoteNames, name)
+		}
+	}
+	sort.Strings(remoteNames)
+
+	var remoteHeadCandidates []selfConsistentBranch
+	var remoteTrackingCandidates []selfConsistentBranch
+	var localCandidates []selfConsistentBranch
+
+	for _, remote := range remoteNames {
+		remoteURL := remoteURLs[remote]
+		remoteHeadRef := "refs/remotes/" + remote + "/HEAD"
+		var targetBranch string
+		symOutput, err := gitCommand("-C", root, "symbolic-ref", "--quiet", remoteHeadRef).Output()
+		if err == nil {
+			targetBranch = strings.TrimPrefix(strings.TrimSpace(string(symOutput)), "refs/remotes/"+remote+"/")
+		}
+		candidate, failure := evaluateCandidate(root, remoteHeadRef, targetBranch, remote, true, remoteURL)
+		if failure != nil {
+			return records.RepositoryConfig{}, failure
+		}
+		if candidate != nil {
+			remoteHeadCandidates = append(remoteHeadCandidates, *candidate)
+		}
+	}
+
+	for _, remote := range remoteNames {
+		remoteURL := remoteURLs[remote]
+		output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/remotes/"+remote+"/").Output()
 		if err != nil {
+			return records.RepositoryConfig{}, ioFailure("git.read_failed", fmt.Sprintf("Git could not read remote-tracking refs for remote %s.", remote))
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			ref := strings.TrimSpace(line)
+			if ref == "" || strings.HasSuffix(ref, "/HEAD") {
+				continue
+			}
+			shortName := strings.TrimPrefix(ref, "refs/remotes/"+remote+"/")
+			candidate, failure := evaluateCandidate(root, ref, shortName, remote, true, remoteURL)
+			if failure != nil {
+				return records.RepositoryConfig{}, failure
+			}
+			if candidate != nil {
+				remoteTrackingCandidates = append(remoteTrackingCandidates, *candidate)
+			}
+		}
+	}
+
+	output, err := gitCommand("-C", root, "for-each-ref", "--format=%(refname)", "refs/heads/").Output()
+	if err != nil {
+		return records.RepositoryConfig{}, ioFailure("git.read_failed", "Git could not read local branch refs.")
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		ref := strings.TrimSpace(line)
+		if ref == "" {
 			continue
 		}
-		commit := strings.ToLower(strings.TrimSpace(string(output)))
-		if head != "" && commit == head {
+		if ref == headRef {
 			continue
 		}
-		data, present, failure := readCommitFile(root, commit, revisionConfigPath)
-		if failure != nil || !present {
-			continue
+		if headRef == "" && head != "" {
+			refCommit, err := gitCommand("-C", root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output()
+			if err == nil && strings.ToLower(strings.TrimSpace(string(refCommit))) == head {
+				continue
+			}
 		}
-		var config records.ProjectConfig
-		if _, err := storage.DecodeFields(data, &config); err != nil {
-			return records.RepositoryConfig{}, ioFailure("git.read_failed", "The approved project configuration could not be decoded.")
+		shortName := strings.TrimPrefix(ref, "refs/heads/")
+		candidate, failure := evaluateCandidate(root, ref, shortName, "", false, "")
+		if failure != nil {
+			return records.RepositoryConfig{}, failure
 		}
-		approvedBranch := strings.TrimSpace(config.Repository.DefaultBranch)
-		if approvedBranch == "" {
-			continue
+		if candidate != nil {
+			localCandidates = append(localCandidates, *candidate)
 		}
+	}
+
+	distinctNames := make(map[string]bool)
+	for _, c := range remoteHeadCandidates {
+		distinctNames[c.branchName] = true
+	}
+	for _, c := range remoteTrackingCandidates {
+		distinctNames[c.branchName] = true
+	}
+	for _, c := range localCandidates {
+		distinctNames[c.branchName] = true
+	}
+
+	if len(distinctNames) > 1 {
+		return records.RepositoryConfig{}, projectFailure("project.invalid_configuration", "Multiple conflicting default branches resolved.")
+	}
+
+	if len(distinctNames) == 1 {
+		var selected selfConsistentBranch
+		if len(remoteHeadCandidates) > 0 {
+			selected = remoteHeadCandidates[0]
+		} else if len(remoteTrackingCandidates) > 0 {
+			selected = remoteTrackingCandidates[0]
+		} else {
+			selected = localCandidates[0]
+		}
+		approvedBranch := selected.branchName
 		workingBranch := strings.TrimSpace(snapshot.Config.Repository.DefaultBranch)
 		if workingBranch != "" && workingBranch != approvedBranch {
 			return records.RepositoryConfig{}, projectFailure("project.invalid_configuration", fmt.Sprintf("Working-tree repository.default_branch %q differs from approved default branch %q.", workingBranch, approvedBranch))
 		}
-		return config.Repository, nil
+		return selected.config.Repository, nil
 	}
 
 	if isProjectInitialization(snapshot) {
