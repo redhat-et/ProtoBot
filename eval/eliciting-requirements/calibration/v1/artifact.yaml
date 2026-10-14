@@ -33,11 +33,11 @@ latency:
   regression_wall_clock_seconds: 613
 reviewers:
   - id: reviewer-a
-    identity: pending-maintainer-assignment
-    assigned_at: null
+    identity: ricmitch
+    assigned_at: "2026-10-14T15:00:00Z"
   - id: reviewer-b
-    identity: pending-maintainer-assignment
-    assigned_at: null
+    identity: johnstrunk
+    assigned_at: "2026-10-14T15:00:00Z"
 prior_baseline:
   path: baselines/v1
   retained: true

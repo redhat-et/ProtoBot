@@ -18,13 +18,13 @@ critical_failure_rule: >-
   aggregate score.
 reviewers:
   - id: reviewer-a
-    identity: pending-maintainer-assignment
-    assigned_at: null
-    status: unassigned
+    identity: ricmitch
+    assigned_at: "2026-10-14T15:00:00Z"
+    status: assigned
   - id: reviewer-b
-    identity: pending-maintainer-assignment
-    assigned_at: null
-    status: unassigned
+    identity: johnstrunk
+    assigned_at: "2026-10-14T15:00:00Z"
+    status: assigned
 required_coverage:
   ears_patterns:
     - ubiquitous

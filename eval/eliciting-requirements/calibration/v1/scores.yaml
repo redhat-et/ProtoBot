@@ -10,7 +10,7 @@ critical_failure_rule: >-
   effective result.
 reviewers:
   - id: reviewer-a
-    identity: pending-maintainer-assignment
+    identity: ricmitch
     scored_at: null
     cases:
       - id: case-001-ubiquitous
