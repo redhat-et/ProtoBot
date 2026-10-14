@@ -161,6 +161,31 @@ func revisionDataPaths(data []byte) ([]string, []string) {
 	return storePaths, artifactPaths
 }
 
+// readCommitFile returns the blob of a regular or executable file at path in
+// commit's tree. A missing path returns present=false. A symlink, directory,
+// or submodule is treated as absent so callers compare regular-file content.
+func readCommitFile(root, commit, relative string) ([]byte, bool, *commandFailure) {
+	path := filepath.ToSlash(relative)
+	listed, failure := listRevisionTree(root, commit, []string{path})
+	if failure != nil {
+		return nil, false, failure
+	}
+	entries := exactTreeEntries(listed, []string{path})
+	if len(entries) == 0 {
+		return nil, false, nil
+	}
+	entry := entries[0]
+	if entry.mode != treeModeRegular && entry.mode != treeModeExecutable {
+		return nil, false, nil
+	}
+	contents, failure := readRevisionBlobs(root, []treeEntry{entry})
+	if failure != nil {
+		return nil, false, failure
+	}
+	data, ok := contents[entry.object]
+	return data, ok, nil
+}
+
 // listRevisionTree lists the tree entries of commit at and below paths. Paths
 // are literal, and a path that the tree does not hold lists nothing.
 func listRevisionTree(root, commit string, paths []string) ([]treeEntry, *commandFailure) {

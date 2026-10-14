@@ -510,7 +510,9 @@ not localized prose. Implementations may add diagnostic codes, but they must
 not change the meaning of an existing code within schema version `1`.
 For `artifact.digest_mismatch`, `path` names `.protobot/project.yaml`, where
 the registered artifact digest is stored; `record_id` identifies the artifact
-whose content did not match that digest.
+whose content did not match that digest. For `artifact.operation_missing` and
+`artifact.unregistered`, `path` names `.protobot/project.yaml` and
+`record_id` identifies the registered artifact.
 
 ---
 
@@ -964,7 +966,15 @@ ears-manager check [--at FULL-SHA] [--change-set CS-ID]
 project store, registry, projection classification, all records, and all
 referential, relationship, EARS, artifact-digest, structured-store-integrity,
 and change-set rules, including impact completeness and default-branch
-freshness for every proposed change set. Freshness uses the local default
+freshness for every proposed change set, and registered artifact path or
+content changes against the default-branch tree. A registered artifact
+whose path or ADR-0002 canonical content differs from the default-branch
+tree requires a proposed change-set `artifact_operations` entry whose
+`artifact_id` matches that artifact. Registering an unchanged file already
+present on the default branch does not require an operation. Unregistration
+is rejected. Metadata-only registry edits do not require an operation. The
+check verifies the operation record; it does not prove that `artifact put`
+was invoked. Freshness uses the local default
 branch when it resolves, otherwise a resolved remote-tracking ref of a
 canonical remote; CI fetches `repository.default_branch` from
 `repository.canonical_remote` into that local ref first
@@ -983,7 +993,7 @@ prefers a resolved local default ref. `change-set update` checks ancestry
 against `HEAD`, not whether the base is on the default branch
 ([ancestry check](#ancestry-check)).
 `--change-set` narrows that impact and freshness check to the named proposed
-manifest.
+manifest. The registered artifact operation check still applies.
 "Matches" means that every current mechanical candidate has exactly one final
 recorded disposition, every recorded `mechanical` entry is still a current
 mechanical candidate, every `semantic` entry names an unchanged active
@@ -1072,6 +1082,8 @@ carries no diagnostics. A diagnostic arrives in `error.diagnostics`.
 | `BASE_NOT_ON_DEFAULT` | Both | A proposed manifest's `base_commit` is not a full commit ID reachable from the default-branch head | `4` |
 | `DEFAULT_MOVED` | Both | The default-branch head is not reachable from `HEAD` | `5` |
 | `BASE_COMMIT_STALE` | Both | The default-branch head is reachable from `HEAD`, but the normalized `base_commit` differs from that head | `5` |
+| `artifact.operation_missing` | Both | A registered artifact's path or canonical content differs from the default-branch tree, and no proposed change set records an artifact operation for that artifact ID | `4` |
+| `artifact.unregistered` | Both | A registered artifact present on the default branch is missing from the working-tree registry | `4` |
 
 ### `change-set compare`
 

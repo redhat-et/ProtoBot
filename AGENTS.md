@@ -192,51 +192,26 @@ must follow these rules:
 6. **Review agents must check registered specification artifact
    updates.** When a PR creates or modifies a registered specification
    artifact, or when Rule 4 identifies staleness in a registered
-   specification artifact, check that changes were authored through
-   `ears-manager artifact put` within an active change set (for each
-   registered path the PR creates or modifies or that Rule 4 found
-   stale, resolve `artifacts[].id` for that path in
-   `.protobot/project.yaml`, then require a change-set manifest under
-   `.protobot/change-sets/` (count a change-set only when
-   working-tree `ears-manager change-set show` (no `--at`), after the
-   PR head is checked out, reports `proposed` iff the manifest path is
-   absent from the default-branch tree; if `show --at <pr-head>` is
-   used, require path-absence in addition to `proposed`; do not treat
-   `--at` status alone as evidence of `artifact put`; never treat a
-   path that already exists on the default branch, including a
-   modified `cs-00001.yaml`, as evidence of `artifact put`) to contain
-   an `artifact_operations[]` entry whose `artifact_id` equals that
-   registry id; treat a digest-only or content change without that
-   proposed operation as a hand edit), that the registered
-   specification artifact and `.protobot/project.yaml` were not edited
-   by hand, and that `ears-manager check` (require a checkout or
-   worktree of the recorded PR head before `check`; a working-tree
-   `check` on the base branch is not evidence) passes without
-   `artifact.digest_mismatch`. Findings should include a registered
-   specification artifact or `.protobot/project.yaml` edited by hand,
-   missing `ears-manager artifact put` when a PR creates or modifies a
-   registered specification artifact or when Rule 4 identifies
-   staleness in a registered specification artifact, for each
-   registered path the PR creates or modifies or that Rule 4 found
-   stale, resolving `artifacts[].id` for that path in
-   `.protobot/project.yaml`, a change-set manifest under
-   `.protobot/change-sets/` (count a change-set only when
-   working-tree `ears-manager change-set show` (no `--at`), after the
-   PR head is checked out, reports `proposed` iff the manifest path is
-   absent from the default-branch tree; if `show --at <pr-head>` is
-   used, require path-absence in addition to `proposed`; do not treat
-   `--at` status alone as evidence of `artifact put`; never treat a
-   path that already exists on the default branch, including a
-   modified `cs-00001.yaml`, as evidence of `artifact put`) missing an
-   `artifact_operations[]` entry whose `artifact_id` equals that
-   registry id (treating a digest-only or content change without that
-   proposed operation as a hand edit), and
-   `artifact.digest_mismatch` (require a checkout or worktree of the
-   recorded PR head before `check`; a working-tree `check` on the base
-   branch is not evidence), not only formatting and
-   cross-reference text matching. When Rule 4 identifies staleness in a
-   registered specification artifact, raise a staleness finding that
-   prescribes `ears-manager artifact put`, not an edit by hand.
+   specification artifact, check that a proposed change set records an
+   `artifact_operations[]` entry whose `artifact_id` equals the
+   registered artifact ID, and that `ears-manager check` (require a
+   checkout or worktree of the recorded PR head before `check`; a
+   working-tree `check` on the base branch is not evidence) passes
+   without `artifact.operation_missing`, `artifact.unregistered`, or
+   `artifact.digest_mismatch`. The check verifies the operation record;
+   it does not prove that `ears-manager artifact put` was invoked.
+   Findings should include a proposed change set missing an
+   `artifact_operations[]` entry whose `artifact_id` equals the
+   registered artifact ID when a PR creates or modifies a registered
+   specification artifact or when Rule 4 identifies staleness in a
+   registered specification artifact, and `artifact.operation_missing`,
+   `artifact.unregistered`, or `artifact.digest_mismatch` (require a
+   checkout or worktree of the recorded PR head before `check`; a
+   working-tree `check` on the base branch is not evidence), not only
+   formatting and cross-reference text matching. When Rule 4 identifies
+   staleness in a registered specification artifact, raise a staleness
+   finding that prescribes `ears-manager artifact put`, not an edit by
+   hand.
 
 ## Agent skills
 

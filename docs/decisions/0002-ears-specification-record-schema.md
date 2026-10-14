@@ -433,8 +433,12 @@ An artifact may be created or revised while its change set is proposed.
 records an artifact operation. Once the change set is approved and merged,
 the registered artifact state is immutable; a later change requires a new
 change set. Direct edits do not update the registry and are rejected by
-digest validation. The `owner` field remains the responsible authority
-across ordinary revisions; it is not a last-mutator or audit field.
+digest validation. A path or canonical-content change that also rewrites
+the registry digest still requires a proposed change-set artifact
+operation; unregistration is rejected. The check verifies the operation
+record; it does not prove that `artifact put` was invoked. The `owner`
+field remains the responsible authority across ordinary revisions; it
+is not a last-mutator or audit field.
 
 Structured requirement, interface, and change-set stores are configured in
 the `stores` block of `.protobot/project.yaml` and are not artifact-registry

@@ -1,0 +1,19 @@
+# managed by ears-manager; do not edit by hand
+id: CS-00003
+base_commit: 5434ee690e0c837ee086d3d36a2c9e89998e9776
+intent: Require a proposed artifact operation for registered path or content changes
+operations: []
+artifact_operations:
+    - action: revise
+      artifact_id: architecture
+affected_interfaces: []
+affected_scopes:
+    - ears-manager
+implementation_required: true
+impact_assessment:
+    - requirement_id: REQ-CLI-00001
+      disposition: applicable
+      rationale: This change extends ears-manager check to require a proposed change-set artifact operation when a registered artifact path or canonical content differs from the default-branch tree.
+      origin: mechanical
+impact_assessment_base_commit: 5434ee690e0c837ee086d3d36a2c9e89998e9776
+created: "2026-10-14T20:30:00Z"

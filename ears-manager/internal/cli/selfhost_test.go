@@ -290,6 +290,142 @@ func TestSelfHostingApprovedChangeSetIgnoresStaleBase(t *testing.T) {
 	assertSuccess(t, code, stdout, stderr)
 }
 
+func TestSelfHostingHandEditedRegisteredArtifactFailsCheckWithoutOperation(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	rewriteRegisteredArtifact(t, root, "architecture", "# Hand-edited Architecture\n")
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	if code != 4 || stderr != "" || jsonString(t, stdout, "error", "code") != "artifact.operation_missing" {
+		t.Fatalf("hand-edited artifact = code %d stdout %s stderr %s", code, stdout, stderr)
+	}
+	if !hasDiagnostic(t, stdout, "artifact.operation_missing", "artifacts[id=architecture]") {
+		t.Fatalf("check omitted artifact.operation_missing for architecture: %s", stdout)
+	}
+	if !strings.Contains(stdout, "architecture") {
+		t.Fatalf("diagnostic did not name artifact architecture: %s", stdout)
+	}
+
+	humanCode, _, humanStderr := runCLI(nil, "check")
+	if humanCode != 4 || !strings.Contains(humanStderr, "error[artifact.operation_missing]:") {
+		t.Fatalf("human check = exit %d stderr %q", humanCode, humanStderr)
+	}
+}
+
+func TestSelfHostingArtifactPutPassesCheck(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	content := readTestFile(t, root, "docs/architecture.md") + "\nRevised through artifact put.\n"
+	code, stdout, stderr := runCLI([]byte(content), "--output", "json", "artifact", "put",
+		"--change-set", "CS-00001",
+		"--id", "architecture",
+		"--kind", "architecture",
+		"--path", "docs/architecture.md",
+		"--owner", "user",
+		"--content-stdin")
+	assertSuccess(t, code, stdout, stderr)
+
+	code, stdout, stderr = runCLI(nil, "--output", "json", "check")
+	assertSuccess(t, code, stdout, stderr)
+}
+
+func TestSelfHostingProposedArtifactOperationPassesCheck(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	rewriteRegisteredArtifact(t, root, "architecture", "# Revised Architecture\n")
+	addProposedArtifactOperation(t, root, "CS-00001", "revise", "architecture")
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	assertSuccess(t, code, stdout, stderr)
+	code, stdout, stderr = runCLI(nil, "--output", "json", "check", "--change-set", "CS-00001")
+	assertSuccess(t, code, stdout, stderr)
+}
+
+func TestSelfHostingApprovedRegistryMatchesDefaultBranchWithoutOperations(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+	git(t, root, "checkout", "-b", "pr/no-artifact-change")
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	assertSuccess(t, code, stdout, stderr)
+}
+
+func TestSelfHostingArtifactUnregistrationFailsCheck(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+	git(t, root, "checkout", "-b", "pr/unregister-architecture")
+
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		kept := config.Artifacts[:0]
+		for _, artifact := range config.Artifacts {
+			if artifact.ID != "architecture" {
+				kept = append(kept, artifact)
+			}
+		}
+		config.Artifacts = kept
+	})
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	if code != 4 || stderr != "" || jsonString(t, stdout, "error", "code") != "artifact.unregistered" {
+		t.Fatalf("unregistered artifact = code %d stdout %s stderr %s", code, stdout, stderr)
+	}
+	if !hasDiagnostic(t, stdout, "artifact.unregistered", "artifacts[id=architecture]") {
+		t.Fatalf("check omitted artifact.unregistered for architecture: %s", stdout)
+	}
+}
+
+func TestSelfHostingMetadataOnlyArtifactRegistryEditDoesNotRequireOperation(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+	git(t, root, "checkout", "-b", "pr/metadata-only")
+
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		for index, artifact := range config.Artifacts {
+			if artifact.ID == "architecture" {
+				config.Artifacts[index].Validator = "markdownlint"
+			}
+		}
+	})
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	assertSuccess(t, code, stdout, stderr)
+}
+
+func TestSelfHostingNewArtifactPathRequiresOperation(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	writeTestFile(t, root, "docs/extra.md", "# Extra\n")
+	digest, err := specvalidation.CanonicalTextDigest([]byte("# Extra\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		config.Artifacts = append(config.Artifacts, records.ArtifactEntry{
+			ID: "extra", Kind: records.ArtifactInterfaceProse, Path: "docs/extra.md",
+			Digest: digest, Owner: "user",
+		})
+	})
+	appendSharedProjection(t, root, "docs/extra.md")
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	if code != 4 || stderr != "" || jsonString(t, stdout, "error", "code") != "artifact.operation_missing" {
+		t.Fatalf("new artifact path = code %d stdout %s stderr %s", code, stdout, stderr)
+	}
+	if !hasDiagnostic(t, stdout, "artifact.operation_missing", "artifacts[id=extra]") {
+		t.Fatalf("check omitted artifact.operation_missing for extra: %s", stdout)
+	}
+
+	addProposedArtifactOperation(t, root, "CS-00001", "add", "extra")
+	code, stdout, stderr = runCLI(nil, "--output", "json", "check")
+	assertSuccess(t, code, stdout, stderr)
+}
+
 func TestSelfHostingFixtureDetectsDirectArtifactEditWithoutStaging(t *testing.T) {
 	root := newSelfHostingCheckout(t)
 	t.Chdir(root)
@@ -1292,4 +1428,64 @@ func selfHostingRoot(t *testing.T) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
+}
+
+func rewriteRegisteredArtifact(t *testing.T, root, id, content string) {
+	t.Helper()
+	digest, err := specvalidation.CanonicalTextDigest([]byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var path string
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		for index, artifact := range config.Artifacts {
+			if artifact.ID != id {
+				continue
+			}
+			path = artifact.Path
+			config.Artifacts[index].Digest = digest
+			return
+		}
+		t.Fatalf("artifact %s is not registered", id)
+	})
+	writeTestFile(t, root, path, content)
+}
+
+func addProposedArtifactOperation(t *testing.T, root, changeSetID, action, artifactID string) {
+	t.Helper()
+	filename, err := records.FilenameFor(records.ChangeSetStore, changeSetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".protobot", "change-sets", filename)
+	var changeSet records.ChangeSet
+	if err := storage.ReadFile(path, &changeSet); err != nil {
+		t.Fatal(err)
+	}
+	changeSet.ArtifactOperations = append(changeSet.ArtifactOperations, records.ArtifactOperation{
+		Action: action, ArtifactID: artifactID,
+	})
+	data, err := storage.Encode(changeSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refreshProjectDigests(t, root)
+}
+
+func appendSharedProjection(t *testing.T, root, path string) {
+	t.Helper()
+	current := specvalidation.ParseProjection([]byte(readTestFile(t, root, specvalidation.ProjectionPath)))
+	data, changed, err := specvalidation.AddSharedClassifications(current.Data, []string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(root, specvalidation.ProjectionPath), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

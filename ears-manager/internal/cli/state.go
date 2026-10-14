@@ -147,6 +147,9 @@ func checkState() (projectState, *commandFailure) {
 	if failure := checkProposedBaseFreshness(root, snapshot, proposed, head); failure != nil {
 		return projectState{root: root}, failure
 	}
+	if failure := checkRegisteredArtifactOperations(root, snapshot, proposed); failure != nil {
+		return projectState{root: root}, failure
+	}
 	return projectState{root: root, snapshot: snapshot, observed: observeSnapshot(root, snapshot), head: head, diagnostics: result.Diagnostics}, nil
 }
 
@@ -368,6 +371,9 @@ func validateScopedCheck(root string, snapshot specvalidation.Snapshot, targetIn
 		unique = append(unique, diagnostic)
 	}
 	if failure := failureFromDiagnostics(unique); failure != nil {
+		return failure
+	}
+	if failure := checkRegisteredArtifactOperations(root, snapshot, proposedIDs); failure != nil {
 		return failure
 	}
 	if !proposed[targetID] {
@@ -1083,10 +1089,192 @@ func proposedChangeSetIDs(root string, snapshot specvalidation.Snapshot) (map[st
 // Source Control Manager publish conditions that check also reports for
 // each proposed change set. Approved manifests are exempt.
 const (
-	codeBaseNotOnDefault = "BASE_NOT_ON_DEFAULT"
-	codeDefaultMoved     = "DEFAULT_MOVED"
-	codeBaseCommitStale  = "BASE_COMMIT_STALE"
+	codeBaseNotOnDefault         = "BASE_NOT_ON_DEFAULT"
+	codeDefaultMoved             = "DEFAULT_MOVED"
+	codeBaseCommitStale          = "BASE_COMMIT_STALE"
+	codeArtifactOperationMissing = "artifact.operation_missing"
+	codeArtifactUnregistered     = "artifact.unregistered"
 )
+
+// checkRegisteredArtifactOperations requires a proposed change-set artifact
+// operation when a registered artifact's path or canonical content differs
+// from the default-branch tree. It compares ADR-0002 canonical text digests
+// of tree blobs, not registry metadata. Registering an unchanged file that
+// already exists on the default branch does not require an operation.
+// Unregistration is rejected. Metadata-only registry edits do not require
+// an operation. The check verifies the operation record; it does not prove
+// that ears-manager artifact put was invoked.
+func checkRegisteredArtifactOperations(root string, snapshot specvalidation.Snapshot, proposed map[string]bool) *commandFailure {
+	targetHead, failure := defaultBranchHead(root, snapshot.Config.Repository)
+	if failure != nil {
+		return failure
+	}
+	defaultArtifacts, failure := defaultBranchArtifactEntries(root, targetHead)
+	if failure != nil {
+		return failure
+	}
+	defaultByID := make(map[string]records.ArtifactEntry, len(defaultArtifacts))
+	for _, artifact := range defaultArtifacts {
+		if artifact.ID != "" {
+			defaultByID[artifact.ID] = artifact
+		}
+	}
+	workingIDs := make(map[string]bool, len(snapshot.Config.Artifacts))
+	for _, artifact := range snapshot.Config.Artifacts {
+		workingIDs[artifact.ID] = true
+	}
+	proposedOps := proposedArtifactIDs(snapshot, proposed)
+	digestCache := map[string]commitDigest{}
+	diagnostics := make([]specvalidation.Diagnostic, 0, len(defaultByID)+len(snapshot.Config.Artifacts))
+	projectPath := configPath(snapshot)
+
+	defaultIDs := make([]string, 0, len(defaultByID))
+	for id := range defaultByID {
+		defaultIDs = append(defaultIDs, id)
+	}
+	sort.Strings(defaultIDs)
+	for _, id := range defaultIDs {
+		if workingIDs[id] {
+			continue
+		}
+		diagnostics = append(diagnostics, specvalidation.Diagnostic{
+			Code:     codeArtifactUnregistered,
+			Severity: "error",
+			Path:     projectPath,
+			RecordID: id,
+			Field:    "artifacts[id=" + id + "]",
+			Message:  fmt.Sprintf("Registered artifact %q was removed from the registry.", id),
+			Hint:     "Artifact unregistration is not permitted. Restore the registry entry.",
+		})
+	}
+
+	working := append([]records.ArtifactEntry(nil), snapshot.Config.Artifacts...)
+	sort.SliceStable(working, func(i, j int) bool { return working[i].ID < working[j].ID })
+	for _, artifact := range working {
+		if artifact.ID == "" {
+			continue
+		}
+		changed, failure := registeredArtifactPathOrContentChanged(root, targetHead, artifact, defaultByID, digestCache)
+		if failure != nil {
+			return failure
+		}
+		if !changed || proposedOps[artifact.ID] {
+			continue
+		}
+		diagnostics = append(diagnostics, specvalidation.Diagnostic{
+			Code:     codeArtifactOperationMissing,
+			Severity: "error",
+			Path:     projectPath,
+			RecordID: artifact.ID,
+			Field:    "artifacts[id=" + artifact.ID + "]",
+			Message:  fmt.Sprintf("Registered artifact %q changed path or content without a proposed change-set artifact operation.", artifact.ID),
+			Hint:     "Record the change through ears-manager artifact put in an active change set.",
+		})
+	}
+	return artifactOperationFailure(diagnostics)
+}
+
+type commitDigest struct {
+	digest  string
+	present bool
+}
+
+func registeredArtifactPathOrContentChanged(root, commit string, artifact records.ArtifactEntry, defaultByID map[string]records.ArtifactEntry, cache map[string]commitDigest) (bool, *commandFailure) {
+	if previous, existed := defaultByID[artifact.ID]; existed && previous.Path != artifact.Path {
+		return true, nil
+	}
+	digest, present, failure := cachedCommitPathDigest(root, commit, artifact.Path, cache)
+	if failure != nil {
+		return false, failure
+	}
+	return !present || digest != artifact.Digest, nil
+}
+
+func cachedCommitPathDigest(root, commit, relative string, cache map[string]commitDigest) (string, bool, *commandFailure) {
+	path := filepath.ToSlash(relative)
+	if cached, ok := cache[path]; ok {
+		return cached.digest, cached.present, nil
+	}
+	digest, present, failure := commitPathDigest(root, commit, path)
+	if failure != nil {
+		return "", false, failure
+	}
+	cache[path] = commitDigest{digest: digest, present: present}
+	return digest, present, nil
+}
+
+func commitPathDigest(root, commit, relative string) (string, bool, *commandFailure) {
+	data, present, failure := readCommitFile(root, commit, relative)
+	if failure != nil || !present {
+		return "", present, failure
+	}
+	digest, err := specvalidation.CanonicalTextDigest(data)
+	if err != nil {
+		return "", true, nil
+	}
+	return digest, true, nil
+}
+
+func defaultBranchArtifactEntries(root, commit string) ([]records.ArtifactEntry, *commandFailure) {
+	data, present, failure := readCommitFile(root, commit, revisionConfigPath)
+	if failure != nil || !present {
+		return nil, failure
+	}
+	var config records.ProjectConfig
+	if _, err := storage.DecodeFields(data, &config); err != nil {
+		return nil, ioFailure("git.read_failed", "The default-branch project configuration could not be decoded.")
+	}
+	return config.Artifacts, nil
+}
+
+func proposedArtifactIDs(snapshot specvalidation.Snapshot, proposed map[string]bool) map[string]bool {
+	ids := make(map[string]bool)
+	for _, document := range snapshot.ChangeSets {
+		if !proposed[document.Value.ID] {
+			continue
+		}
+		for _, operation := range document.Value.ArtifactOperations {
+			if operation.ArtifactID != "" {
+				ids[operation.ArtifactID] = true
+			}
+		}
+	}
+	return ids
+}
+
+func artifactOperationFailure(diagnostics []specvalidation.Diagnostic) *commandFailure {
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	sort.SliceStable(diagnostics, func(i, j int) bool {
+		left, right := diagnostics[i], diagnostics[j]
+		for _, pair := range [][2]string{
+			{left.Path, right.Path}, {left.Code, right.Code}, {left.RecordID, right.RecordID},
+			{left.Field, right.Field}, {left.Severity, right.Severity},
+			{left.Message, right.Message}, {left.Hint, right.Hint},
+		} {
+			if pair[0] != pair[1] {
+				return pair[0] < pair[1]
+			}
+		}
+		return false
+	})
+	primary := codeArtifactOperationMissing
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == codeArtifactUnregistered {
+			primary = codeArtifactUnregistered
+			break
+		}
+	}
+	message := diagnostics[0].Message
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == primary {
+			message = diagnostic.Message
+			break
+		}
+	}
+	return validationFailure(primary, message, diagnostics)
+}
 
 // checkProposedBaseFreshness applies the Source Control Manager's publish
 // freshness rules to every proposed change-set manifest. base_commit must

@@ -865,15 +865,19 @@ enforcement:
 The later checks compare against digests that live in the registry:
 `store_digests` and each artifact's `digest` in `.protobot/project.yaml`,
 which cannot record a digest for itself and which `ears-manager check`
-validates only structurally
+validates structurally
 ([Repository fields](../git-integration.md#repository-fields)). A fail-open
 write that changes a registered path and also rewrites its digest in
-`project.yaml` therefore passes the pre-stage digest comparison,
-`ears-manager check`, and CI path ownership. The Codex row admits such a
-write. Wherever this contract says the later checks catch an unauthorized
-persistent edit, that holds for edits that leave the registry intact; the
-compound edit is a recorded gap, and review of the pull request is the
-remaining check.
+`project.yaml` passes the pre-stage digest comparison and CI path
+ownership, and fails `ears-manager check` unless a proposed change set
+records an artifact operation for that artifact. Coordinated edits to
+the artifact,
+digest, and manifest still pass: the check verifies the operation record
+and does not prove that `artifact put` was invoked. The Codex row admits
+such a write. Wherever this contract says the later checks catch an
+unauthorized persistent edit, that holds for edits that leave the registry
+intact or omit the operation record; the coordinated compound edit is a
+recorded gap, and review of the pull request is the remaining check.
 
 The binding status and fixture must keep these failure modes visible. A
 call with no guard decision is not a refusal, and a fixture that exercises

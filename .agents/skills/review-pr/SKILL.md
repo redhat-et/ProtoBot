@@ -25,33 +25,23 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   (`docs/vision.md`, `docs/architecture.md`, or any other artifact
   registered in `.protobot/project.yaml`), or when Rule 4 of "Rules for
   creating or modifying specification documents" in `AGENTS.md` identifies
-  staleness in a registered specification artifact, verify that changes were
-  authored through `ears-manager artifact put` within an active change set:
-  - Require a checkout or worktree of the recorded PR head before working-tree
-    `change-set show` and `ears-manager check`; do not treat a `check` pass on
-    the base branch as evidence.
-  - For each registered path the PR creates or modifies or that Rule 4 of
-    "Rules for creating or modifying specification documents" in `AGENTS.md`
-    found stale, resolve `artifacts[].id` for that path in
-    `.protobot/project.yaml`, then require a change-set manifest under
-    `.protobot/change-sets/` (count a change-set only when working-tree
-    `ears-manager change-set show` (no `--at`), after the PR head is checked
-    out, reports `proposed` iff the manifest path is absent from the
-    default-branch tree; if `show --at <pr-head>` is used, require
-    path-absence in addition to `proposed`; do not treat `--at` status alone
-    as evidence of `artifact put`; never treat a path that already exists on
-    the default branch, including a modified `cs-00001.yaml`, as evidence of
-    `artifact put`) to contain an `artifact_operations[]` entry whose
-    `artifact_id` equals that registry id. Treat a digest-only or content
-    change without that proposed operation as a hand edit.
-  - Inspect the registered specification artifact and `.protobot/project.yaml`
-    to ensure neither was edited by hand. A registered specification artifact
-    or `.protobot/project.yaml` edited by hand is a finding.
-  - Confirm `ears-manager check` passes without `artifact.digest_mismatch`.
-  - A missing `ears-manager artifact put`, when a PR creates or modifies a
-    registered specification artifact or when Rule 4 of "Rules for creating
-    or modifying specification documents" in `AGENTS.md` identifies staleness
-    in a registered specification artifact, is a finding.
+  staleness in a registered specification artifact, check that a proposed
+  change set records an `artifact_operations[]` entry whose `artifact_id`
+  equals the registered artifact ID, and that `ears-manager check` passes
+  without `artifact.operation_missing`, `artifact.unregistered`, or
+  `artifact.digest_mismatch`. Issue #255 moved this verification into
+  `ears-manager check`.
+  - Require a checkout or worktree of the recorded PR head before
+    `ears-manager check`; do not treat a `check` pass on the base branch as
+    evidence.
+  - The check verifies the operation record; it does not prove that
+    `ears-manager artifact put` was invoked.
+  - A proposed change set missing an `artifact_operations[]` entry whose
+    `artifact_id` equals the registered artifact ID, when a PR creates or
+    modifies a registered specification artifact or when Rule 4 of "Rules
+    for creating or modifying specification documents" in `AGENTS.md`
+    identifies staleness in a registered specification artifact, is a
+    finding.
   - When Rule 4 of "Rules for creating or modifying specification documents"
     in `AGENTS.md` identifies staleness in a registered specification artifact,
     raise a staleness finding that prescribes `ears-manager artifact put`, not

@@ -266,7 +266,7 @@ project-initialization boundary.
 | `change-set show` | Show a change set by ID. |
 | `change-set compare` | Compare a change set with the current Schematic. |
 | `change-set update` | Update a proposed change set. |
-| `check` | Validate spec files: EARS formatting, required fields, referential integrity. CI gate. |
+| `check` | Validate spec files: EARS formatting, required fields, referential integrity, and registered artifact operations. CI gate. |
 | `impact` | Produce potentially applicable requirements from scope intersections. |
 
 **Callers:** The Specification Toolkit (via agent tool calls),
@@ -707,8 +707,12 @@ unauthorized persistent edit to a registered path reaches them
 and leaves the registry intact, the SCM's pre-stage digest
 comparison refuses to stage it and `ears-manager check` fails it
 before merge; a fail-open write that also rewrites the digest in
-`.protobot/project.yaml` passes both; CI path ownership does
-not catch an edit inside the correct owned path
+`.protobot/project.yaml` fails `ears-manager check` unless a
+proposed change set records an artifact operation for that
+artifact. Coordinated edits to the artifact, digest, and manifest
+still pass: the check verifies the operation record and does not
+prove that `ears-manager artifact put` was invoked. CI path
+ownership does not catch an edit inside the correct owned path
 ([What the harness layer stops][layer-stops]). No later check
 establishes the provenance of `--content-file` or `--impact-file`
 bytes ([File-source arguments][fail-open]).
@@ -723,8 +727,9 @@ prompting alone. The mandatory enforcement layers are:
 - **Branch protection on `main`** — prevents direct pushes;
   all changes require a reviewed PR.
 - **`ears-manager check` as a CI merge gate** — validates
-  specification well-formedness, required metadata, and
-  referential integrity before merge.
+  specification well-formedness, required metadata, referential
+  integrity, and registered artifact path or content changes
+  before merge.
 - **Path ownership in CI** — rejects edits by a component or
   Worker outside its owned or allowlisted paths (CODEOWNERS
   and required reviews).

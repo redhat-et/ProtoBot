@@ -799,15 +799,18 @@ it checks, and a call without a guard decision may still write one
 `ears-manager`, by any route, that leaves the registry intact must be
 rejected or caught before it can reach the default branch. Four layers
 do that, in order of how early they fire. A fail-open write that also
-rewrites the digest in `.protobot/project.yaml` is a recorded gap and
-is not caught by those layers ([File-source arguments][fail-open]);
-review of the pull request is the remaining check.
+rewrites the digest in `.protobot/project.yaml` fails `ears-manager check`
+unless a proposed change set records an artifact operation for that
+artifact. Coordinated edits to the artifact, digest, and manifest
+still pass: the check verifies the operation record and does not prove
+that `ears-manager artifact put` was invoked
+([File-source arguments][fail-open]).
 
 | Layer | Where | Catches |
 | --- | --- | --- |
 | Harness tool permission rules (optional, [#33](agent-harness/adapter-contract.md#what-the-harness-layer-stops)) | The agent's own tool call | A write under a registered path before it happens |
 | Pre-stage digest comparison | The Drafting Table, in the SCM's `commit`, before staging | A registered artifact or structured store whose content no longer matches its governed digest |
-| `ears-manager check` | Branch push and merge gate in CI | Malformed records, artifact or store digest mismatches, dangling references, symmetry and cycle violations |
+| `ears-manager check` | Branch push and merge gate in CI | Malformed records, artifact or store digest mismatches, registered artifact path or content changes without a proposed change-set artifact operation, dangling references, symmetry and cycle violations |
 | Path ownership in CI | Merge gate | A change that edits files outside the owning component's paths |
 
 ### The pre-stage digest comparison
@@ -851,9 +854,13 @@ CI repeats the same comparison inside `ears-manager check`, so a
 contributor who bypasses the Drafting Table entirely is still
 caught before merge when the edit leaves the registry intact. A
 fail-open write that also rewrites the digest in
-`.protobot/project.yaml` is a recorded gap and is not caught by those
-layers ([File-source arguments][fail-open]); review of the pull request
-is the remaining check. Path ownership in CI is the last layer.
+`.protobot/project.yaml` fails `ears-manager check` unless a proposed
+change set records an artifact operation for that artifact. Coordinated
+edits to the artifact, digest, and manifest still pass: the check
+verifies the operation record and does not prove that
+`ears-manager artifact put` was invoked
+([File-source arguments][fail-open]). Path ownership in CI is the last
+layer.
 
 ---
 

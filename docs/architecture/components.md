@@ -427,9 +427,10 @@ It is used by these callers:
   and [open question Q19][q19].
 - **CI** — `ears-manager check` runs on every branch push to
   validate that spec files are well-formed, all EARS statements
-  match required templates, referential integrity holds, and each
+  match required templates, referential integrity holds, each
   proposed change set's `base_commit` is the fetched default-branch
-  head.
+  head, and registered artifact path or content changes have a
+  proposed change-set artifact operation.
 - **Job Site Materializer** — reads the approved manifest and requirement
   records at the immutable specification commit recorded in a build
   work-item contract.
@@ -478,7 +479,7 @@ scope](ears-manager-cli.md#em-04-first-release-scope).
 | Subcommand | Purpose |
 | --- | --- |
 | `ears-manager project init` | Initialize `.protobot/project.yaml`, seed version-1 schema keys, store paths, store integrity digests, and opaque artifact entries, and write a version-1 `.protobot/projection.yaml` that classifies the registered specification paths and the configured store directories as `shared`. It creates no store directory and no artifact content. |
-| `ears-manager check` | Validate all spec files: project configuration and store integrity, projection classification (`projection.invalid`, `projection.unclassified`), EARS formatting, required fields, applicability metadata, change-set integrity, referential integrity, and proposed `base_commit` freshness against the default-branch head (`BASE_NOT_ON_DEFAULT`, `DEFAULT_MOVED`, `BASE_COMMIT_STALE`). Exit non-zero on failure. Suitable for CI gates. |
+| `ears-manager check` | Validate all spec files: project configuration and store integrity, projection classification (`projection.invalid`, `projection.unclassified`), EARS formatting, required fields, applicability metadata, change-set integrity, referential integrity, proposed `base_commit` freshness against the default-branch head (`BASE_NOT_ON_DEFAULT`, `DEFAULT_MOVED`, `BASE_COMMIT_STALE`), and registered artifact path or content changes against the default-branch tree (`artifact.operation_missing`, `artifact.unregistered`). Exit non-zero on failure. Suitable for CI gates. |
 | `ears-manager requirement add` | Add a new EARS requirement with interface or project-wide applicability selectors and optional narrower scopes. Validates the EARS statement and metadata before writing. |
 | `ears-manager requirement list/show` | Read requirements at the working tree or an immutable `--at` revision. |
 | `ears-manager requirement update/retire` | Modify requirements through a proposed change set. |
@@ -528,11 +529,14 @@ scope](ears-manager-cli.md#em-04-first-release-scope).
   otherwise it is `projection.unclassified`.
 - **Artifact governance.** Vision, Architecture, interface IDL, and
   interface-prose files are registered by kind, path, digest, owner, and
-  validator. Structured requirement, interface, and change-set records use
-  the `stores` block, per-store integrity digests, and their ADR-0003 layout.
-  Opaque prose and external IDLs still pass through `ears-manager` for
-  change-set membership and path/transaction control; controlled validator
-  adapters invoke approved format-specific tools.
+  validator. A path or canonical-content change relative to the
+  default-branch tree requires a proposed change-set artifact operation;
+  unregistration is rejected. Structured requirement, interface, and
+  change-set records use the `stores` block, per-store integrity digests,
+  and their ADR-0003 layout. Opaque prose and external IDLs still pass
+  through `ears-manager` for change-set membership and path/transaction
+  control; controlled validator adapters invoke approved format-specific
+  tools.
 - **File format consistency.** `ears-manager` ensures one-file-per-record
   YAML files ([ADR-0001](../decisions/0001-requirements-storage-format.md))
   are syntactically valid and follow the expected schema.
@@ -1090,8 +1094,8 @@ flowchart TD
   Architecture follows the same branch → review → merge lifecycle
   as any other change. No special case needed.
 - **CI can validate branches.** Spec format, well-formedness,
-  proposed `base_commit` freshness, and consistency checks run on
-  branch pushes, just like code linting.
+  proposed `base_commit` freshness, registered artifact operations,
+  and consistency checks run on branch pushes, just like code linting.
 - **Concurrent work items don't conflict until merge.** Each work
   item has its own branch. Conflicts surface at merge time, which
   is when they need to be resolved anyway.
@@ -1892,7 +1896,8 @@ sequenceDiagram
    PR. This is the human approval gate — standard branch
    protection rules, CODEOWNERS, and required reviews all apply.
    CI runs `ears-manager check` as a merge gate to validate spec
-   well-formedness and proposed `base_commit` freshness.
+   well-formedness, proposed `base_commit` freshness, and registered
+   artifact operations.
 3. **The change set lands on main.** A registration hook calls the Job
    Site materializer with the change-set ID, resulting merge commit, stable
    materialization key, and the distinct deterministic registration
