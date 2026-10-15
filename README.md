@@ -116,8 +116,10 @@ comparisons remain separate follow-on work.
 ProtoBot hosts its own specification store under `.protobot/`. Those files
 are written by `ears-manager`; do not edit them by hand.
 `docs/vision.md` and `docs/architecture.md` are registered artifacts. A
-direct edit that leaves the registry digest unchanged fails
-`ears-manager check`. The initial store includes the governed `CS-00001`
+direct edit of a registered specification artifact fails `ears-manager check`
+unless a proposed change set records an artifact operation (via
+`ears-manager artifact put`); rewriting the digest alone no longer bypasses
+validation. The initial store includes the governed `CS-00001`
 change set, the `protobot-cli` interface, and requirement `REQ-CLI-00001`.
 
 Run the local check from the checked-out source, so it uses the same
