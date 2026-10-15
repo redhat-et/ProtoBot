@@ -980,8 +980,8 @@ func defaultBranchRefs(root string, repository records.RepositoryConfig) ([]stri
 }
 
 func canonicalRemoteURLMatches(url1, url2 string) bool {
-	u1 := strings.TrimSuffix(withoutUserinfo(strings.TrimSpace(url1)), ".git")
-	u2 := strings.TrimSuffix(withoutUserinfo(strings.TrimSpace(url2)), ".git")
+	u1 := withoutUserinfo(strings.TrimSpace(url1))
+	u2 := withoutUserinfo(strings.TrimSpace(url2))
 	return u1 != "" && u1 == u2
 }
 
@@ -1244,8 +1244,29 @@ func commitPathDigest(root, commit, relative string) (string, bool, *commandFail
 	return digest, true, nil
 }
 
-func isProjectInitialization(snapshot specvalidation.Snapshot) bool {
-	return len(snapshot.ChangeSets) == 0 || (len(snapshot.ChangeSets) == 1 && snapshot.ChangeSets[0].Value.ID == "CS-00001")
+func isProjectInitialization(root string, snapshot specvalidation.Snapshot) bool {
+	if len(snapshot.ChangeSets) == 0 {
+		return true
+	}
+	if len(snapshot.ChangeSets) != 1 || snapshot.ChangeSets[0].Value.ID != "CS-00001" {
+		return false
+	}
+	defaultBranch := strings.TrimSpace(snapshot.Config.Repository.DefaultBranch)
+	if defaultBranch == "" {
+		return false
+	}
+	headRef := checkedOutRef(root)
+	if headRef == "refs/heads/"+defaultBranch {
+		return false
+	}
+	branchHead, failure := localBranchHead(root, defaultBranch)
+	if failure != nil {
+		return false
+	}
+	if treeHasPath(root, branchHead, revisionConfigPath) {
+		return false
+	}
+	return true
 }
 
 func defaultBranchArtifactEntries(root, commit string, snapshot specvalidation.Snapshot) ([]records.ArtifactEntry, *commandFailure) {
@@ -1254,7 +1275,7 @@ func defaultBranchArtifactEntries(root, commit string, snapshot specvalidation.S
 		return nil, failure
 	}
 	if !present {
-		if isProjectInitialization(snapshot) {
+		if isProjectInitialization(root, snapshot) {
 			return nil, nil
 		}
 		return nil, ioFailure("git.read_failed", "The default-branch project configuration could not be read.")
@@ -1287,10 +1308,10 @@ func evaluateCandidate(root, ref, shortName, remote string, isRemote bool, remot
 	}
 	var config records.ProjectConfig
 	if _, err := storage.DecodeFields(data, &config); err != nil {
-		return nil, nil
+		return nil, ioFailure("git.read_failed", "The default-branch project configuration could not be decoded.")
 	}
-	branchName := strings.TrimSpace(config.Repository.DefaultBranch)
-	if branchName == "" {
+	branchName, failure := defaultBranchName(config.Repository.DefaultBranch)
+	if failure != nil {
 		return nil, nil
 	}
 	if shortName != "" {
@@ -1458,7 +1479,7 @@ func approvedRepositoryConfig(root string, snapshot specvalidation.Snapshot) (re
 		return selected.config.Repository, nil
 	}
 
-	if isProjectInitialization(snapshot) {
+	if isProjectInitialization(root, snapshot) {
 		return snapshot.Config.Repository, nil
 	}
 	return records.RepositoryConfig{}, projectFailure("project.default_branch_unresolved", "Approved repository default branch configuration could not be resolved.")

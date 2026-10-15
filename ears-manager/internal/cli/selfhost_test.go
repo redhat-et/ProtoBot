@@ -536,7 +536,7 @@ func TestSelfHostingCanonicalRemoteMergeHeadRetargetedDefaultBranchFailsCheck(t 
 
 	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
 	errorCode := jsonString(t, stdout, "error", "code")
-	if (code != 3 && code != 4) || stderr != "" || (errorCode != "project.invalid_configuration" && errorCode != "artifact.operation_missing") {
+	if code != 3 || stderr != "" || errorCode != "project.invalid_configuration" {
 		t.Fatalf("canonical remote merge head retarget = code %d stdout %s stderr %s", code, stdout, stderr)
 	}
 }
@@ -562,6 +562,69 @@ func TestSelfHostingApprovedRepositoryConfigReadErrorFailsClosed(t *testing.T) {
 	if code == 0 || (errorCode != "git.read_failed" && errorCode != "revision.read_failed") {
 		t.Fatalf("read error on first candidate must fail closed: code %d stdout %s stderr %s", code, stdout, stderr)
 	}
+}
+
+func TestSelfHostingApprovedRepositoryConfigDecodeErrorFailsClosed(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+
+	git(t, root, "checkout", "main")
+	writeTestFile(t, root, ".protobot/project.yaml", "corrupt: [yaml: invalid\n")
+	commitAll(t, root, "corrupt project config")
+
+	git(t, root, "checkout", "-b", "pr/feature")
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	errorCode := jsonString(t, stdout, "error", "code")
+	if code == 0 || errorCode != "git.read_failed" {
+		t.Fatalf("decode error on candidate must fail closed: code %d stdout %s stderr %s", code, stdout, stderr)
+	}
+}
+
+func TestSelfHostingMergedCS00001CloneRetargetFailsClosed(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+
+	// On main with no non-HEAD default branch refs, retargeting repository.default_branch
+	// must fail closed rather than falling open to the working-tree config.
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		config.Repository.DefaultBranch = "evil"
+	})
+	refreshProjectDigests(t, root)
+
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	errorCode := jsonString(t, stdout, "error", "code")
+	if code == 0 || (errorCode != "project.default_branch_unresolved" && errorCode != "project.invalid_configuration") {
+		t.Fatalf("retarget default branch in merged clone must fail closed: code %d stdout %s stderr %s", code, stdout, stderr)
+	}
+}
+
+func TestSelfHostingApprovedRepositoryConfigInvalidBranchNameSkipped(t *testing.T) {
+	root := newSelfHostingCheckout(t)
+	t.Chdir(root)
+	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
+	mergeIntoMain(t, root, branch)
+
+	git(t, root, "remote", "add", "origin", "https://github.com/redhat-et/ProtoBot.git")
+	mainCommit := gitOutput(t, root, "rev-parse", "refs/heads/main")
+	git(t, root, "update-ref", "refs/remotes/origin/main", mainCommit)
+
+	// Add an origin ref whose project.yaml has an invalid default_branch syntax.
+	git(t, root, "checkout", "-b", "invalid-branch")
+	rewriteProjectConfig(t, root, func(config *records.ProjectConfig) {
+		config.Repository.DefaultBranch = "main~1"
+	})
+	refreshProjectDigests(t, root)
+	commitAll(t, root, "invalid branch name syntax in project config")
+	invalidCommit := gitOutput(t, root, "rev-parse", "HEAD")
+	git(t, root, "update-ref", "refs/remotes/origin/HEAD", invalidCommit)
+
+	git(t, root, "checkout", branch)
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check")
+	assertSuccess(t, code, stdout, stderr)
 }
 
 func TestSelfHostingApprovedRegistryMatchesDefaultBranchWithoutOperations(t *testing.T) {
