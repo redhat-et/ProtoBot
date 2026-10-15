@@ -17,7 +17,7 @@ stores:
 store_digests:
     requirements: sha256:9a358a00bdabb03a3cff5cdce0fac181510eb977b166d476c0d67801beecef22
     interfaces: sha256:8e787702f4ccb37bac8f5e209d3d1da0f2e75d5fe42c32e71d46e179a5102b60
-    change_sets: sha256:a2cb161b2138bada98f63fefa12138ed169d8f3aa6412d551ef5e5e66b119d53
+    change_sets: sha256:25ab1f1cf293e698b9230311efcf4e8c7031b5bab7c4c1c34ade6a4c124b565f
 artifacts:
     - id: architecture
       kind: architecture
