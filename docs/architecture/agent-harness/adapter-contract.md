@@ -45,8 +45,11 @@ binding per harness:
   harness binding must provide.
 - **[OpenCode Harness Binding](opencode.md) is the first binding.** It
   defines the OpenCode files that meet this contract, designed against
-  OpenCode 1.18.30 and partly observed with a stub model. Its fixture
-  runs in #77.
+  OpenCode 2.0.28. Skill discovery, visibility, tool hiding, rule
+  order, pattern matching, the plugin hook, export, and the replay
+  provider were first observed on OpenCode 1.18.30 with a stub model
+  and remain historical until the fixture re-runs them on v2. Its
+  fixture runs in #77. v1.x is not supported.
 - **[Claude Code Harness Binding](claude-code.md) is the second.** It
   defines the Claude Code files, designed against the Claude Code
   2.1.273 documentation and CLI help. Its fixture has not run yet.
@@ -1122,7 +1125,7 @@ under [File-source arguments](#file-source-arguments).
 
 | Harness | Binding | Status |
 | --- | --- | --- |
-| OpenCode | [OpenCode Harness Binding](opencode.md) | Designed against OpenCode 1.18.30, with skill discovery and visibility, tool hiding, rule order, pattern matching, the plugin hook, export, and the replay provider observed against a stub model; the fixture runs in #77, so no H1 to H11 obligation is marked met; H12 is met; H13 not checked |
+| OpenCode | [OpenCode Harness Binding](opencode.md) | Designed against OpenCode 2.0.28; skill discovery and visibility, tool hiding, rule order, pattern matching, the plugin hook, export, and the replay provider were first observed against a stub model on 1.18.30 and remain historical until #77 re-runs them on v2; no H1 to H11 obligation is marked met; H12 is met; H13 not checked |
 | Claude Code | [Claude Code Harness Binding](claude-code.md) | Designed against Claude Code 2.1.273; the fixture has not run, so no H1 to H11 obligation is marked met; H12 is met |
 | Codex | [Codex Harness Binding](codex.md) | Designed against Codex CLI 0.154.0, with skill visibility, tools, the profile, and the hook observed against a stub model; the fixture has not run, so no H1 to H11 obligation is marked met; H12 is met. The Codex sandbox stays on, so the user runs a branch-cutting `change-set create`, which writes `.git/`, and registration, which needs the network. Git and the Git host go through the `scm` server, which runs outside the sandbox |
 
@@ -1152,15 +1155,17 @@ status names it.
 
 The table records what each harness offers for each obligation. The
 OpenCode column is bound in [OpenCode Harness Binding](opencode.md)
-and partly observed against a stub model on 2026-09-16; its fixture
-runs in #77. The Claude Code column is bound
-in [Claude Code Harness Binding](claude-code.md) from the published
-documentation and CLI help of Claude Code 2.1.273, read on 2026-09-16,
-and not yet checked by the fixture. The Codex column is bound in
-[Codex Harness Binding](codex.md) from the documentation, CLI help, and
-source of Codex CLI 0.154.0, partly observed against a stub model on
-2026-09-16, and not yet checked by the fixture. "Open" marks what is not
-yet known. Each binding verifies its column against the version it pins.
+against OpenCode 2.0.28; CLI, config, and plugin surface were rechecked
+in #272. Stub-model observations from 2026-09-16 on OpenCode 1.18.30
+remain historical until the fixture re-runs them on v2. The Claude Code
+column is bound in [Claude Code Harness Binding](claude-code.md) from
+the published documentation and CLI help of Claude Code 2.1.273, read
+on 2026-09-16, and not yet checked by the fixture. The Codex column is
+bound in [Codex Harness Binding](codex.md) from the documentation, CLI
+help, and source of Codex CLI 0.154.0, partly observed against a stub
+model on 2026-09-16, and not yet checked by the fixture. "Open" marks
+what is not yet known. Each binding verifies its column against the
+version it pins. OpenCode v1.x is not supported.
 
 | Extension point | OpenCode | Claude Code | Codex |
 | --- | --- | --- | --- |
@@ -1175,11 +1180,11 @@ yet known. Each binding verifies its column against the version it pins.
 | Remote `wms` server with OAuth 2.1 (H13) | Open | An HTTP MCP server with OAuth through `/mcp`; candidate | A streamable HTTP MCP server with `codex mcp login`; candidate |
 | Hide tools from the role (H9) | `"*": deny` in the agent | The agent's `tools` list and deny rules | `web_search = "disabled"` and `multi_agent = false`, observed; no setting hides `apply_patch` |
 | Restrict skills (H10) | `permission.skill` with `"*": deny` first hides every other skill from the model's list and refuses it; observed | `skillOverrides` with `off` hides and refuses a named skill; `Skill(<name>)` rules never change the list; a skill in another user's scope cannot be named in advance; observed | `include_instructions = false` removes the skill catalog, and the profile names the Toolkit skills; `[[skills.config]]` hides a named skill; observed. No skill tool: the guard refuses a read of another `SKILL.md` |
-| Invoke the guard (H8) | A plugin's `tool.execute.before` and a shim | A `PreToolUse` command hook; status 2 blocks and the reason reaches the model | A `PreToolUse` hook in `.codex/hooks.json`; status 2 blocks, observed; the hook needs trust, and an untrusted, crashing, or silent hook lets the call through; the launcher checks the hook file and the profile and starts Codex with `--dangerously-bypass-hook-trust`, so the hook runs, and the sandbox stays on |
-| Role signal for the guard | The agent name from `chat.params` | `PROTOBOT_ROLE` from the role's settings `env`; `agent_type` in the hook input is undocumented | `PROTOBOT_ROLE` set at launch reaches the hook, observed; the input names no profile |
-| Headless run (H7) | `opencode run --format json` | `claude -p --output-format stream-json --permission-prompts none` | `codex exec --json` |
+| Invoke the guard (H8) | A plugin default export with `setup` that registers `tool.execute.before`; a tool error rejects the call | A `PreToolUse` command hook; status 2 blocks and the reason reaches the model | A `PreToolUse` hook in `.codex/hooks.json`; status 2 blocks, observed; the hook needs trust, and an untrusted, crashing, or silent hook lets the call through; the launcher checks the hook file and the profile and starts Codex with `--dangerously-bypass-hook-trust`, so the hook runs, and the sandbox stays on |
+| Role signal for the guard | The `agent` field on `tool.execute.before` (v2); historically `chat.params` on 1.18.30 | `PROTOBOT_ROLE` from the role's settings `env`; `agent_type` in the hook input is undocumented | `PROTOBOT_ROLE` set at launch reaches the hook, observed; the input names no profile |
+| Headless run (H7) | `opencode run --standalone --format json` | `claude -p --output-format stream-json --permission-prompts none` | `codex exec --json` |
 | Continue a session (H4) | `--continue`, `--session` | `--continue`, `--resume` | `codex resume`, `codex exec resume` |
-| Session record (H6) | `opencode export`, with `--sanitize` | The transcript JSONL under `~/.claude/projects/`, plus `stream-json` with `--include-hook-events` | The session file under `$CODEX_HOME/sessions/`, plus `--json`; hook events are not recorded |
+| Session record (H6) | `opencode session export`, with `--sanitize` | The transcript JSONL under `~/.claude/projects/`, plus `stream-json` with `--include-hook-events` | The session file under `$CODEX_HOME/sessions/`, plus `--json`; hook events are not recorded |
 | Model replay (H7) | A custom OpenAI-compatible provider | A base-URL override to a replay endpoint; candidate, unverified | A custom model provider with `wire_api = "responses"`; observed with a stub |
 
 Four differences already shape the core. Claude Code and Codex share

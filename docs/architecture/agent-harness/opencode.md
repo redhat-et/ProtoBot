@@ -10,6 +10,7 @@
 **Contents:**
 
 - [Purpose and scope](#purpose-and-scope)
+- [OpenCode v2 requirement](#opencode-v2-requirement)
 - [Binding files](#binding-files)
 - [Skill discovery and invocation](#skill-discovery-and-invocation)
 - [Obligation status](#obligation-status)
@@ -30,11 +31,39 @@ is in [Agent Harness Adapter Contract](adapter-contract.md).
 This document is the OpenCode half.
 
 It adds no rule of its own. Where OpenCode forces a choice, this
-document states the choice and the obligation it serves. Every
-OpenCode behavior named here was observed on OpenCode 1.18.30 with a
-replayed model ([Observed OpenCode behaviors](#observed-opencode-behaviors)).
-The fixture has not run here yet. Issue #77 runs it, and turns each
-"designed" and "observed" status into "met" or into a recorded gap.
+document states the choice and the obligation it serves. ProtoBot
+requires OpenCode v2. Issue #272 rechecked CLI flags, config keys,
+plugin hooks, and debug commands against OpenCode 2.0.28
+(`@opencode/cli`) source and documentation. Behaviors first observed
+on OpenCode 1.18.30 with a replayed model remain in
+[Observed OpenCode behaviors](#observed-opencode-behaviors) as
+historical evidence until issue #77 re-runs the fixture on v2. v1.x is
+not supported. The fixture has not run here yet. Issue #77 runs it, and
+turns each "designed" and "observed" status into "met" or into a
+recorded gap.
+
+---
+
+## OpenCode v2 requirement
+
+Every repository-managed OpenCode invocation installs or selects v2 and
+rejects v1.x. Generic mentions of "OpenCode" as the first Drafting
+Table harness are not version pins.
+
+| Touch point | Kind | Disposition |
+| --- | --- | --- |
+| `eval/eliciting-requirements/scripts/run-opencode.sh` | Executable | Requires `opencode --version` 2.x; rejects a missing binary and 1.x; invokes `opencode run --standalone --model … --format json --auto` from the case workspace |
+| `eval/eliciting-requirements/scripts/run-opencode_test.sh` | Test | Mocks 1.18.30, 2.0.28, 3.0.0, a noisy version stream, a missing binary, and an unparseable version; verifies CLI flags, bwrap sandbox argv, and fallback |
+| `eval/eliciting-requirements/{eval,eval-regression}.yaml` | Config | Call the wrapper; they do not pin a binary |
+| This binding and the adapter contract | Spec | Designed against OpenCode 2.0.28; 1.18.30 notes are historical |
+| `docs/architecture.md` strawman, overview, components, UX | Spec | Name OpenCode as the first harness; not install paths |
+| `eval/eliciting-requirements/baselines/v1/` and `/eval-run --run-id v2` | Eval | Baseline and run identifiers, not OpenCode versions |
+| Binding files under `.opencode/` | Install (issue #77) | Project-scope v2 layout; no repository-managed installer yet |
+
+There is no CI job that installs OpenCode. A setup or test that consumes
+an external binary must run the wrapper (or the same version check)
+before use. Install v2 with `npm i -g @opencode/cli` or another v2
+installer from the [OpenCode repository](https://github.com/anomalyco/opencode).
 
 ---
 
@@ -278,19 +307,25 @@ record ([Traces](adapter-contract.md#traces)).
 
 `.opencode/plugins/protobot-guard.js` connects OpenCode to the shared
 [guard](adapter-contract.md#the-guard) (H8). OpenCode has no
-`PreToolUse` command hook, so the shim does the translation:
+`PreToolUse` command hook, so the shim does the translation. OpenCode
+v2 loads a local plugin as a default export with an `id` and a `setup`
+(or `effect`) function; a v1 `export const Plugin = async (ctx) =>
+({ "tool.execute.before": … })` module is not a valid v2 plugin.
 
-1. **Tracks the role.** OpenCode's `tool.execute.before` hook does not
-   name the agent, but `chat.params` does. The shim records the agent of
-   each session: `drafting-table` is the Drafting Table role, and every
-   other agent, and a session the shim has not seen yet, is `other`.
+1. **Reads the role from the hook event.** OpenCode v2's
+   `tool.execute.before` event names `agent`, `tool`, `sessionID`,
+   `messageID`, `id`, and `input`. `drafting-table` is the Drafting
+   Table role; every other agent is `other`. Historically, OpenCode
+   1.18.30 did not put the agent on this hook, and the shim used
+   `chat.params` instead; that is not the v2 contract.
 2. **Builds the guard input.** For each tool call it writes the
    `PreToolUse` JSON — `hook_event_name`, `session_id`, `cwd`,
    `tool_name`, and `tool_input` from the call's arguments — and runs
    `drafting-table-guard --harness opencode --role <role>`.
-3. **Blocks on refusal.** On any non-zero status it throws an error
-   whose message is the guard's line. OpenCode returns that message to
-   the model as the tool result and keeps it in the session record.
+3. **Blocks on refusal.** On any non-zero status it fails the hook with
+   a tool error whose message is the guard's line. OpenCode v2 rejects
+   the call before the tool runs and returns that message to the model
+   as the tool result, and keeps it in the session record.
 
 The shim holds no rule, reads no project file, and does nothing when a
 session is idle or ends (H5).
@@ -336,8 +371,8 @@ ships a built-in skill, and a user can have skills of their own.
 
 OpenCode lists skills for the model in the system prompt, in an
 `<available_skills>` block, and the `skill` tool loads one by name. The
-agent's `skill` rule decides both. Headless runs on 1.18.30, on
-2026-09-16, with a stub model that recorded every request, showed:
+agent's `skill` rule decides both. Headless runs on 1.18.30 (historical),
+on 2026-09-16, with a stub model that recorded every request, showed:
 
 | Agent's `skill` rule | Skill in `<available_skills>` | The model calls the skill |
 | --- | --- | --- |
@@ -355,8 +390,7 @@ binding cannot know in advance is hidden too.
 | --- | --- |
 | `/drafting-table [intent]` in a running session | The normal route. The command prompt runs on the `drafting-table` agent. |
 | Selecting `drafting-table` with Tab | The same agent without the start prompt; its first turn loads the session skill |
-| `opencode --agent drafting-table` | A new TUI session on the agent |
-| `opencode run --agent drafting-table --command drafting-table` | A headless session; the fixture uses it |
+| `opencode run --standalone --agent drafting-table --format json "/drafting-table"` | A headless session; the fixture uses it. The message is the `/drafting-table` command; v2 `run` has no `--command` flag. `--standalone` uses a private server instead of the v2 background service. |
 
 Later turns must also run on `drafting-table`. A turn on another agent
 has no governed tools, and the guard refuses them.
@@ -365,10 +399,11 @@ has no governed tools, and the guard refuses them.
 
 `eliciting-requirements` loads through the `skill` tool and reads its
 `references/` through `read`. Its evaluation wrapper under
-`eval/eliciting-requirements/` runs OpenCode in a per-case workspace
+`eval/eliciting-requirements/` runs OpenCode v2 in a per-case workspace
 with its own `opencode.json` and invokes the skill as
 `/eliciting-requirements`, so the skill needs no binding file, and the
-entry point's name must differ from every skill name.
+entry point's name must differ from every skill name. The wrapper
+rejects OpenCode 1.x before it writes that config.
 
 ---
 
@@ -377,12 +412,12 @@ entry point's name must differ from every skill name.
 | # | Obligation | OpenCode binding | Status |
 | --- | --- | --- | --- |
 | H1 | Discover Toolkit skills from `.agents/skills/` | Native discovery | Observed (behavior 1); the fixture has not run |
-| H2 | The `ears-manager` CLI and the `wms` and `scm` tools for the role | `ears-manager *` in the bash rules; the `wms` and `scm` entries and named normalized tool rules | Designed; pattern matching observed (behavior 5), the `wms` and `scm` servers not yet. The `scm` server serves MCP revision 2026-07-28 and the legacy 2025-11-25 ([MCP protocol](../source-control-manager.md#mcp-protocol)); the fixture records which one OpenCode 1.18.30 negotiates |
+| H2 | The `ears-manager` CLI and the `wms` and `scm` tools for the role | `ears-manager *` in the bash rules; the `wms` and `scm` entries and named normalized tool rules | Designed; pattern matching observed on 1.18.30 (behavior 5), the `wms` and `scm` servers not yet. The `scm` server serves MCP revision 2026-07-28 and the legacy 2025-11-25 ([MCP protocol](../source-control-manager.md#mcp-protocol)); the fixture records which one OpenCode v2 negotiates |
 | H3 | `drafting-table` entry point | The command and the agent | Designed; `--agent` observed in the stub runs, the command file not yet |
 | H4 | Resume on every entry, continued session, and compaction | Command prompt and session skill; `--continue` and `--session` continue a session | Designed |
 | H5 | Nothing on idle or exit | The shim registers no idle or exit hook | Designed |
-| H6 | Replayable session record | OpenCode's session record and `opencode export`; the resolved rules come from `opencode debug agent` | Observed for `opencode export` (behavior 8) |
-| H7 | Headless replay with no permission prompt | `opencode run --format json`, a replay provider, no `ask` rules | Observed for the replay provider and the `ask` rejection (behaviors 6, 9); the fixture has not run |
+| H6 | Replayable session record | OpenCode's session record and `opencode session export`; the resolved rules come from `opencode debug agents` | Observed on 1.18.30 for `opencode export` (behavior 8); v2 command is `opencode session export` |
+| H7 | Headless replay with no permission prompt | `opencode run --standalone --format json`, a replay provider, no `ask` rules | Observed for the replay provider and the `ask` rejection (behaviors 6, 9); the fixture has not run |
 | H8 | Invoke the guard on each tool call and enforce its decision | The shim | Active-hook refusal is observed (behavior 7); if the plugin is absent or no hook is registered, allowed `ears-manager` commands bypass guard-only shell restrictions, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (recorded gap); `"*": deny` still refuses `git` and `gh` |
 | H9 | Hide file-writing, subagent, and web tools | `"*": deny` | Observed (behavior 3) |
 | H10 | Toolkit skills only | `skill` rule with `"*": deny` first; other skills are hidden from the model's list and refused | Observed (behavior 2) |
@@ -393,7 +428,8 @@ entry point's name must differ from every skill name.
 "Designed" means the mechanism is documented and the fixture has not
 run. "Observed" means a stub run on 1.18.30 showed it, and the number
 points at [Observed OpenCode behaviors](#observed-opencode-behaviors).
-Nothing else is marked met; issue #77 runs the fixture.
+Those observations are historical until #77 re-runs them on v2. Nothing
+else is marked met; issue #77 runs the fixture on OpenCode v2.
 
 What the OpenCode layer stops on its normal native and active-guard
 paths, by route. The plugin-unavailable exception above applies to any
@@ -418,8 +454,10 @@ see [What the harness layer stops][layer-stops].
 
 ## Observed OpenCode behaviors
 
-The binding relies on these behaviors, each observed on OpenCode
-1.18.30:
+The binding relies on these behaviors. Items 1 to 9 were observed on
+OpenCode 1.18.30 and are historical until the fixture re-runs them on
+v2. Issue #272 confirmed the v2 CLI, config, and plugin surface below
+against OpenCode 2.0.28 source; it did not re-run the stub model.
 
 1. Skills are discovered from the locations in [Discovery](#discovery),
    and a name found twice is listed once.
@@ -437,16 +475,34 @@ The binding relies on these behaviors, each observed on OpenCode
 6. In `opencode run`, a rule that resolves to `ask` is rejected and the
    run ends.
 7. An error thrown in the `tool.execute.before` plugin hook blocks the
-   call, and its text reaches the model and the session record. The
-   `chat.params` hook carries the agent name.
-8. `opencode export` writes the session record as JSON with the agent,
+   call, and its text reaches the model and the session record. On
+   1.18.30 the `chat.params` hook carried the agent name. OpenCode v2
+   puts `agent` on the `tool.execute.before` event, so the shim does
+   not use `chat.params`.
+8. Session export writes the session record as JSON with the agent,
    the model and provider, the OpenCode version, and every tool call.
-   `opencode export --sanitize` redacts message text, tool arguments,
-   and tool results, and keeps tool names, statuses, and error texts.
+   `--sanitize` redacts message text, tool arguments, and tool results,
+   and keeps tool names, statuses, and error texts. On 1.18.30 the
+   command was `opencode export`; on v2 it is `opencode session export`.
 9. A custom OpenAI-compatible provider can serve recorded model turns
    to `opencode run`.
 
-Issue #77 pins the OpenCode version it tests. An upgrade runs the
+**v2 CLI and plugin surface**, confirmed from OpenCode 2.0.28 source
+and documentation (not from a stub-model run):
+
+- `opencode run` accepts `--agent`, `--model`, `--format json`,
+  `--auto`, `--continue`, `--session`, `--standalone`, and a message;
+  it has no `--dir` and no `--command`.
+- `opencode debug` exposes `agents`, `config`, and `paths`. It does not
+  expose `skill` or a singular `agent` command.
+- `opencode session export` accepts `--sanitize`.
+- A local plugin is a default export with `id` and `setup` (or
+  `effect`). `tool.execute.before` may fail and reject the call before
+  the tool runs; the event includes `agent`.
+- `share: "disabled"`, `permission` object syntax, local `mcp` servers,
+  and skill discovery from `.agents/skills/` remain valid.
+
+Issue #77 pins the OpenCode v2 version it tests. An upgrade runs the
 fixture before it is used. A behavior that changes is fixed in this
 binding, never in a Toolkit or adapter-core file.
 
@@ -457,13 +513,13 @@ binding, never in a Toolkit or adapter-core file.
 The [fixture session](adapter-contract.md#fixture-session) needs these
 harness commands. For OpenCode:
 
-| Fixture need | OpenCode |
+| Fixture need | OpenCode v2 |
 | --- | --- |
-| List discovered skills (step 1) | `opencode debug skill` |
-| Headless turn in the role (steps 2 to 14) | `opencode run --agent drafting-table --command drafting-table --format json`; add `--continue` or `--session <id>` to continue |
-| Headless turn outside the role (steps 2, 7, 9) | `opencode run --agent build --format json` |
-| Resolved native rules | `opencode debug agent drafting-table` and `opencode debug config` |
-| Session export (step 15) | `opencode export <session>`, with and without `--sanitize` |
+| List discovered skills (step 1) | Open gap until #77; v2 dropped `opencode debug skill` and has no command to list discovered skills before a session. The `<available_skills>` system prompt block verified at the replay endpoint is a later binding check (steps 2 and 4), not a substitute for step 1 |
+| Headless turn in the role (steps 2 to 14) | `opencode run --standalone --agent drafting-table --format json "/drafting-table"`; add `--continue` or `--session <id>` to continue |
+| Headless turn outside the role (steps 2, 7, 9) | `opencode run --standalone --agent build --format json` with a message |
+| Resolved native rules | `opencode debug agents` and `opencode debug config` |
+| Session export (step 15) | `opencode session export <session>`, with and without `--sanitize` |
 
 **Replayed model.** A local OpenAI-compatible endpoint returns the
 recorded model turns in order. It is registered as a custom provider:
@@ -491,8 +547,8 @@ clients, and shell.
 **Binding checks** added to the harness-neutral ones:
 
 - `opencode debug config` shows `share` as `disabled`.
-- `opencode debug agent drafting-table` shows no `ask` rule from the
-  agent file, and its `skill` patterns equal the manifest's
+- `opencode debug agents` lists `drafting-table` with no `ask` rule from
+  the agent file, and its `skill` patterns equal the manifest's
   `toolkit_skills`.
 - The replay endpoint records each request. In a turn in the role, the
   `<available_skills>` block of the system prompt names exactly the
