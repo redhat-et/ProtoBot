@@ -16,6 +16,33 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
 - Fetch the PR with `gh pr view` and `gh pr diff`. Record the head SHA, the
   base branch, and the merge base. Every line number in the review refers to
   the head SHA.
+- Check CI status on the PR head with `gh pr checks`. Failing CI checks,
+  including `Specification store check`, belong in the review verdict with
+  the blocking comments or as `chore`. Do not treat pending CI checks as
+  passing.
+- Before conducting detailed specification analysis, follow a single trusted
+  freshness sequence: inspect the PR diff for `repository.canonical_remote` or
+  `repository.default_branch` changes before any fetch. If the PR diffs
+  `repository.canonical_remote` or `repository.default_branch`, treat it as a
+  hand-edit finding and do not run `repo_state` on the PR-head tree. SCM
+  `repo_state` reads `.protobot/project.yaml` and is safe only when those two
+  fields are unchanged versus the base branch. Make the CI sequence the only
+  allowed freshness sync: check out (or worktree) the recorded PR head, then
+  `git checkout --detach HEAD`, then fetch `repository.default_branch` from the
+  canonical remote using the pinned command in
+  `.github/workflows/ci-workflow.yaml`
+  (`git fetch --no-tags https://github.com/redhat-et/ProtoBot.git refs/heads/main`),
+  then `git update-ref refs/heads/main FETCH_HEAD`, then run
+  `ears-manager check`. Do not present detach as an alternative to checking out
+  the PR head, and do not treat a `check` that ran against any other worktree as
+  a freshness result. Do not treat the GitHub PR base SHA, the merge-base, a
+  fast-forward of a local `main`, or an unsynchronized local default-branch ref
+  as the freshness target. Verify that it emits none of `BASE_NOT_ON_DEFAULT`,
+  `DEFAULT_MOVED`, or `BASE_COMMIT_STALE`. Any of `BASE_NOT_ON_DEFAULT`,
+  `DEFAULT_MOVED`, or `BASE_COMMIT_STALE` emitted by `ears-manager check` is a
+  blocking finding. Do not treat a `check` pass on the base branch as evidence.
+  A local `ears-manager check` pass is not evidence of freshness unless the
+  local default branch ref is synchronized with the canonical remote.
 - Read the full diff. Then read every file the diff cites or depends on. For
   design documents, read the sibling documents end to end. Contradictions
   live in the parts that nobody cites.
@@ -56,6 +83,31 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
     in `AGENTS.md` identifies staleness in a registered specification artifact,
     raise a staleness finding that prescribes `ears-manager artifact put`, not
     an edit by hand.
+- When a PR modifies `.protobot/project.yaml`, inspect the diff for a hand
+  edit to `repository.canonical_remote` or `artifacts[]` metadata
+  (`artifacts[].owner`, `artifacts[].validator`, and `artifacts[].kind`). Rule 5
+  of "Rules for creating or modifying specification documents" in `AGENTS.md`
+  forbids a hand edit to `.protobot/project.yaml`. Diffs to `artifacts[]`
+  metadata (`artifacts[].owner`, `artifacts[].validator`, and
+  `artifacts[].kind`) in `.protobot/project.yaml` are hand-edit findings unless
+  the proposed-change-set test passes (for each modified artifact entry,
+  resolving `artifacts[].id` in `.protobot/project.yaml`, require a change-set
+  manifest under `.protobot/change-sets/` (count a change-set only when
+  working-tree `ears-manager change-set show` (no `--at`), after the PR head is
+  checked out, reports `proposed` iff the manifest path is absent from the
+  default-branch tree; if `show --at <pr-head>` is used, require path-absence
+  in addition to `proposed`; do not treat `--at` status alone as evidence of
+  `artifact put`; never treat a path that already exists on the default
+  branch, including a modified `cs-00001.yaml`, as evidence of `artifact put`)
+  to contain an `artifact_operations[]` entry whose `artifact_id` equals that
+  registry id) and the field diff is limited to changes `ears-manager artifact
+  put` can write (`artifacts[].owner` only on `action: add`; `artifacts[].kind`
+  and `artifacts[].validator` on `action: add` and `action: revise`; any
+  `artifacts[].owner` change on an existing id is always a hand edit). A hand
+  edit to `repository.canonical_remote` in `.protobot/project.yaml` is a
+  finding. `ears-manager check` exiting 0 is not evidence that
+  `repository.canonical_remote` or `artifacts[]` metadata (`artifacts[].owner`,
+  `artifacts[].validator`, and `artifacts[].kind`) were not edited by hand.
 - Write the review to `review-<PR number>.md` in the repository root. Do not
   commit it, do not post it, do not push.
 
@@ -63,7 +115,9 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
 
 1. Header: PR link, head and base SHAs, author, review date, files touched.
 2. Verdict: approve or request changes, then the blocking comments as a
-   list, one line each: ID and title. Then any `chore`, then praise, then
+   list, one line each: ID and title. Failing CI checks, including
+   `Specification store check`, belong in the review verdict with the
+   blocking comments or as `chore`. Then any `chore`, then praise, then
    any `thought`. Nothing else.
 3. Comments, grouped in this order: blocking; non-blocking issues and
    suggestions; todos, nitpicks, and questions; other files. Inside a group,
@@ -113,9 +167,11 @@ The Drafting Table agent creates and refines backlog requests
 ## Rules for the content
 
 - Post only what the author can act on. A check that found nothing (the
-  branch is behind `main`, the merge is clean, no stale wording is left)
-  goes in the "What was checked" section of the local document, never in
-  the posted review or its comments.
+  branch is up to date with `main`, the merge is clean, no stale wording is
+  left) goes in the "What was checked" section of the local document, never
+  in the posted review or its comments. `BASE_NOT_ON_DEFAULT`,
+  `DEFAULT_MOVED`, or `BASE_COMMIT_STALE` emitted by `ears-manager check` is
+  a blocking finding, not a check that found nothing.
 - Problem first, then evidence, then fix. Say what is wrong before why.
 - Every fix must make the design or the code simpler or more complete. Drop
   a proposal that adds more than it removes.
