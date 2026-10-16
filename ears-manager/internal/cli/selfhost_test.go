@@ -291,7 +291,7 @@ func TestSelfHostingApprovedChangeSetIgnoresStaleBase(t *testing.T) {
 }
 
 func TestSelfHostingHandEditedRegisteredArtifactFailsCheckWithoutOperation(t *testing.T) {
-	root := newSelfHostingCheckout(t)
+	root := newSelfHostingSeedProposedCheckout(t)
 	t.Chdir(root)
 	rewriteRegisteredArtifact(t, root, "architecture", "# Hand-edited Architecture\n")
 
@@ -321,7 +321,7 @@ func TestSelfHostingHandEditedRegisteredArtifactFailsCheckWithoutOperation(t *te
 }
 
 func TestSelfHostingArtifactPutPassesCheck(t *testing.T) {
-	root := newSelfHostingCheckout(t)
+	root := newSelfHostingSeedProposedCheckout(t)
 	t.Chdir(root)
 	content := readTestFile(t, root, "docs/architecture.md") + "\nRevised through artifact put.\n"
 	code, stdout, stderr := runCLI([]byte(content), "--output", "json", "artifact", "put",
@@ -338,7 +338,7 @@ func TestSelfHostingArtifactPutPassesCheck(t *testing.T) {
 }
 
 func TestSelfHostingProposedArtifactOperationPassesCheck(t *testing.T) {
-	root := newSelfHostingCheckout(t)
+	root := newSelfHostingSeedProposedCheckout(t)
 	t.Chdir(root)
 	rewriteRegisteredArtifact(t, root, "architecture", "# Revised Architecture\n")
 	addProposedArtifactOperation(t, root, "CS-00001", "revise", "architecture")
@@ -350,7 +350,7 @@ func TestSelfHostingProposedArtifactOperationPassesCheck(t *testing.T) {
 }
 
 func TestSelfHostingRegisteredArtifactPathChangeRequiresOperation(t *testing.T) {
-	root := newSelfHostingCheckout(t)
+	root := newSelfHostingSeedProposedCheckout(t)
 	t.Chdir(root)
 	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
 	mergeIntoMain(t, root, branch)
@@ -639,7 +639,7 @@ func TestSelfHostingApprovedRegistryMatchesDefaultBranchWithoutOperations(t *tes
 }
 
 func TestSelfHostingArtifactUnregistrationFailsCheck(t *testing.T) {
-	root := newSelfHostingCheckout(t)
+	root := newSelfHostingSeedProposedCheckout(t)
 	t.Chdir(root)
 	branch := gitOutput(t, root, "symbolic-ref", "--short", "HEAD")
 	mergeIntoMain(t, root, branch)
@@ -684,7 +684,7 @@ func TestSelfHostingMetadataOnlyArtifactRegistryEditDoesNotRequireOperation(t *t
 }
 
 func TestSelfHostingNewArtifactPathRequiresOperation(t *testing.T) {
-	root := newSelfHostingCheckout(t)
+	root := newSelfHostingSeedProposedCheckout(t)
 	t.Chdir(root)
 	writeTestFile(t, root, "docs/extra.md", "# Extra\n")
 	digest, err := specvalidation.CanonicalTextDigest([]byte("# Extra\n"))
@@ -1412,7 +1412,7 @@ func selfHostingSourceWithExtraChangeSet(t *testing.T) (string, string) {
 		Text: "When an engineer runs the self-hosting test suite, the CLI shall support multiple proposed change sets.",
 		AppliesTo: records.Applicability{
 			Interfaces: []string{},
-			Scopes:     []string{"ears-manager"},
+			Scopes:     []string{"fixture-test"},
 		},
 		Verification: records.Verification{
 			Mode: "isolated-interface",
@@ -1497,7 +1497,7 @@ func selfHostingSourceWithApprovedAndProposedChangeSets(t *testing.T) (string, [
 		Text: "When an engineer inspects specification status, the CLI shall report approved change sets.",
 		AppliesTo: records.Applicability{
 			Interfaces: []string{},
-			Scopes:     []string{"ears-manager"},
+			Scopes:     []string{"fixture-test"},
 		},
 		Verification: records.Verification{
 			Mode: "isolated-interface",
@@ -1560,7 +1560,7 @@ func selfHostingSourceWithApprovedAndProposedChangeSets(t *testing.T) (string, [
 		Text: "When an engineer adds a proposed change set, the CLI shall support multiple proposed change sets.",
 		AppliesTo: records.Applicability{
 			Interfaces: []string{},
-			Scopes:     []string{"ears-manager"},
+			Scopes:     []string{"fixture-test"},
 		},
 		Verification: records.Verification{
 			Mode: "isolated-interface",

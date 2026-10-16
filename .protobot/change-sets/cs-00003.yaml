@@ -1,6 +1,6 @@
 # managed by ears-manager; do not edit by hand
 id: CS-00003
-base_commit: 5d069e62093ecf555e70110190f7b793e73f6fec
+base_commit: 9cb741dc2d20df1cf6cdabcf941ccb456ff2d660
 intent: Require a proposed artifact operation for registered path or content changes
 operations: []
 artifact_operations:
@@ -15,5 +15,5 @@ impact_assessment:
       disposition: applicable
       rationale: This change extends ears-manager check to require a proposed change-set artifact operation when a registered artifact path or canonical content differs from the default-branch tree.
       origin: mechanical
-impact_assessment_base_commit: 5d069e62093ecf555e70110190f7b793e73f6fec
+impact_assessment_base_commit: 9cb741dc2d20df1cf6cdabcf941ccb456ff2d660
 created: "2026-10-14T20:30:00Z"
