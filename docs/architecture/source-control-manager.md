@@ -810,9 +810,11 @@ requires a retry, and `behind` or `diverged` requires user resolution
    nothing is staged, with two exceptions that are returned as
    warnings: status `5` alone, an impact assessment that is incomplete
    or stale, so a draft can be committed before impact review ends, and
-   a digest mismatch of a registered artifact outside the file set,
-   which the commit leaves out. CI still gates the merge on the impact
-   assessment (#34).
+   `artifact.digest_mismatch` for a registered artifact outside the file
+   set, which the commit leaves out. An `artifact.operation_missing` or
+   `artifact.unregistered` diagnostic is not a warning, including when
+   the affected artifact is outside the file set. CI still gates the
+   merge on the impact assessment (#34).
    - With status `4` or `5`, a digest mismatch of an artifact of the
      file set, or of any structured store, makes the refusal
      `SPEC_DIGEST_MISMATCH`, because #34 compares every store, not only
@@ -840,10 +842,12 @@ requires a retry, and `behind` or `diverged` requires user resolution
      that path out. The validator of #108 added both codes, as #30
      allows, and #30 gives both status `4`
      ([`check`](ears-manager-cli.md#check)).
-   - Any other status `4`, apart from that warning, a specification
-     that is not valid, is `SPEC_CHECK_FAILED`, with the envelope. A
-     `.protobot/` file that carries a credential, which #34 makes a
-     `check` failure, is refused here, before it can be pushed.
+   - Any other status `4`, apart from that digest warning, is a
+     specification failure reported as `SPEC_CHECK_FAILED`, with the
+     envelope. This includes `artifact.operation_missing` and
+     `artifact.unregistered`. A `.protobot/` file that carries a
+     credential, which #34 makes a `check` failure, is refused here,
+     before it can be pushed.
    - Status `2`, `3`, `6`, or `70` is `SPEC_TOOL_FAILED`, as for every
      other `ears-manager` read.
 4. **Render the message.** The subject is `spec(CS-<nnnnn>):
@@ -1607,7 +1611,7 @@ write happened returns `mutation: unknown` and `retry: reconcile`.
 | `UNCOMMITTED_CHANGES` | `branch_init`, `branch_resume`, `commit`, `publish`, `refresh` | Uncommitted changes that the operation would carry or misreport, or, for `commit`, a `projection.yaml` that mixes the change set's entries with a policy edit, or a merge, cherry-pick, or revert in progress; the details name them | — | `user` |
 | `INIT_REMOTE_MISMATCH` | `commit` | On the initialization branch, `repository.canonical_remote` is not the fetch URL of the upstream remote of the default branch; the details name the discard of the uncommitted `.protobot/` and a new `project init` | — | `user` |
 | `SPEC_DIGEST_MISMATCH` | `commit` | `check` fails with status `4` or `5` and reports `artifact.digest_mismatch` for an artifact of the file set, by its `record_id`, or `project.store_digest_mismatch` for any structured store; the details name each artifact or store path, the two routes forward, and, in `untracked`, the entries of a store that the discard leaves | Registered artifact or structured-store digest mismatch | `user` |
-| `SPEC_CHECK_FAILED` | `commit` | `check` failed with status `4`, and without a digest-mismatch diagnostic that makes it `SPEC_DIGEST_MISMATCH` | `ears-manager check` failed; registered path or store directory not classified `shared` in the projection manifest | `revise` |
+| `SPEC_CHECK_FAILED` | `commit` | `check` failed with status `4`, and without a digest-mismatch diagnostic that makes it `SPEC_DIGEST_MISMATCH` | `ears-manager check` failed; this includes `artifact.operation_missing`, `artifact.unregistered`, or a registered path or store directory not classified `shared` in the projection manifest | `revise` |
 | `PATH_NOT_STAGEABLE` | `commit` | A path of the change set is a directory, breaks #34's path rules, is one that the guard keeps from `artifact put`, is `.gitattributes` or `.gitmodules`, or replaces a tracked directory or lies below a tracked file | — | `never` |
 | `STAGED_CONTENT_CHANGED` | `commit` | A Git filter, or a write since the digest check, changed a staged file, so the commit would not hold what `check` saw | — | `user` |
 | `UNSAFE_TEXT` | `commit`, `publish`, `refresh` | The intent, or the `refresh` merge message, holds text that GitHub acts on; or, for `publish`, the title is empty or longer than 256 characters, or the body is longer than 65,536. The details name the field; for an empty or too long text, the reason; and for the merge message, the remote and the branch, whose names put the text there | — | `revise`, or `user` for the `refresh` merge message |

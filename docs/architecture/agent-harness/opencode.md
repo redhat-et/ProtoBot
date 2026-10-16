@@ -408,11 +408,20 @@ row that depends on the guard:
 | Tool of another MCP server | Not offered | The user's own configuration |
 | Subagent | `task` not offered | Not applicable |
 
-Later integrity and CI layers catch unauthorized persistent edits to
-registered paths; they do not enforce shell grammar, argument values,
-variable expansion, or file-source provenance. In particular, they do
-not make an allowed shell command safe when the plugin is unavailable;
-see [What the harness layer stops][layer-stops].
+Later integrity and CI layers catch registered-artifact digest mismatches
+and path/canonical-content deltas without a matching proposed operation;
+they also reject unregistration. They do not enforce shell grammar, argument
+values, variable expansion, or file-source provenance. A coordinated manual
+edit to an artifact and its matching operation can pass, so these checks do
+not prove that `ears-manager artifact put` was invoked. Manual edits to
+`repository.default_branch`, or to `repository.canonical_remote` when the
+remote-tracking fallback is used, can retarget the baseline selected from the
+working-tree project configuration. The resolver uses the local default ref
+first, falls back to a canonical remote-tracking ref, and does not fetch.
+Rule 5 in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`. Rule 6
+in `AGENTS.md` requires reviewers to inspect it and flag hand edits. In
+particular, later checks do not make an allowed shell command safe when the
+plugin is unavailable; see [What the harness layer stops][layer-stops].
 
 ---
 

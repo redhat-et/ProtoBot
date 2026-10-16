@@ -169,8 +169,13 @@ the harness guard enforces this on the calls it checks, and a call
 without a guard decision is limited as
 [What the harness layer stops](agent-harness/adapter-contract.md#what-the-harness-layer-stops)
 records.
-`ears-manager check` validates well-formedness and proposed `base_commit`
-freshness as a CI gate before merge.
+`ears-manager check` validates well-formedness, registered artifact digests,
+artifact path/canonical-content deltas against `artifact_operations[]` in
+proposed change sets, continued registration of default-branch artifacts, and
+proposed `base_commit` freshness as a CI gate before merge. A passing check
+confirms manifest association, not that `ears-manager artifact put` was
+invoked; `.protobot/project.yaml` remains an exclusively governed file under
+Rule 5 in `AGENTS.md`.
 
 ### WMS lifecycle state
 
@@ -665,7 +670,9 @@ These constraints are enforced structurally:
   mode, the user's local Git token is used without OAuth 2.1 infrastructure
   ([`architecture.md`](../architecture.md#environmental-constraints)).
 - **Integrity gates:** Enforced by branch protection on `main`,
-  `ears-manager check` in CI, and path-based ownership.
+  `ears-manager check` in CI (including `artifact.digest_mismatch`,
+  `artifact.operation_missing`, and `artifact.unregistered`), and path-based
+  ownership.
 
 ---
 

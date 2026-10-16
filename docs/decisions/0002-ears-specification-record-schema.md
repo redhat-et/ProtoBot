@@ -432,9 +432,33 @@ An artifact may be created or revised while its change set is proposed.
 `artifact put` writes the canonical content, recomputes the digest, and
 records an artifact operation. Once the change set is approved and merged,
 the registered artifact state is immutable; a later change requires a new
-change set. Direct edits do not update the registry and are rejected by
-digest validation. The `owner` field remains the responsible authority
-across ordinary revisions; it is not a last-mutator or audit field.
+change set. `ears-manager check` compares registered artifact paths and
+canonical content with the default-branch tree. A path or canonical-content
+delta for an artifact registered on the default branch requires an
+`artifact_operations[]` entry with the same `artifact_id` in any proposed
+change set; approved operations do not count. Removing an artifact registered
+on the default branch is rejected. A new registry entry for a file already
+present at the same path with identical canonical text is not by itself a
+delta. Metadata-only changes to `kind`, `owner`, or `validator` are outside
+this operation check; `path` changes and unregistration are not.
+`artifact.digest_mismatch` remains the separate failure for content that does
+not match its registry digest; a matching digest without a proposed operation
+is reported as `artifact.operation_missing`.
+
+This check establishes that an artifact delta is represented in a proposed
+manifest. It does not prove that `ears-manager artifact put` was invoked or
+prevent coordinated manual edits to the artifact and manifest. `artifact put`
+remains the governed write path. The baseline uses the existing default-branch
+resolver, whose repository settings come from the working-tree
+`.protobot/project.yaml`: it uses the local `repository.default_branch` ref
+when it resolves, otherwise a resolved remote-tracking ref for
+`repository.canonical_remote`; `ears-manager` never fetches. A hand edit to
+`repository.default_branch`, or to `repository.canonical_remote` when the
+remote-tracking fallback is used, can retarget the baseline. This is outside
+the operation-record check. Rule 5 in `AGENTS.md` prohibits hand-editing
+`.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag
+hand edits. The `owner` field remains the responsible authority across
+ordinary revisions; it is not a last-mutator or audit field.
 
 Structured requirement, interface, and change-set stores are configured in
 the `stores` block of `.protobot/project.yaml` and are not artifact-registry
