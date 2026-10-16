@@ -8,3 +8,4 @@ _test_lint_*
 tests/lint/fixtures/linttest_*.go
 wms/linttest_*.go
 ears-manager/linttest_*.go
+__pycache__/

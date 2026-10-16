@@ -331,6 +331,11 @@ pass, so the shim exits 0 or 2 and nothing else: a missing guard is a
 refusal, not the shell's exit 127. The shim holds no rule, reads no
 file, and registers no `Stop` or `SessionEnd` hook (H5).
 
+The current Go guard implements only `--harness opencode`; this shim's
+`--harness claude-code` invocation is refused as unsupported. This
+section describes the designed Claude Code binding, not a supported
+guard runtime for the current executable.
+
 ---
 
 ## Skill discovery and invocation
@@ -424,20 +429,34 @@ run. Nothing else is marked met.
 
 What the Claude Code layer stops, by route:
 
+The route table below is the designed Claude Code binding behavior. The
+current Go guard rejects this harness at input validation until a Claude
+Code vocabulary is implemented.
+
 | Write route to a guarded path | `drafting-table` agent | Every other session |
 | --- | --- | --- |
-| File tool under `.protobot/` | Tool not offered; also denied by the project rule | Denied by the project rule and the guard |
-| File tool on a registered path elsewhere | Tool not offered | Refused by the guard |
-| Shell writer, such as `sed -i` | Denied by `dontAsk` with no allow rule, and refused by the guard | Not stopped |
-| Output redirection in a shell command | Refused by the guard; a prefix rule cannot see it | Refused by the guard when the redirection target is written from the project root |
+| File tool under `.protobot/` project controls | Tool not offered; also denied by the project rule | Denied by the project rule and the guard |
+| File tool under Git metadata or reserved harness binding paths/files (`.agents/`, `.claude/`, `.codex/`, `.opencode/`, `.github/`, `opencode.json`, `AGENTS.md`, or `CLAUDE.md`) | Tool not offered | Refused by the guard when it returns a decision |
+| File tool under the selected adapter manifest path and its containing directory/`skills/` subtree | Tool not offered | Refused by the guard when it returns a decision, whether or not the selected manifest exists |
+| File tool under configured store paths read from `project.yaml` and resolved safely | Tool not offered | Refused by the guard when it returns a decision |
+| File tool on a registered path elsewhere, when known from successful project inspection | Tool not offered | Refused by the guard when it returns a decision |
+| Direct shell writer to an ordinary registered artifact from the project root or by absolute path, such as `sed -i`, `cp`, `tee`, `truncate`, `sort -o`/`--output`, `uniq input output`, or Git `diff`/`diff-tree`/`diff-index`/`diff-files`/`range-diff`/`show`/`log --output` | Denied by `dontAsk` with no allow rule, and refused by the role's exact shell grammar | Not generally stopped solely because the target is an ordinary registered file; a relative target after a working-directory change is refused as ambiguous |
+| Recognized direct shell writers to the `.protobot/` project-control namespace, Git metadata, reserved harness binding paths/files (`.agents/`, `.claude/`, `.codex/`, `.opencode/`, `.github/`, `opencode.json`, `AGENTS.md`, or `CLAUDE.md`), configured store paths read from `project.yaml` and resolved safely, or the selected adapter manifest path and its containing directory/`skills/` subtree, as detailed in [Rule 7](adapter-contract.md#guard-rules) | Denied by `dontAsk` with no allow rule, and refused by the role's exact shell grammar | Refused by the guard when its hook returns a decision. Rule 7 also checks move/removal and link-mode source operands, including existing symlink chains and destination-relative symbolic-link targets; a recognized directory-content `cp` (source `.` or ending in `/.`) is refused when its resolved destination directory is an ancestor of or equal to Git metadata, `.protobot/`, the selected manifest/`skills/`, `.agents/drafting-table.yaml`, `.agents/skills`, or safely resolved configured store paths; a plain directory copy such as `cp -r dir .` checks its mapped `destination/basename(source)` target instead. For `cp`, `mv`, and `install`, existing or trailing-slash directory destinations and `-t`/`--target-directory` check each source's mapped `destination/basename(source)` target. `cp --parents`, `rsync --relative`/`-R`, and `rsync --files-from` fail closed because they change destination mapping (`-R` is recursive for `cp` and relative for `rsync`; `--files-from` uses uninspected file-list entries to map output beneath the destination). `rsync --backup-dir`, `--partial-dir`, `--temp-dir`, and `--write-batch` fail closed because they can name write locations outside modeled destinations. `rsync --rsh`/`-e` and `--rsync-path` fail closed because they carry remote-side commands. `rsync --link-dest` fails closed because it can create a hard link from an alternate base into a mapped destination, allowing a later in-place update to change the base. `rsync --remove-source-files` fails closed because it deletes source operands, making the sources write locations. `ln` checks directory destinations, including trailing slash, and the implicit `basename(target)` destination for single-operand `ln target` and `ln -s target`. The writer inventory includes `mkdir` and `touch`. Recognized file writers fail closed when required operands are missing. Optional long values for `cp --context[=CTX]`, `cp --reflink[=WHEN]`, `mv --context[=CTX]`, and `install`/`mkdir --context[=CTX]` do not consume the next argument. The short `-Z` flag for `cp`, `install`, and `mkdir` also leaves the next argument as an operand; `install --preserve-context` and `rsync --delete-missing-args` are flags. Symlink-preserving analysis covers tree members for recursive `cp -r`/`-R`/`-a`/`--recursive` unless `-L`/`--dereference` is present without `-H` or an explicit symlink-preserving flag; `-H` dereferences command-line links but tree-member links remain covered; `mv` directory trees; `rsync -a`/`--archive`; or `rsync -r`/`--recursive` with `-l`/`--links`. Top-level source links are preserved for `cp -a`/`--archive`/`-d`/`-P`/`--no-dereference` and for recursive `cp` without `-H`/`-L`/`--dereference`; `mv` and `rsync -a`/`--archive`/`-l`/`--links` also preserve top-level links. `cp --preserve=links` preserves hard links only, not symlink operands. Tree walks do not follow symlinks, re-anchor relative symbolic-link text at the mapped destination, check absolute link text unchanged, and fail closed on inspection errors or more than 10,000 entries. For recursive `cp`, `-H` combined with `-L`/`--dereference` makes the guard scan tree-member links conservatively; if `-H`, `-L`, or `--dereference` is combined with an explicit symlink-preserving flag (`-a`, `-d`, `-P`, or `--no-dereference`), it also checks top-level source links. The targeted inventory is not exhaustive; a fail-open call has no general path-provenance control |
+| Output redirection in a shell command | Refused by the guard; a prefix rule cannot see it | Refused for the `.protobot/` project-control namespace, Git metadata, reserved harness binding paths/files, the selected adapter manifest path and its containing directory/`skills/` subtree, configured store paths read from `project.yaml` and resolved safely, and registered artifact paths known from successful project inspection; any shell command that contains both an output redirection and any working-directory change is refused, regardless of order; an uninspectable target is refused too |
+| Recognized opaque execution forms that could hide an indirect governed write, including inline or standard-input interpreters, command-string wrappers, Git aliases and metadata-writing Git commands, transport plumbing commands `git fetch-pack` and `git send-pack`, recipe/build/test runners, execution-changing `find` placeholders, `rg` preprocessor/pager forms except data-only `--paging=never` and `--paging never`, and Git `grep -O`. Rule 4 defines the exact targeted environment keys (including Git SSH/askpass and repository/index/object/template/ceiling overrides, shell-startup/loader assignments, ripgrep configuration, and imported `BASH_FUNC_*%%` assignments), the `xargs --help`/`--version` informational forms, and the `xargs` append/replacement rules. Git effect examples include unconditional `archive` (including `-o`, `--output`, and stdout forms), `bundle create`, unconditional `format-patch` (because `format.outputDirectory` can redirect output), `mailsplit`, `checkout-index`, `fast-import`, and `instaweb`; these are examples, not a complete Git command inventory. The guard does not refuse every environment assignment or every `xargs` invocation. | Denied by `dontAsk` with no allow rule, and refused by the role's exact shell grammar | Refused by the guard when its hook returns a decision; a hook failure can pass these forms through |
+| Some interpreter source-file invocations, such as `python helper.py`, renamed executables, or unrecognized shell writers/executors | Denied by `dontAsk` with no allow rule | Not generally stopped; an indirect `ears-manager` write has no later control |
 | Tool of another MCP server | Not loaded, because of `--strict-mcp-config` | The user's own configuration |
 | Subagent | `Agent` not offered | Not applicable |
 
 The shell rows that depend on the guard apply only when the hook returns
 a decision. If the hook fails open, native command-prefix permissions
-do not replace the guard's argument and shell-syntax checks; in
-particular, later checks cannot establish whether file-source bytes came
-from standard input or an external path. See the shared
+do not replace the guard's argument and shell-syntax checks; later checks
+compare registered artifact and configured-store digests only while the
+recorded digests remain intact and do not establish writer provenance for
+`.protobot/` control files, reserved harness paths, the selected manifest,
+or Git metadata. They also cannot establish whether file-source bytes came
+from standard input or an external path.
+See the shared
 [file-source exception](adapter-contract.md#file-source-arguments).
 
 ---

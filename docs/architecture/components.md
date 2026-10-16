@@ -285,7 +285,21 @@ capability during Dimensioning, but it is broader than ProtoBot and does not
 own ProtoBot storage, change sets, approval, or lifecycle behavior. The same
 repository path contains process skills such as `pull-request`, `rebase-pr`,
 and `review-pr`; those are maintenance tooling, not Toolkit domain content.
-The final cross-harness packaging boundary remains an open question.
+The Toolkit also packages `drafting-specifications` as the ProtoBot session
+protocol: it coordinates start/resume, review checkpoints, and the mapping from
+accepted elicitation candidates to governed operations. It is separate from
+`eliciting-requirements`, which remains host-independent, and from repository
+process skills, which are not Toolkit capabilities. The protocol names
+`ears-manager`, the WMS Adapter, and the Source Control Manager as distinct
+boundaries; it owns no persistent store and names no harness-specific tool or
+configuration. The same protocol is loaded by single-player and multi-player
+TUI bindings and the hosted Web runtime; each deployment retains its own
+session and credential-isolation boundary. The Toolkit holds no downstream
+credential or authoritative session state.
+
+The final cross-harness packaging boundary remains an open question: the
+`.agents/skills/` layout is shared by current bindings, while distribution to
+projects outside the ProtoBot repository and Toolkit versioning remain open.
 
 ### Design principles
 

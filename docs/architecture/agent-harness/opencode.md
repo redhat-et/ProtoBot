@@ -33,8 +33,14 @@ It adds no rule of its own. Where OpenCode forces a choice, this
 document states the choice and the obligation it serves. Every
 OpenCode behavior named here was observed on OpenCode 1.18.30 with a
 replayed model ([Observed OpenCode behaviors](#observed-opencode-behaviors)).
-The fixture has not run here yet. Issue #77 runs it, and turns each
-"designed" and "observed" status into "met" or into a recorded gap.
+The fixture ran in #77 against the pinned OpenCode 1.18.30 binary, with
+real skills, permissions, plugin, MCP clients, shell, `ears-manager`, the
+Source Control Manager, and the guard, plus recording WMS and `gh` stubs.
+The recorded fixture covers the baseline guard vectors. Guard unit tests
+cover expanded Rule 4 and Rule 7 cases, but not all are represented in the
+fixture; the statuses below record the fixture evidence and the gaps it left
+open. See
+[Running the fixture on OpenCode](#running-the-fixture-on-opencode).
 
 ---
 
@@ -72,7 +78,8 @@ needs the `external_directory` rule in
   "mcp": {
     "wms": {
       "type": "local",
-      "command": ["<WMS Adapter MCP server, named by #31>"]
+      "command": ["<WMS Adapter MCP server, named by #31>"],
+      "enabled": false
     },
     "scm": {
       "type": "local",
@@ -80,6 +87,7 @@ needs the `external_directory` rule in
     }
   },
   "permission": {
+    "apply_patch": "deny",
     "edit": {
       ".protobot/**": "deny"
     },
@@ -98,11 +106,17 @@ needs the `external_directory` rule in
   names the server. The `scm` server is the Drafting Table face of the
   [Source Control Manager](../source-control-manager.md), which runs
   every Git and Git host operation of the role. Neither entry holds a
-  credential. `ears-manager` needs no entry: it is a shell operation.
+  credential. The placeholder `wms` command stays disabled until #31
+  provides an executable server. `ears-manager` needs no entry: it is a
+  shell operation.
 - **`edit` is denied under `.protobot/` for every agent.** The `edit`
   rule covers every OpenCode file tool: `edit`, `write`, and the patch
-  tool. It is a static copy of the guard's guarded-path rule that holds
-  even when plugins do not load.
+  tool. It is the native `.protobot/` slice of guard rule 3 and holds
+  even when plugins do not load; the other protected-path checks remain
+  the guard's responsibility.
+- **`apply_patch` is denied globally**, so file patches reach the guard
+  only through direct hook fixtures; the native tool is not offered in
+  the resolved OpenCode tool set.
 - **The `wms` and `scm` tools are denied here and allowed only in the
   `drafting-table` agent**, a native copy of the MCP half of guard rule
   4. The `ears-manager` half has no native copy: the agent's `bash`
@@ -110,7 +124,8 @@ needs the `external_directory` rule in
   agent's named allows match the normalized names in the manifest; the
   guard independently enforces the same list.
 
-This file adds denies and nothing else;
+This file disables the unimplemented WMS placeholder and adds permission
+denials, but no allow rules;
 [How the rules combine](#how-the-rules-combine) explains why.
 
 ### The `drafting-table` agent
@@ -124,6 +139,7 @@ description: ProtoBot Drafting Table — Sketching and Dimensioning through gove
 mode: primary
 permission:
   "*": deny
+  apply_patch: deny
   read:
     "*": allow
     "*.env": deny
@@ -283,7 +299,12 @@ record ([Traces](adapter-contract.md#traces)).
 1. **Tracks the role.** OpenCode's `tool.execute.before` hook does not
    name the agent, but `chat.params` does. The shim records the agent of
    each session: `drafting-table` is the Drafting Table role, and every
-   other agent, and a session the shim has not seen yet, is `other`.
+   other agent is `other`. A tool call from a session the shim has not
+   seen yet is also treated as `other`, which fails closed for
+   `ears-manager` writes and governed tools but leaves rule 5's
+   credential-read refusals to the native deny list; that unbound-session
+   window is a recorded gap, because refusing every unbound call would
+   also refuse tool calls from sessions the shim cannot attribute.
 2. **Builds the guard input.** For each tool call it writes the
    `PreToolUse` JSON — `hook_event_name`, `session_id`, `cwd`,
    `tool_name`, and `tool_input` from the call's arguments — and runs
@@ -376,24 +397,25 @@ entry point's name must differ from every skill name.
 
 | # | Obligation | OpenCode binding | Status |
 | --- | --- | --- | --- |
-| H1 | Discover Toolkit skills from `.agents/skills/` | Native discovery | Observed (behavior 1); the fixture has not run |
-| H2 | The `ears-manager` CLI and the `wms` and `scm` tools for the role | `ears-manager *` in the bash rules; the `wms` and `scm` entries and named normalized tool rules | Designed; pattern matching observed (behavior 5), the `wms` and `scm` servers not yet. The `scm` server serves MCP revision 2026-07-28 and the legacy 2025-11-25 ([MCP protocol](../source-control-manager.md#mcp-protocol)); the fixture records which one OpenCode 1.18.30 negotiates |
-| H3 | `drafting-table` entry point | The command and the agent | Designed; `--agent` observed in the stub runs, the command file not yet |
-| H4 | Resume on every entry, continued session, and compaction | Command prompt and session skill; `--continue` and `--session` continue a session | Designed |
-| H5 | Nothing on idle or exit | The shim registers no idle or exit hook | Designed |
-| H6 | Replayable session record | OpenCode's session record and `opencode export`; the resolved rules come from `opencode debug agent` | Observed for `opencode export` (behavior 8) |
-| H7 | Headless replay with no permission prompt | `opencode run --format json`, a replay provider, no `ask` rules | Observed for the replay provider and the `ask` rejection (behaviors 6, 9); the fixture has not run |
-| H8 | Invoke the guard on each tool call and enforce its decision | The shim | Active-hook refusal is observed (behavior 7); if the plugin is absent or no hook is registered, allowed `ears-manager` commands bypass guard-only shell restrictions, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (recorded gap); `"*": deny` still refuses `git` and `gh` |
-| H9 | Hide file-writing, subagent, and web tools | `"*": deny` | Observed (behavior 3) |
-| H10 | Toolkit skills only | `skill` rule with `"*": deny` first; other skills are hidden from the model's list and refused | Observed (behavior 2) |
-| H11 | No credential in binding files; no session upload | Placeholders; `share: disabled` | Designed |
+| H1 | Discover Toolkit skills from `.agents/skills/` | Native discovery | Met; the fixture listed `drafting-specifications`, `eliciting-requirements`, and `review-pr` from a nested directory |
+| H2 | The `ears-manager` CLI and the `wms` and `scm` tools for the role | `ears-manager *` in the bash rules; the `wms` and `scm` entries and named normalized tool rules | Met; the fixture ran real `ears-manager` shell operations and `wms`/`scm` MCP tools through OpenCode's MCP clients. OpenCode 1.18.30 negotiated the legacy MCP revision 2025-11-25 with both servers |
+| H3 | `drafting-table` entry point | The command and the agent | Met; the fixture entered the role headlessly with `--agent drafting-table --command drafting-table` |
+| H4 | Resume on every entry, continued session, and compaction | Command prompt and session skill; `--continue` and `--session` continue a session | Met; fresh and continued sessions repeated the resume reads before any governed write |
+| H5 | Nothing on idle or exit | The shim registers no idle or exit hook | Met; no commit, push, or registration ran without request, and the recording WMS process stopped cleanly. A dedicated SCM-process idle/exit assertion is deferred |
+| H6 | Replayable session record | OpenCode's session record and `opencode export`; the resolved rules come from `opencode debug agent` | Met; the fixture exported every session with the agent, model, harness version, tool calls, and guard refusals |
+| H7 | Headless replay with no permission prompt | `opencode run --format json`, a replay provider, no `ask` rules | Met; the whole scenario replayed twice with byte-stable summaries and no permission prompt |
+| H8 | Invoke the guard on each tool call and enforce its decision | The shim | Met on the active-hook path; guard refusals reached the model and the session record. If the plugin is absent or no hook is registered, allowed `ears-manager` commands bypass guard-only shell restrictions, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (recorded gap); `"*": deny` still refuses `git` and `gh` |
+| H9 | Hide file-writing, subagent, and web tools | `"*": deny` | Met; the resolved tool set offers neither `edit`, `write`, `task`, `webfetch`, nor `websearch`. OpenCode 1.18.30 does not register a native `apply_patch` tool for this agent; the guard vocabulary still covers it, and the fixture exercised the documented hook shape directly |
+| H10 | Toolkit skills only | `skill` rule with `"*": deny` first; other skills are hidden from the model's list and refused | Met; the `<available_skills>` block the model received named exactly the Toolkit skills, and both `review-pr` load routes were refused |
+| H11 | No credential in binding files; no session upload | Placeholders; `share: disabled` | Met; the resolved config shows `share` as `disabled`, and a planted token-shaped string reached no export, model request, or recording stub |
 | H12 | Publish this status | This table | Met |
 | H13 | Remote `wms` server with OAuth 2.1 | Not checked; the fixture is single-player | Open |
 
-"Designed" means the mechanism is documented and the fixture has not
-run. "Observed" means a stub run on 1.18.30 showed it, and the number
-points at [Observed OpenCode behaviors](#observed-opencode-behaviors).
-Nothing else is marked met; issue #77 runs the fixture.
+"Met" means the #77 fixture demonstrated the obligation against the pinned
+OpenCode 1.18.30 binary with real governed tools; where an obligation holds
+only on a checked path, the gap stays in the row. Deferred fixture steps are
+recorded in the golden fixture's expectation record
+([Running the fixture on OpenCode](#running-the-fixture-on-opencode)).
 
 What the OpenCode layer stops on its normal native and active-guard
 paths, by route. The plugin-unavailable exception above applies to any
@@ -401,18 +423,27 @@ row that depends on the guard:
 
 | Write route to a guarded path | `drafting-table` agent | Every other agent |
 | --- | --- | --- |
-| File tool under `.protobot/` | Tool not offered | Refused by the project rule and the guard |
-| File tool on a registered path elsewhere | Tool not offered | Refused by the guard |
-| Shell writer, such as `sed -i` | Refused by the native copy and the active guard | Not stopped |
-| Output redirection in a shell command | Refused by the active guard; not checked inside an allowed native command pattern | Refused by the active guard when the redirection target is written from the project root |
+| File tool under `.protobot/` project controls | Tool not offered | Refused by the project rule and the guard |
+| File tool under Git metadata or reserved harness binding paths/files (`.agents/`, `.claude/`, `.codex/`, `.opencode/`, `.github/`, `opencode.json`, `AGENTS.md`, or `CLAUDE.md`) | Tool not offered | Refused by the active guard |
+| File tool under the selected adapter manifest path and its containing directory/`skills/` subtree | Tool not offered | Refused by the active guard, whether or not the selected manifest exists |
+| File tool under configured store paths read from `project.yaml` and resolved safely | Tool not offered | Refused by the active guard |
+| File tool on a registered path elsewhere, when known from successful project inspection | Tool not offered | Refused by the guard |
+| Direct shell writer to an ordinary registered artifact from the project root or by absolute path, such as `sed -i`, `cp`, `tee`, `truncate`, `sort -o`/`--output`, `uniq input output`, or Git `diff`/`diff-tree`/`diff-index`/`diff-files`/`range-diff`/`show`/`log --output` | Refused by the native copy and the role's exact shell grammar | Not generally stopped solely because the target is an ordinary registered file; a relative target after a working-directory change is refused as ambiguous |
+| Recognized direct shell writers to the `.protobot/` project-control namespace, Git metadata, reserved harness binding paths/files (`.agents/`, `.claude/`, `.codex/`, `.opencode/`, `.github/`, `opencode.json`, `AGENTS.md`, or `CLAUDE.md`), configured store paths read from `project.yaml` and resolved safely, or the selected adapter manifest path and its containing directory/`skills/` subtree, as detailed in [Rule 7](adapter-contract.md#guard-rules) | Refused by the role's exact shell grammar | Refused by the active guard when it returns a decision. Rule 7 also checks move/removal and link-mode source operands, including existing symlink chains and destination-relative symbolic-link targets; a recognized directory-content `cp` (source `.` or ending in `/.`) is refused when its resolved destination directory is an ancestor of or equal to Git metadata, `.protobot/`, the selected manifest/`skills/`, `.agents/drafting-table.yaml`, `.agents/skills`, or safely resolved configured store paths; a plain directory copy such as `cp -r dir .` checks its mapped `destination/basename(source)` target instead. For `cp`, `mv`, and `install`, existing or trailing-slash directory destinations and `-t`/`--target-directory` check each source's mapped `destination/basename(source)` target. `cp --parents`, `rsync --relative`/`-R`, and `rsync --files-from` fail closed because they change destination mapping (`-R` is recursive for `cp` and relative for `rsync`; `--files-from` uses uninspected file-list entries to map output beneath the destination). `rsync --backup-dir`, `--partial-dir`, `--temp-dir`, and `--write-batch` fail closed because they can name write locations outside modeled destinations. `rsync --rsh`/`-e` and `--rsync-path` fail closed because they carry remote-side commands. `rsync --link-dest` fails closed because it can create a hard link from an alternate base into a mapped destination, allowing a later in-place update to change the base. `rsync --remove-source-files` fails closed because it deletes source operands, making the sources write locations. `ln` checks directory destinations, including trailing slash, and the implicit `basename(target)` destination for single-operand `ln target` and `ln -s target`. The writer inventory includes `mkdir` and `touch`. Recognized file writers fail closed when required operands are missing. Optional long values for `cp --context[=CTX]`, `cp --reflink[=WHEN]`, `mv --context[=CTX]`, and `install`/`mkdir --context[=CTX]` do not consume the next argument. The short `-Z` flag for `cp`, `install`, and `mkdir` also leaves the next argument as an operand; `install --preserve-context` and `rsync --delete-missing-args` are flags. Symlink-preserving analysis covers tree members for recursive `cp -r`/`-R`/`-a`/`--recursive` unless `-L`/`--dereference` is present without `-H` or an explicit symlink-preserving flag; `-H` dereferences command-line links but tree-member links remain covered; `mv` directory trees; `rsync -a`/`--archive`; or `rsync -r`/`--recursive` with `-l`/`--links`. Top-level source links are preserved for `cp -a`/`--archive`/`-d`/`-P`/`--no-dereference` and for recursive `cp` without `-H`/`-L`/`--dereference`; `mv` and `rsync -a`/`--archive`/`-l`/`--links` also preserve top-level links. `cp --preserve=links` preserves hard links only, not symlink operands. Tree walks do not follow symlinks, re-anchor relative symbolic-link text at the mapped destination, check absolute link text unchanged, and fail closed on inspection errors or more than 10,000 entries. For recursive `cp`, `-H` combined with `-L`/`--dereference` makes the guard scan tree-member links conservatively; if `-H`, `-L`, or `--dereference` is combined with an explicit symlink-preserving flag (`-a`, `-d`, `-P`, or `--no-dereference`), it also checks top-level source links. The targeted inventory is not exhaustive; on a fail-open direct write, intact artifact/store digests can catch changed registered content but not coordinated digest edits or provide general writer provenance |
+| Output redirection in a shell command | Refused by the active guard; not checked inside an allowed native command pattern | Refused for the `.protobot/` project-control namespace, Git metadata, reserved harness binding paths/files, the selected adapter manifest path and its containing directory/`skills/` subtree, configured store paths read from `project.yaml` and resolved safely, and registered artifact paths known from successful project inspection; any shell command that contains both an output redirection and any working-directory change is refused, regardless of order; an uninspectable target is refused too |
+| Recognized opaque execution forms that could hide an indirect governed write, including inline or standard-input interpreters, command-string wrappers, Git aliases and metadata-writing Git commands, transport plumbing commands `git fetch-pack` and `git send-pack`, recipe/build/test runners, execution-changing `find` placeholders, `rg` preprocessor/pager forms except data-only `--paging=never` and `--paging never`, and Git `grep -O`. Rule 4 defines the exact targeted environment keys (including Git SSH/askpass and repository/index/object/template/ceiling overrides, shell-startup/loader assignments, ripgrep configuration, and imported `BASH_FUNC_*%%` assignments), the `xargs --help`/`--version` informational forms, and the `xargs` append/replacement rules. Git effect examples include unconditional `archive` (including `-o`, `--output`, and stdout forms), `bundle create`, unconditional `format-patch` (because `format.outputDirectory` can redirect output), `mailsplit`, `checkout-index`, `fast-import`, and `instaweb`; these are examples, not a complete Git command inventory. The guard does not refuse every environment assignment or every `xargs` invocation. | Refused by the role's exact shell grammar | Refused by the active guard; no native rule covers these forms if the plugin is absent |
+| Some interpreter source-file invocations, such as `python helper.py`, renamed executables, or unrecognized shell writers/executors | Refused by the role's exact shell grammar | Not generally stopped; an indirect `ears-manager` write has no later control |
 | Tool of another MCP server | Not offered | The user's own configuration |
 | Subagent | `task` not offered | Not applicable |
 
 Later integrity and CI layers catch unauthorized persistent edits to
-registered paths; they do not enforce shell grammar, argument values,
-variable expansion, or file-source provenance. In particular, they do
-not make an allowed shell command safe when the plugin is unavailable;
-see [What the harness layer stops][layer-stops].
+registered paths, and configured-store changes only while their recorded
+digests remain intact; they do not establish writer provenance or generally
+check `.protobot/` control files, reserved harness controls, or Git metadata.
+They also do not enforce shell grammar, argument values, variable expansion,
+or file-source provenance. In particular, they do not make an allowed shell
+command safe when the plugin is unavailable; see [What the harness layer
+stops][layer-stops].
 
 ---
 
@@ -498,6 +529,25 @@ clients, and shell.
   `<available_skills>` block of the system prompt names exactly the
   manifest's `toolkit_skills`.
 - No headless run prints an automatic permission rejection.
+
+**Running the #77 fixture.** The implemented driver replays the recorded
+scenario twice and compares the semantic summaries and source-input hashes:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 OPENCODE_BIN=/path/to/opencode-1.18.30/bin/opencode \
+  python -m unittest discover -s tests/drafting-table -p 'test_*.py' -v
+```
+
+The driver builds the real `ears-manager`, `source-control-manager`, and
+`drafting-table-guard` binaries from the repository modules, provisions an
+isolated temporary Git project, and uses a loopback-only recorded model
+endpoint plus recording WMS and `gh` stubs. It never edits the checkout or
+registered specification artifacts. The inputs, expected state, and deferred
+steps are recorded in
+[`docs/architecture/fixtures/drafting-table-opencode-golden.jsonl`](../fixtures/drafting-table-opencode-golden.jsonl).
+OpenCode 1.18.30 does not register a native `apply_patch` tool in the
+resolved agent tool set; the fixture records that fact and exercises the
+documented `apply_patch` hook shape against the built guard directly.
 
 ---
 

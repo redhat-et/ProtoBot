@@ -415,7 +415,7 @@ func helpText(args []string) string {
 	case "interface":
 		return "Usage: ears-manager interface <add|list|show> [options]\n"
 	case "artifact":
-		return "Usage: ears-manager artifact <get|put> [options]\n"
+		return "Usage: ears-manager artifact <list|get|put> [options]\n"
 	case "change-set":
 		return "Usage: ears-manager change-set <create|list|show|update|compare> [options]\n"
 	case "check":
@@ -444,6 +444,8 @@ func helpText(args []string) string {
 		return "Usage: ears-manager interface show --id ID\n"
 	case "artifact get":
 		return "Usage: ears-manager artifact get (--id ID | --kind KIND)\n"
+	case "artifact list":
+		return "Usage: ears-manager artifact list [--kind KIND] [--owner OWNER] [--at FULL-SHA]\n"
 	case "artifact put":
 		return "Usage: ears-manager artifact put --change-set CS-ID --id ID --kind KIND --path PATH --owner OWNER (--content-file PATH | --content-stdin)\n"
 	case "change-set create":
@@ -457,7 +459,7 @@ func helpText(args []string) string {
 	case "change-set compare":
 		return "Usage: ears-manager change-set compare --change-set CS-ID\n"
 	default:
-		return "Usage: ears-manager [--output human|json] <command> [<subcommand>] [options]\n\nCommands:\n  project init\n  check\n  requirement add|list|show|update|retire\n  interface add|list|show\n  artifact get|put\n  change-set create|list|show|update|compare\n  impact\n\nUse --help after a command for command-specific usage.\n"
+		return "Usage: ears-manager [--output human|json] <command> [<subcommand>] [options]\n\nCommands:\n  project init\n  check\n  requirement add|list|show|update|retire\n  interface add|list|show\n  artifact list|get|put\n  change-set create|list|show|update|compare\n  impact\n\nUse --help after a command for command-specific usage.\n"
 	}
 }
 

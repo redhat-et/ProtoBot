@@ -1,0 +1,32 @@
+---
+adapter_layout: 1
+entry_point: drafting-table
+session_skill: drafting-specifications
+toolkit_skills:
+  - drafting-specifications
+  - eliciting-requirements
+governed_commands:
+  - ears-manager
+governed_mcp_servers:
+  wms:
+    tools:
+      - request_create
+      - request_refine
+      - request_link_change_set
+      - request_link_build_work_item
+      - request_get
+      - request_query
+      - work_item_get
+      - work_item_query
+      - blocked_work_query
+      - lifecycle_preflight
+      - blocked_work_submit_resolution
+      - blocked_work_acknowledge
+  scm:
+    tools:
+      - repo_state
+      - branch_init
+      - branch_resume
+      - commit
+      - publish
+      - refresh

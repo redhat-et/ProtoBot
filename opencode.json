@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "mcp": {
+    "wms": {
+      "type": "local",
+      "command": ["<WMS Adapter MCP server, named by #31>"],
+      "enabled": false
+    },
+    "scm": {
+      "type": "local",
+      "command": ["source-control-manager", "serve", "--face", "drafting-table"]
+    }
+  },
+  "permission": {
+    "apply_patch": "deny",
+    "edit": {
+      ".protobot/**": "deny"
+    },
+    "wms_*": "deny",
+    "scm_*": "deny"
+  }
+}

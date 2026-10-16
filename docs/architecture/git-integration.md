@@ -84,9 +84,11 @@ Git history_. Adjacent contracts define the surfaces around it:
   with the [OpenCode](agent-harness/opencode.md),
   [Claude Code](agent-harness/claude-code.md), and
   [Codex](agent-harness/codex.md) bindings) defines
-  skill discovery and harness tool permissions, including the optional
-  early enforcement layer that denies direct writes to registered
-  paths.
+  skill discovery and harness tool permissions, including optional early
+  checks for file-writing tools and recognized protected-path shell writes.
+  Its route tables distinguish those checks from ordinary registered-file
+  shell-writer invocations that are not generally stopped outside the
+  Drafting Table role.
 - **#125** ([Source Control Manager](source-control-manager.md))
   defines the component that performs this contract's Git and Git host
   operations for the Drafting Table. The Drafting Table asks for an
@@ -793,19 +795,23 @@ project; it does not change any rule in this document.
 ## Ungoverned-edit detection
 
 No component is meant to write a registered specification file
-directly; for the Drafting Table the guard enforces this on the calls
-it checks, and a call without a guard decision may still write one
-([What the harness layer stops][layer-stops]). A file edited outside
-`ears-manager`, by any route, that leaves the registry intact must be
-rejected or caught before it can reach the default branch. Four layers
-do that, in order of how early they fire. A fail-open write that also
-rewrites the digest in `.protobot/project.yaml` is a recorded gap and
-is not caught by those layers ([File-source arguments][fail-open]);
-review of the pull request is the remaining check.
+directly. For the Drafting Table, the guard refuses covered file-writing
+tools and shell calls it checks; a call without a guard decision may still
+write one ([What the harness layer stops][layer-stops]). Outside that
+role, ordinary shell-writer arguments naming a registered file are not
+generally stopped solely because of registration. A registered file edited
+outside `ears-manager` that leaves its registry intact is caught by the
+SCM's pre-stage comparison or `ears-manager check` before it can reach the
+default branch. The optional harness layer and the later controls have
+different coverage; path ownership in CI separately rejects edits outside
+the owning component's paths. A fail-open write that also rewrites the
+digest in `.protobot/project.yaml` remains a recorded gap
+([File-source arguments][fail-open]); review of the pull request is the
+remaining check.
 
 | Layer | Where | Catches |
 | --- | --- | --- |
-| Harness tool permission rules (optional, [#33](agent-harness/adapter-contract.md#what-the-harness-layer-stops)) | The agent's own tool call | A write under a registered path before it happens |
+| Harness tool permission rules (optional, [#33](agent-harness/adapter-contract.md#what-the-harness-layer-stops)) | The agent's own tool call | File-writing-tool calls to registered paths and direct shell calls covered by the binding or the guard's targeted protected-path checks |
 | Pre-stage digest comparison | The Drafting Table, in the SCM's `commit`, before staging | A registered artifact or structured store whose content no longer matches its governed digest |
 | `ears-manager check` | Branch push and merge gate in CI | Malformed records, artifact or store digest mismatches, dangling references, symmetry and cycle violations |
 | Path ownership in CI | Merge gate | A change that edits files outside the owning component's paths |

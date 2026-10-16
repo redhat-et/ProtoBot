@@ -59,6 +59,8 @@ func dispatch(args []string, stdin io.Reader) (any, Mutation, *commandFailure) {
 			return nil, Mutation{}, usageFailure("an artifact subcommand is required")
 		}
 		switch args[1] {
+		case "list":
+			return runArtifactList(args[2:])
 		case "get":
 			return runArtifactGet(args[2:])
 		case "put":
@@ -894,6 +896,83 @@ func runArtifactGet(args []string) (any, Mutation, *commandFailure) {
 	}{Artifact: toArtifactJSON(selected), Content: string(content)}, Mutation{}, nil
 }
 
+func runArtifactList(args []string) (any, Mutation, *commandFailure) {
+	parsed, failure := parseOptions(args, valueOptions("kind", "owner", "at"))
+	if failure != nil {
+		return nil, Mutation{}, failure
+	}
+	if parsed.has("kind") && !validArtifactKind(parsed.one("kind")) {
+		return nil, Mutation{}, validationFailure("artifact.unknown_kind", fmt.Sprintf("Unsupported artifact kind %q.", parsed.one("kind")), nil)
+	}
+	if parsed.has("owner") && !validArtifactOwner(parsed.one("owner")) {
+		return nil, Mutation{}, validationFailure("artifact.invalid_owner", fmt.Sprintf("Unsupported artifact owner %q.", parsed.one("owner")), nil)
+	}
+
+	var state projectState
+	if parsed.has("at") {
+		commit, failure := parseRevisionOption(parsed.one("at"))
+		if failure != nil {
+			return nil, Mutation{}, failure
+		}
+		root, failure := resolveRoot()
+		if failure != nil {
+			return nil, Mutation{}, failure
+		}
+		if failure := requireRevisionCommit(root, commit); failure != nil {
+			return nil, Mutation{}, failure
+		}
+		var cleanup func()
+		state, cleanup, failure = loadRevisionState(root, commit)
+		if failure != nil {
+			return nil, Mutation{}, failure
+		}
+		defer cleanup()
+		if failure := validateCandidate(state.snapshot, true); failure != nil {
+			return nil, Mutation{}, artifactListReadFailure(failure)
+		}
+	} else {
+		state, failure = loadReadState()
+		if failure != nil {
+			return nil, Mutation{}, artifactListReadFailure(failure)
+		}
+	}
+
+	items := make([]artifactJSON, 0, len(state.snapshot.Config.Artifacts))
+	for _, artifact := range state.snapshot.Config.Artifacts {
+		if parsed.has("kind") && string(artifact.Kind) != parsed.one("kind") {
+			continue
+		}
+		if parsed.has("owner") && artifact.Owner != parsed.one("owner") {
+			continue
+		}
+		items = append(items, toArtifactJSON(artifact))
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return struct {
+		Artifacts []artifactJSON `json:"artifacts"`
+	}{Artifacts: items}, Mutation{}, nil
+}
+
+func artifactListReadFailure(failure *commandFailure) *commandFailure {
+	if failure == nil || failure.Code != "validation.failed" {
+		return failure
+	}
+	for _, diagnostic := range failure.Diagnostics {
+		if diagnostic.Path == revisionConfigPath && diagnostic.Code == "storage.decode_failed" {
+			configurationFailure := projectFailure("project.invalid_configuration", "The project configuration is invalid.")
+			configurationFailure.Diagnostics = append([]specvalidation.Diagnostic(nil), failure.Diagnostics...)
+			return configurationFailure
+		}
+		switch diagnostic.Code {
+		case "artifact.path_not_found":
+			return validationFailure("artifact.read_failed", "A registered artifact was not found.", nil)
+		case "artifact.path_unreadable":
+			return ioFailure("artifact.read_failed", "A registered artifact could not be read.")
+		}
+	}
+	return failure
+}
+
 func runArtifactPut(args []string, stdin io.Reader) (any, Mutation, *commandFailure) {
 	parsed, failure := parseOptions(args, map[string]optionSpec{
 		"change-set":    {takesValue: true},
@@ -1191,6 +1270,10 @@ func validArtifactKind(value string) bool {
 	default:
 		return false
 	}
+}
+
+func validArtifactOwner(value string) bool {
+	return value == "user" || value == "ears-manager"
 }
 
 func validRelationshipType(value string) bool {
