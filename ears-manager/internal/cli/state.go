@@ -1104,14 +1104,6 @@ func proposedChangeSetIDs(root string, snapshot specvalidation.Snapshot) (map[st
 	return proposed, nil
 }
 
-// Source Control Manager publish conditions that check also reports for
-// each proposed change set. Approved manifests are exempt.
-const (
-	codeBaseNotOnDefault = "BASE_NOT_ON_DEFAULT"
-	codeDefaultMoved     = "DEFAULT_MOVED"
-	codeBaseCommitStale  = "BASE_COMMIT_STALE"
-)
-
 // Registered artifact operation validation diagnostic codes reported by check.
 const (
 	codeArtifactOperationMissing = "artifact.operation_missing"
@@ -1533,6 +1525,14 @@ func artifactOperationFailure(diagnostics []specvalidation.Diagnostic) *commandF
 	}
 	return validationFailure(primary, message, diagnostics)
 }
+
+// Source Control Manager publish conditions that check also reports for
+// each proposed change set. Approved manifests are exempt.
+const (
+	codeBaseNotOnDefault = "BASE_NOT_ON_DEFAULT"
+	codeDefaultMoved     = "DEFAULT_MOVED"
+	codeBaseCommitStale  = "BASE_COMMIT_STALE"
+)
 
 // checkProposedBaseFreshness applies the Source Control Manager's publish
 // freshness rules to every proposed change-set manifest. base_commit must
