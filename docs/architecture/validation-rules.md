@@ -787,6 +787,8 @@ decisions.
   Job Site, and security boundaries.
 - [Drafting Table WMS Integration](drafting-table-wms.md) — Backend-neutral
   request, query, linking, and blocked-resolution operations.
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  execution and sandbox checks; it does not mutate lifecycle state.
 - [User Interaction Flow](user-interaction-flow.md) — Change types, work-item
   lifecycle, and testing strategy.
 - [Drafting Table UX](drafting-table-ux.md) — Preflight, blocked-work,

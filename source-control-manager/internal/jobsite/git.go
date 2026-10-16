@@ -40,15 +40,19 @@ type blobEntry struct {
 	OID  string
 }
 
-func openGit(path string) (*gitRepo, error) {
+func openGitWithEnv(path string, env []string) (*gitRepo, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return nil, err
 	}
-	runner, err := gitx.New(path)
+	runner, err := gitx.NewWithEnv(path, env)
 	if err != nil {
 		return nil, err
 	}
 	return &gitRepo{path: path, runner: runner}, nil
+}
+
+func openGit(path string) (*gitRepo, error) {
+	return openGitWithEnv(path, os.Environ())
 }
 
 func (g *gitRepo) Close() {

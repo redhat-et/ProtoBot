@@ -1278,18 +1278,20 @@ full DAG visible to either Worker.
 
 #### Isolation acceptance tests
 
-Every supported sandbox/backend must pass negative tests proving that
-each Worker cannot:
+Every supported sandbox/backend must pass the sandbox conformance suite in the
+[Job Site Sandbox Contract](jobsite-sandbox.md) and the #172
+integration-level suite. The integration-level suite proves that each Worker
+cannot:
 
 - enumerate the other Worker or integration repository's refs;
 - read a known forbidden commit with `git cat-file` or recover it as an
   unreachable/reflog object;
 - read forbidden current or historical paths;
 - use a remote, credential, Git alternate, shared object cache, or
-  network endpoint to fetch the canonical or peer repository; or
-- submit a patch outside its role's allowlisted paths.
+  network endpoint to fetch the canonical or peer repository.
 
-These tests run for both the initial project and later work items, so
+The Patch/Ownership Validator rejects patches outside a role's allowlisted
+paths. These tests run for both the initial project and later work items, so
 previously merged implementation and test artifacts remain separated.
 
 #### Triage and baseline feedback contract (decided)
@@ -2011,7 +2013,8 @@ The first Job Site backend is **Fullsend**, using its OpenShell-based
 execution path. A direct **OpenShell** backend is the fallback and the
 preferred base for a custom ProtoBot Job Site. This is an implementation
 strategy, not an architectural dependency: both adapters implement the
-same ProtoBot execution and sandbox contract. Because both still depend
+same ProtoBot [Job Site Sandbox Contract](jobsite-sandbox.md).
+Because both still depend
 on OpenShell, a separate portable containment profile is the required
 sandbox fallback for platform incompatibility or failed OpenShell
 acceptance tests.
@@ -2047,19 +2050,21 @@ OpenCode remains the first Drafting Table harness. Job Site Workers use
 the harnesses supported by the selected execution backend; OpenCode is
 not a Job Site prerequisite unless a Fullsend OpenCode runtime is added.
 
-#### Sandbox contract and acceptance suite
+#### Sandbox contract and conformance suite
 
-The sandbox is the primary enforcement mechanism for safeguards; prompts
-are not a security boundary. Fullsend/OpenShell, direct OpenShell, and
-the portable profile must pass the same end-to-end suite for every
-supported compute backend:
+The versioned, backend-neutral contract is the
+[Job Site Sandbox Contract](jobsite-sandbox.md) (`jobsite-sandbox/v1`).
+The local test adapter and sandbox conformance suite live in
+`source-control-manager/internal/jobsite`. Prompts are not a security
+boundary. The sandbox is the primary enforcement mechanism for
+safeguards.
 
-- **Execution and filesystem:** no host, peer Worker, canonical repo, or
-  integration-repo reads; no writes outside projected paths; no mount,
-  namespace, ptrace, privilege, device, or forbidden syscall escape.
-- **Git isolation:** all negative ref/object/history/remote tests in
-  [Worker repository projections](#worker-repository-projections-decided)
-  pass from inside the actual agent process.
+The sandbox conformance suite owns these API-boundary controls:
+
+- **Filesystem API:** no host, peer Worker, canonical repo, or
+  integration-repo reads and no writes outside projected paths.
+- **Git API:** the negative ref/object/history/remote checks in
+  [Worker repository projections](#worker-repository-projections-decided).
 - **Network:** deny by default; allow only an approved executable to an
   approved destination, protocol, method, and L7 path. Tests must reject
   the same destination from another binary plus DNS, direct-IP, redirect,
@@ -2068,18 +2073,29 @@ supported compute backend:
   environment variable, process argument, log, response body, or agent-
   readable proxy state. A boundary broker injects credentials only after
   authorization and strips them before responses return.
-- **Lifecycle:** lease expiry, process termination, and work-item
-  completion remove ephemeral repositories, processes, mounts, network
-  policy, and broker sessions without making data recoverable by the next
-  sandbox.
+- **Lifecycle API:** sandbox-lease expiry and process termination stop
+  further session operations.
+- **Resource limits:** wall-clock, CPU, memory, process-count,
+  writable-disk, and writable-file limits fail closed.
 - **Auditability:** policy version, sandbox/backend version, executable
   digest, authorization decision, allowed request, denial, and cleanup
   result are tied to the work-item trace.
 
-If a backend or platform cannot pass the suite, the Job Site refuses
+Each runtime must also pass an integration-level suite that checks the
+actual Worker execution boundary. #172 owns that suite for
+Fullsend/OpenShell. It must reject host/peer reads; mount, namespace,
+ptrace, privilege, device, and forbidden-syscall escapes; Git checks run
+from inside the agent process; agent-readable proxy and log state; and
+leftover mounts, network policy, or broker sessions. The portable profile
+requires an assigned integration-level owner before it can enable
+autonomous execution.
+
+If a backend or platform cannot pass both suites, the Job Site refuses
 autonomous execution. It must not silently switch to a weaker profile.
 Fullsend's use of OpenShell is therefore validated as effective behavior,
-not accepted transitively by product name.
+not accepted transitively by product name. The API-level checks,
+local test adapter, and structured `ConformanceReport` are defined by
+the [Job Site Sandbox Contract](jobsite-sandbox.md).
 
 ### Authentication and Credential Isolation
 
@@ -2160,6 +2176,9 @@ confirmation.
   authorization, transitions, rejection semantics, and acceptance matrix
 - [Drafting Table WMS Integration Contract](drafting-table-wms.md) —
   Backend-neutral request, query, linking, and blocked-resolution operations
+- [Job Site Sandbox Contract](jobsite-sandbox.md) — Backend-neutral
+  sandbox conformance suite, local test adapter, and
+  Fullsend/OpenShell mapping
 - [WMS Implementations](../../wms/README.md) — Backend-neutral wire types
   and operation surfaces, the Go lifecycle evaluator, the in-memory fake
   adapter used by the conformance and fixture tests, and the first backend

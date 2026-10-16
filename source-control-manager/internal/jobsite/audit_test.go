@@ -1,6 +1,7 @@
 package jobsite
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -313,5 +314,37 @@ func TestRollbackFailureReturnsDistinctFailClosedError(t *testing.T) {
 	fcErr := fail(CodePatchRollbackFailed, fmt.Sprintf("Failed to restore Integration HEAD to %s during rollback: %v.", c1, err))
 	if errorCode(fcErr) != CodePatchRollbackFailed {
 		t.Fatalf("errorCode = %q, want %q", errorCode(fcErr), CodePatchRollbackFailed)
+	}
+}
+
+func TestWriteSandboxAudit(t *testing.T) {
+	dir := t.TempDir()
+	ev := SandboxAuditEvent{
+		ContractVersion: ContractVersion,
+		BackendVersion:  "local/test",
+		TraceID:         "trace-123",
+		Sequence:        1,
+		EventType:       EventSandboxOpen,
+		Decision:        DecisionAccept,
+		PreviousDigest:  emptyDigest(),
+		EventDigest:     "sha256:abc",
+	}
+
+	name := "sandbox-0001.json"
+	if err := writeSandboxAudit(dir, name, ev); err != nil {
+		t.Fatalf("writeSandboxAudit failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var readEv SandboxAuditEvent
+	if err := json.Unmarshal(data, &readEv); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if readEv.ContractVersion != ContractVersion || readEv.TraceID != "trace-123" || readEv.Sequence != 1 {
+		t.Fatalf("unexpected audit event read: %+v", readEv)
 	}
 }

@@ -68,6 +68,18 @@ func writeAudit(dir string, name string, record AuditRecord) error {
 	return os.WriteFile(filepath.Join(dir, name), data, 0o600)
 }
 
+func writeSandboxAudit(dir string, name string, ev SandboxAuditEvent) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(ev, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(filepath.Join(dir, name), data, 0o600)
+}
+
 func writeAuditExcl(dir string, name string, record AuditRecord) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

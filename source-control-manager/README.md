@@ -30,16 +30,18 @@ directory of its own, `core.fsmonitor` off, and literal pathspecs. A commit
 is built in a private index and moved onto the branch with a
 compare-and-swap `git update-ref`.
 
-## Job Site projection fixture
+## Job Site projection and sandbox fixture
 
-`internal/jobsite` is the standalone Job Site projection seam for
-issue #78. It exports Worker A, Worker B, and a private Integration
+`internal/jobsite` is the standalone Job Site projection and sandbox
+seam. It exports Worker A, Worker B, and a private Integration
 repository from a source commit and a version-1 projection policy,
-and it validates PatchBundle v1 imports. It is not a Drafting Table
-SCM face. Sandbox enforcement, the integration loop, and Fullsend
-mapping remain #79, #69, and #172.
+validates PatchBundle v1 imports, and runs the `jobsite-sandbox/v1`
+conformance suite against a local test adapter. It is not a Drafting
+Table SCM face. The integration loop and Fullsend mapping remain #69
+and #172.
 
-`go test ./internal/jobsite` is the mandatory local isolation fixture.
+`go test ./internal/jobsite` is the mandatory local isolation and
+sandbox-contract fixture.
 
 ## Not in this build
 
