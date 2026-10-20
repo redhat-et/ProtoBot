@@ -785,6 +785,9 @@ class ScenarioRun:
         self.provider = ReplayServer()
         self.wms_log = self.temp / "wms-events.jsonl"
         self._disposed = False
+        # Per-turn tool evidence for the recorded demonstration; never
+        # part of the deterministic scenario summary.
+        self.narrative: list[dict[str, Any]] = []
         try:
             self.project_context = prepare_project(
                 self.project,
@@ -897,7 +900,7 @@ class ScenarioRun:
     def turn_output(
         self, turn: dict[str, Any], args: list[str], cwd: Path | None = None
     ) -> str:
-        return invoke_turn(
+        output = invoke_turn(
             self.binary,
             self.provider,
             turn,
@@ -907,6 +910,19 @@ class ScenarioRun:
             self.env,
             cwd,
         )
+        self.narrative.append(
+            {
+                "turn": turn["name"],
+                "tools": [
+                    {
+                        "tool": canonical_tool_event(event),
+                        "status": event["status"],
+                    }
+                    for event in tool_events(output)
+                ],
+            }
+        )
+        return output
 
     def new_role_session(
         self,
@@ -1750,6 +1766,7 @@ def run_approved(
             return {
                 "summary": summary,
                 "stable": stable,
+                "narrative": harness.narrative,
                 "session_ids": [
                     sid_a,
                     sid_b,
@@ -1932,6 +1949,7 @@ def run_rejection(
         return {
             "summary": summary,
             "stable": stable,
+            "narrative": harness.narrative,
             "session_ids": [sid, sid_revision],
         }
 
@@ -2028,7 +2046,12 @@ def run_wms_unavailable(
                 f"{summary['chat']['session_export_count']}"
             )
         stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
-        return {"summary": summary, "stable": stable, "session_ids": [sid]}
+        return {
+            "summary": summary,
+            "stable": stable,
+            "narrative": harness.narrative,
+            "session_ids": [sid],
+        }
 
 
 def push_default_move(harness: ScenarioRun) -> str:
@@ -2343,6 +2366,7 @@ def run_stale(
         return {
             "summary": summary,
             "stable": stable,
+            "narrative": harness.narrative,
             "session_ids": [
                 sid_candidate,
                 sid_review,
