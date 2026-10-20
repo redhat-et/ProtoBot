@@ -35,12 +35,24 @@ class OpenCodeReplayTest(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["result"], "passed")
         self.assertEqual(result["repeat_runs"], 2)
-        self.assertEqual(list(result["scenarios"]), ["approved-handoff"])
+        self.assertEqual(
+            list(result["scenarios"]),
+            ["approved-handoff", "rejection-revision", "wms-unavailable"],
+        )
         approved = result["scenarios"]["approved-handoff"]
         self.assertTrue(approved["chat"]["session_exported"])
-        self.assertEqual(approved["chat"]["session_export_count"], 8)
+        self.assertEqual(approved["chat"]["session_export_count"], 9)
+        self.assertTrue(approved["chat"]["jobsite_lifecycle_refused"])
         self.assertEqual(approved["wms"]["state_before"], "blocked")
         self.assertEqual(approved["wms"]["state_after"], "blocked")
+        rejection = result["scenarios"]["rejection-revision"]
+        self.assertEqual(rejection["chat"]["explicit_rejection"]["tool_calls"], 0)
+        self.assertTrue(rejection["chat"]["revision"]["vision_revised"])
+        self.assertFalse(rejection["chat"]["revision"]["committed"])
+        self.assertEqual(rejection["wms"]["mutations"], 0)
+        wms_unavailable = result["scenarios"]["wms-unavailable"]
+        self.assertFalse(wms_unavailable["wms"]["wms_available"])
+        self.assertTrue(wms_unavailable["chat"]["drafting_continued"])
 
 
 if __name__ == "__main__":
