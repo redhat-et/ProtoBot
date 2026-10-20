@@ -35,10 +35,12 @@ class OpenCodeReplayTest(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["result"], "passed")
         self.assertEqual(result["repeat_runs"], 2)
-        self.assertTrue(result["summary"]["chat"]["session_exported"])
-        self.assertEqual(result["summary"]["chat"]["session_export_count"], 8)
-        self.assertEqual(result["summary"]["wms"]["state_before"], "blocked")
-        self.assertEqual(result["summary"]["wms"]["state_after"], "blocked")
+        self.assertEqual(list(result["scenarios"]), ["approved-handoff"])
+        approved = result["scenarios"]["approved-handoff"]
+        self.assertTrue(approved["chat"]["session_exported"])
+        self.assertEqual(approved["chat"]["session_export_count"], 8)
+        self.assertEqual(approved["wms"]["state_before"], "blocked")
+        self.assertEqual(approved["wms"]["state_after"], "blocked")
 
 
 if __name__ == "__main__":
