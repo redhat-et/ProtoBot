@@ -1519,7 +1519,9 @@ status names it.
 
 The table records what each harness offers for each obligation. The
 OpenCode column is bound in [OpenCode Harness Binding](opencode.md)
-and its recorded #77 fixture ran against the pinned binary and covers
+and its recorded fixture — the #77 approved-handoff scenario, extended
+in #173 with the rejection-revision, stale-state, and WMS-unavailable
+scenarios — ran against the pinned binary and covers
 the baseline guard vectors. Guard unit tests cover expanded Rule 4 and
 Rule 7 cases, but not all are represented in the fixture. H1 to H12
 record that run, with the plugin-absent fail-open path and deferred steps
@@ -1606,7 +1608,15 @@ keeps the real harness and asserts the binding and the guard. Merge and
 registration are covered by step 8 of #34's
 [repository fixture](../git-integration.md#repository-fixture), and the
 SCM's operations and refusals by the same fixture run against the SCM
-([Repository fixture against the SCM][scm-fixture]).
+([Repository fixture against the SCM][scm-fixture]). The recorded
+OpenCode fixture additionally covers, in its own scenarios, the
+rejection checkpoint with a Vision revision through `artifact put`
+(rejection-as-revision), the WMS-unavailable session, the Job Site
+lifecycle refusal, and the stale-state steps 12–14 through the
+refresh sequence, the host merge, and `register-approved-change-set`.
+The implemented approved-path scenario keeps #77's simplification of
+running on proposed `CS-00002`; the stale-state scenario follows this
+table's setup and runs on `CS-00003`.
 
 ### Setup
 
