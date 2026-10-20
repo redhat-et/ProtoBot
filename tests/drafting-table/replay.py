@@ -33,12 +33,27 @@ V2_ENV = (
 )
 
 
-def read_golden() -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Any]]:
+def read_golden() -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     records = [json.loads(line) for line in GOLDEN.read_text().splitlines() if line]
     fixture = next(record for record in records if record["kind"] == "fixture")
-    turns = {record["name"]: record for record in records if record["kind"] == "turn"}
-    expectation = next(record for record in records if record["kind"] == "expectation")
-    return fixture, turns, expectation
+    scenarios = {
+        record["name"]: {"expectation": record["expectation"], "turns": {}}
+        for record in records
+        if record["kind"] == "scenario"
+    }
+    for record in records:
+        if record["kind"] != "turn":
+            continue
+        name = record.get("scenario")
+        if name not in scenarios:
+            raise AssertionError(
+                f"golden turn {record.get('name')!r} references unknown scenario {name!r}"
+            )
+        scenarios[name]["turns"][record["name"]] = record
+    for name in fixture["scenarios"]:
+        if name not in scenarios:
+            raise AssertionError(f"golden fixture scenario {name!r} has no records")
+    return fixture, scenarios
 
 
 def sha256(path: Path) -> str:
@@ -640,19 +655,20 @@ def skill_files() -> list[Path]:
     return [path for path in paths if path.is_file()]
 
 
-def run_scenario(
+def run_approved(
     binary: str,
     fixture: dict[str, Any],
-    turns: dict[str, dict[str, Any]],
-    expectation: dict[str, Any],
+    scenario: dict[str, Any],
+    bindir: Path,
 ) -> dict[str, Any]:
+    turns = scenario["turns"]
+    expectation = scenario["expectation"]
     with tempfile.TemporaryDirectory(prefix="opencode-drafting-table-") as work:
         temp = Path(work)
         home = temp / "home"
         project = temp / "project"
         home.mkdir()
         env = clean_env(os.environ, project=project, home=home)
-        bindir = build_binaries(temp, env)
         env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
         env["DT_GH_LOG"] = str(temp / "gh-events.jsonl")
         provider = ReplayServer()
@@ -1483,6 +1499,11 @@ def run_scenario(
                 },
                 "source_input_sha256": source_hashes,
             }
+            if summary["chat"]["session_export_count"] != expectation["exports"]:
+                raise AssertionError(
+                    f"golden expects {expectation['exports']} exports, got "
+                    f"{summary['chat']['session_export_count']}"
+                )
             stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
             return {
                 "summary": summary,
@@ -1621,28 +1642,32 @@ def main() -> int:
     binary = shutil.which(args.opencode_bin) or args.opencode_bin
     if not Path(binary).exists() and shutil.which(binary) is None:
         parser.error(f"OpenCode binary not found: {args.opencode_bin}")
-    fixture, turns, expectation = read_golden()
+    fixture, scenarios = read_golden()
     if fixture.get("opencode_version") != PINNED_OPENCODE:
         raise AssertionError(
             "golden fixture version does not match the pinned OpenCode version"
         )
     verify_binary(binary)
-    first = run_scenario(binary, fixture, turns, expectation)
-    second = run_scenario(binary, fixture, turns, expectation)
-    if first["stable"] != second["stable"]:
-        raise AssertionError(
-            "repeat-run semantic/state summaries differ\n"
-            f"first:  {first['stable']}\nsecond: {second['stable']}"
-        )
-    summary = first["summary"]
-    if summary["chat"]["session_export_count"] != expectation["exports"]:
-        raise AssertionError(
-            f"golden expects {expectation['exports']} exports, got "
-            f"{summary['chat']['session_export_count']}"
-        )
+    runners = {"approved-handoff": run_approved}
+    results: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory(prefix="opencode-drafting-table-bin-") as work:
+        bindir = build_binaries(Path(work), os.environ)
+        for name in fixture["scenarios"]:
+            runner = runners.get(name)
+            if runner is None:
+                raise AssertionError(f"no replay driver for golden scenario {name!r}")
+            scenario = scenarios[name]
+            first = runner(binary, fixture, scenario, bindir)
+            second = runner(binary, fixture, scenario, bindir)
+            if first["stable"] != second["stable"]:
+                raise AssertionError(
+                    f"repeat-run semantic/state summaries differ for scenario "
+                    f"{name!r}\nfirst:  {first['stable']}\nsecond: {second['stable']}"
+                )
+            results[name] = first["summary"]
     print(
         json.dumps(
-            {"result": "passed", "repeat_runs": 2, "summary": summary},
+            {"result": "passed", "repeat_runs": 2, "scenarios": results},
             indent=2,
             sort_keys=True,
         )
