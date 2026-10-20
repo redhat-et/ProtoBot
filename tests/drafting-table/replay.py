@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "docs/architecture/fixtures/drafting-table-opencode-golden.jsonl"
 WMS_STUB = ROOT / "tests/drafting-table/wms_stub.py"
 GH_STUB = ROOT / "tests/drafting-table/gh_stub.py"
+REGISTER_STUB = ROOT / "tests/drafting-table/register_stub.py"
 PINNED_OPENCODE = "1.18.30"
 PROJECT_ID = "fixture-project"
 CHANGE_SET_ID = "CS-00002"
@@ -326,6 +327,11 @@ def build_binaries(temp: Path, env: dict[str, str]) -> Path:
         f"#!{sys.executable}\nimport os, sys\nos.execv(sys.executable, [sys.executable, {str(GH_STUB)!r}, *sys.argv[1:]])\n"
     )
     gh.chmod(0o755)
+    register = bindir / "register-approved-change-set"
+    register.write_text(
+        f"#!{sys.executable}\nimport os, sys\nos.execv(sys.executable, [sys.executable, {str(REGISTER_STUB)!r}, *sys.argv[1:]])\n"
+    )
+    register.chmod(0o755)
     return bindir
 
 
@@ -360,9 +366,14 @@ def prepare_project(
     wms_log: Path,
     *,
     wms_mode: str = "serving",
+    scenario_change_set: str = "CS-00002",
 ) -> dict[str, str]:
     bare = project.parent / "origin.git"
-    run(["git", "init", "--bare", str(bare)], cwd=project.parent, env=env)
+    run(
+        ["git", "init", "--bare", "--initial-branch=main", str(bare)],
+        cwd=project.parent,
+        env=env,
+    )
     project.mkdir()
     copy_project_inputs(project)
     (project / "opencode.json").write_text(
@@ -471,10 +482,57 @@ def prepare_project(
         env=env,
     )
     change_set = json_output(created)["data"]["change_set"]["id"]
-    if change_set != CHANGE_SET_ID:
-        raise AssertionError(
-            f"fixture setup made {change_set}, expected {CHANGE_SET_ID}"
+    if change_set != "CS-00002":
+        raise AssertionError(f"fixture setup made {change_set}, expected CS-00002")
+    if scenario_change_set == "CS-00002":
+        # The session under test starts on proposed CS-00002.
+        pass
+    else:
+        # Merge CS-00002 into the default branch so the scenario change
+        # set is cut from the merged baseline, as the adapter fixture
+        # session table specifies.
+        run(["git", "add", "-A"], cwd=project, env=env)
+        run(
+            ["git", "commit", "--quiet", "-m", "Fixture second change set"],
+            cwd=project,
+            env=env,
         )
+        second_branch = run(
+            ["git", "branch", "--show-current"], cwd=project, env=env
+        ).stdout.strip()
+        run(["git", "switch", "--quiet", "main"], cwd=project, env=env)
+        run(
+            ["git", "merge", "--quiet", "--no-ff", "--no-edit", second_branch],
+            cwd=project,
+            env=env,
+        )
+        run(["git", "push", "--quiet", "origin", "main"], cwd=project, env=env)
+        third = run(
+            [
+                str(ears),
+                "--output",
+                "json",
+                "change-set",
+                "create",
+                "--intent",
+                "Exercise the stale-state refresh sequence",
+                "--implementation-required",
+                "false",
+                "--implementation-rationale",
+                "Specification-only fixture change.",
+                "--created",
+                "2026-10-12T10:02:00Z",
+                "--affected-scope",
+                "drafting-table",
+            ],
+            cwd=project,
+            env=env,
+        )
+        third_id = json_output(third)["data"]["change_set"]["id"]
+        if third_id != scenario_change_set:
+            raise AssertionError(
+                f"fixture setup made {third_id}, expected {scenario_change_set}"
+            )
 
     (project / ".netrc").write_text(
         f"machine fixture.invalid login fixture password {SENTINEL}\n"
@@ -675,7 +733,7 @@ def source_hashes() -> dict[str, str]:
     hashes = {
         str(path.relative_to(ROOT)): sha256(path) for path in sorted(skill_files())
     }
-    for path in (WMS_STUB, GH_STUB):
+    for path in (WMS_STUB, GH_STUB, REGISTER_STUB):
         hashes[str(path.relative_to(ROOT))] = sha256(path)
     driver = Path(__file__).resolve()
     hashes[str(driver.relative_to(ROOT))] = sha256(driver)
@@ -710,10 +768,12 @@ class ScenarioRun:
         bindir: Path,
         *,
         wms_mode: str = "serving",
+        change_set_id: str = "CS-00002",
     ) -> None:
         self.binary = binary
         self.fixture = fixture
         self.bindir = bindir
+        self.change_set_id = change_set_id
         self._work = tempfile.TemporaryDirectory(prefix="opencode-drafting-table-")
         self.temp = Path(self._work.name)
         self.home = self.temp / "home"
@@ -734,6 +794,7 @@ class ScenarioRun:
                 self.provider.url,
                 self.wms_log,
                 wms_mode=wms_mode,
+                scenario_change_set=change_set_id,
             )
             self._verify_environment()
         except BaseException:
@@ -1970,6 +2031,329 @@ def run_wms_unavailable(
         return {"summary": summary, "stable": stable, "session_ids": [sid]}
 
 
+def push_default_move(harness: ScenarioRun) -> str:
+    """Push one commit to the default branch of the bare origin from
+    outside any session; returns the new default-branch head."""
+    env = harness.env
+    mover = harness.temp / "mover"
+    bare = Path(harness.project_context["bare"])
+    run(["git", "clone", "--quiet", str(bare), str(mover)], cwd=harness.temp, env=env)
+    (mover / "default-move.md").write_text("The default branch moved.\n")
+    run(["git", "add", "default-move.md"], cwd=mover, env=env)
+    run(["git", "commit", "--quiet", "-m", "Default branch move"], cwd=mover, env=env)
+    run(["git", "push", "--quiet", "origin", "main"], cwd=mover, env=env)
+    return run(["git", "rev-parse", "HEAD"], cwd=mover, env=env).stdout.strip()
+
+
+def run_stale(
+    binary: str,
+    fixture: dict[str, Any],
+    scenario: dict[str, Any],
+    bindir: Path,
+) -> dict[str, Any]:
+    """A default-branch move between session pause and resume is detected
+    on resume, publish fails DEFAULT_MOVED, and the refresh sequence ends
+    in one pull request, one host merge, and one idempotent registration."""
+    turns = scenario["turns"]
+    expectation = scenario["expectation"]
+    change_set = expectation["change_set"]
+    harness = ScenarioRun(binary, fixture, bindir, change_set_id=change_set)
+    with harness:
+        provider = harness.provider
+        project = harness.project
+        env = harness.env
+        wms_log = harness.wms_log
+        gh_log = Path(env["DT_GH_LOG"])
+        env["DT_GH_STATE"] = str(harness.temp / "gh-state.json")
+        env["DT_GH_ORIGIN"] = harness.project_context["bare"]
+        env["DT_REG_LOG"] = str(harness.temp / "register-events.jsonl")
+        env["DT_REG_PROJECT"] = fixture["project_id"]
+
+        base_commit = harness.base_commit(change_set)
+        provider.replacements["<BASE_COMMIT>"] = base_commit
+
+        candidate = turns["stale-candidate"]
+        sid_candidate, candidate_result = harness.new_role_session(
+            candidate, expectation["start_before_first_write"]
+        )
+        if expectation["requirement_id"] not in candidate_result:
+            raise AssertionError(
+                f"stale candidate was not written: {candidate_result}"
+            )
+
+        review = turns["stale-review"]
+        sid_review, review_result = harness.new_role_session(
+            review, expectation["start_before_first_write"]
+        )
+        if (
+            base_commit not in review_result
+            or expectation["requirement_id"] not in review_result
+        ):
+            raise AssertionError(
+                "the stale review did not identify the exact proposal and base: "
+                f"{review_result}"
+            )
+
+        # The default branch moves from outside the session.
+        new_head = push_default_move(harness)
+        provider.replacements["<NEW_BASE>"] = new_head
+
+        # The resumed session re-presents CS-00003, its branch, and the
+        # recorded base from governed reads, not from conversation.
+        resume = turns["stale-resume-after-move"]
+        resume_result = harness.resume_session(resume, sid_review)
+        repo_event = next(
+            (
+                event
+                for event in tool_events(resume_result)
+                if event["tool"] == "scm_repo_state"
+            ),
+            None,
+        )
+        if (
+            base_commit not in resume_result
+            or repo_event is None
+            or '"default_moved":true' not in repo_event["output"]
+        ):
+            raise AssertionError(
+                f"resume did not detect the default-branch move: {resume_result}"
+            )
+
+        # Explicit approval bound to the reviewed base: the commit lands,
+        # and publish refuses because the default branch moved.
+        approval = turns["stale-approval-default-moved"]
+        approval_prompt = approval["prompt"].replace("<BASE_COMMIT>", base_commit)
+        approval = {**approval, "prompt": approval_prompt}
+        sid_approval, approval_result = harness.new_role_session(
+            approval, expectation["start_before_first_write"]
+        )
+        if base_commit not in approval_result:
+            raise AssertionError(
+                f"approval session lost the exact base: {approval_result}"
+            )
+        approval_events = tool_events(approval_result)
+        if not any(
+            event["tool"] == "scm_commit" and event["status"] == "completed"
+            for event in approval_events
+        ):
+            raise AssertionError(
+                f"explicit approval did not complete scm_commit: {approval_events!r}"
+            )
+        publish_event = next(
+            (event for event in approval_events if event["tool"] == "scm_publish"),
+            None,
+        )
+        if (
+            publish_event is None
+            or publish_event["status"] != "error"
+            or expectation["publish_failure"]
+            not in publish_event["error"] + str(publish_event["output"])
+        ):
+            raise AssertionError(
+                f"publish did not fail {expectation['publish_failure']}: "
+                f"{approval_events!r}"
+            )
+        if any(event.get("event") == "create" for event in read_jsonl(gh_log)):
+            raise AssertionError("a failed publish still created a pull request")
+
+        # The refresh sequence: merge the moved default, rebind the base
+        # commit, rerun impact and validation, and commit again.
+        refresh = turns["stale-refresh-and-update"]
+        sid_refresh, refresh_result = harness.new_role_session(
+            refresh, expectation["start_before_first_write"]
+        )
+        refresh_events = tool_events(refresh_result)
+        for tool_name in ("scm_refresh", "scm_repo_state"):
+            if not any(
+                event["tool"] == tool_name and event["status"] == "completed"
+                for event in refresh_events
+            ):
+                raise AssertionError(
+                    f"refresh sequence did not complete {tool_name}: {refresh_events!r}"
+                )
+        parents = run(
+            ["git", "rev-list", "--parents", "-n", "1", "HEAD"],
+            cwd=project,
+            env=env,
+        ).stdout.split()
+        if len(parents) < 3:
+            raise AssertionError(
+                f"refresh did not merge the moved default branch: {parents!r}"
+            )
+        if harness.base_commit(change_set) != new_head:
+            raise AssertionError(
+                "change-set update did not rebind the base commit to the new head"
+            )
+
+        republish = turns["stale-recommit-and-publish"]
+        sid_republish, republish_result = harness.new_role_session(
+            republish, expectation["start_before_first_write"]
+        )
+        republish_events = tool_events(republish_result)
+        for tool_name in ("scm_commit", "scm_publish"):
+            if not any(
+                event["tool"] == tool_name and event["status"] == "completed"
+                for event in republish_events
+            ):
+                raise AssertionError(
+                    f"re-publish did not complete {tool_name}: {republish_events!r}"
+                )
+        if "pull request" not in republish_result.lower():
+            raise AssertionError(
+                f"re-publish did not hand off a pull request: {republish_result}"
+            )
+
+        # The user merges the pull request on the host.
+        merged = run(
+            [str(harness.bindir / "gh"), "pr", "merge", "1", "--merge"],
+            cwd=project,
+            env=env,
+            check=False,
+        )
+        if merged.returncode:
+            raise AssertionError(
+                f"host merge failed: {merged.returncode}\n{merged.stdout}\n{merged.stderr}"
+            )
+
+        register = turns["stale-register"]
+        sid_register, register_result = harness.new_role_session(
+            register, expectation["start_before_first_write"]
+        )
+        register_events = tool_events(register_result)
+        if not any(
+            event["tool"] == "bash"
+            and event["input"].get("command")
+            == f"register-approved-change-set --change-set {change_set}"
+            and event["status"] == "completed"
+            for event in register_events
+        ):
+            raise AssertionError(
+                f"registration command did not complete: {register_events!r}"
+            )
+
+        # A retry after registration is the same idempotent call.
+        register_again = turns["stale-register-again"]
+        register_again_result = harness.resume_session(register_again, sid_register)
+        again_events = tool_events(register_again_result)
+        if not any(
+            event["tool"] == "bash"
+            and event["input"].get("command")
+            == f"register-approved-change-set --change-set {change_set}"
+            and event["status"] == "completed"
+            for event in again_events
+        ):
+            raise AssertionError(
+                f"idempotent registration retry did not complete: {again_events!r}"
+            )
+        registrations = read_jsonl(Path(env["DT_REG_LOG"]))
+        if len(registrations) != expectation["registration"]["calls"]:
+            raise AssertionError(
+                f"expected {expectation['registration']['calls']} registration "
+                f"record(s), got {registrations!r}"
+            )
+        if registrations[0]["change_set"] != change_set:
+            raise AssertionError(
+                f"registration named the wrong change set: {registrations!r}"
+            )
+
+        gh_events = read_jsonl(gh_log)
+        pr_creates = [event for event in gh_events if event.get("event") == "create"]
+        pr_merges = [event for event in gh_events if event.get("event") == "merge"]
+        if len(pr_creates) != 1 or len(pr_merges) != 1:
+            raise AssertionError(
+                f"expected one pull-request create and one merge, got {gh_events!r}"
+            )
+        gh_args = pr_creates[0]["argv"]
+        if (
+            gh_args[gh_args.index("--repo") + 1]
+            != "github.com/protobot-fixture/fixture"
+            or gh_args[gh_args.index("--base") + 1] != "main"
+            or gh_args[gh_args.index("--head") + 1] != expectation["pr_head"]
+        ):
+            raise AssertionError(
+                f"pull request used unexpected binding fields: {gh_args!r}"
+            )
+        if any(
+            event.get("event") not in ("list", "create", "merge")
+            for event in gh_events
+        ):
+            raise AssertionError(f"unexpected Git host action: {gh_events!r}")
+        assert_git_status(project, env, [])
+        if any(
+            event.get("before") != event.get("after")
+            or event.get("mutation") != "none"
+            for event in wms_calls(wms_log)
+        ):
+            raise AssertionError("stale-state scenario changed WMS records")
+
+        exports = []
+        for sid in (
+            sid_candidate,
+            sid_review,
+            sid_approval,
+            sid_refresh,
+            sid_republish,
+            sid_register,
+        ):
+            raw, sanitized = harness.export(sid)
+            if SENTINEL in raw or SENTINEL in sanitized:
+                raise AssertionError(
+                    "a planted token-shaped secret appeared in a session export"
+                )
+            exports.append(raw)
+
+        summary = {
+            "fixture": fixture["name"],
+            "opencode_version": harness.binary_version,
+            "recorded_model": fixture["model"],
+            "chat": {
+                "candidate_reviewed": expectation["requirement_id"],
+                "default_moved_detected": True,
+                "publish_failed_default_moved": True,
+                "refresh_merge_parents": len(parents) - 1,
+                "base_commit_updated": harness.base_commit(change_set) == new_head,
+                "explicit_approval_and_handoff": True,
+                "registered": len(registrations) == 1,
+                "registration_idempotent": True,
+                "session_exported": True,
+                "session_export_count": len(exports),
+            },
+            "git": {
+                "branch": expectation["pr_head"],
+                "pr_create_count": len(pr_creates),
+                "pr_merge_count": len(pr_merges),
+                "pr_base": "main",
+                "merged": True,
+                "working_tree_clean": True,
+            },
+            "wms": {
+                "blocked_item": fixture["blocked_work_item"]["id"],
+                "state_before": fixture["blocked_work_item"]["state"],
+                "state_after": expectation["wms_state_after"],
+                "mutations": 0,
+            },
+            "source_input_sha256": source_hashes(),
+        }
+        if summary["chat"]["session_export_count"] != expectation["exports"]:
+            raise AssertionError(
+                f"golden expects {expectation['exports']} exports, got "
+                f"{summary['chat']['session_export_count']}"
+            )
+        stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+        return {
+            "summary": summary,
+            "stable": stable,
+            "session_ids": [
+                sid_candidate,
+                sid_review,
+                sid_approval,
+                sid_refresh,
+                sid_republish,
+                sid_register,
+            ],
+        }
+
+
 def export_session(
     binary: str,
     session: str,
@@ -2107,6 +2491,7 @@ def main() -> int:
         "approved-handoff": run_approved,
         "rejection-revision": run_rejection,
         "wms-unavailable": run_wms_unavailable,
+        "stale-state": run_stale,
     }
     results: dict[str, Any] = {}
     with tempfile.TemporaryDirectory(prefix="opencode-drafting-table-bin-") as work:
