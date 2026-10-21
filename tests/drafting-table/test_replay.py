@@ -37,7 +37,12 @@ class OpenCodeReplayTest(unittest.TestCase):
         self.assertEqual(result["repeat_runs"], 2)
         self.assertEqual(
             list(result["scenarios"]),
-            ["approved-handoff", "rejection-revision", "stale-state", "wms-unavailable"],
+            [
+                "approved-handoff",
+                "rejection-revision",
+                "stale-state",
+                "wms-unavailable",
+            ],
         )
         approved = result["scenarios"]["approved-handoff"]
         self.assertTrue(approved["chat"]["session_exported"])
