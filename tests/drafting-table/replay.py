@@ -15,7 +15,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "docs/architecture/fixtures/drafting-table-opencode-golden.jsonl"
@@ -862,9 +862,13 @@ class ScenarioRun:
         )
         own_rules = resolved_rules[own_rules_start:]
         if any(rule.get("action") == "ask" for rule in own_rules):
-            raise AssertionError("Drafting Table agent rules introduce an ask permission")
+            raise AssertionError(
+                "Drafting Table agent rules introduce an ask permission"
+            )
         if '"disabled"' not in config_debug and "disabled" not in config_debug.lower():
-            raise AssertionError("resolved OpenCode config does not show share=disabled")
+            raise AssertionError(
+                "resolved OpenCode config does not show share=disabled"
+            )
 
     def base_commit(self, change_set: str) -> str:
         # Record the authoritative base revision for explicit approval
@@ -883,9 +887,9 @@ class ScenarioRun:
             env=self.env,
         )
         show_data = json_output(show)["data"]
-        base_commit = show_data.get("change_set", {}).get("base_commit") or show_data.get(
+        base_commit = show_data.get("change_set", {}).get(
             "base_commit"
-        )
+        ) or show_data.get("base_commit")
         if not isinstance(base_commit, str) or len(base_commit) != 40:
             raise AssertionError(
                 f"could not read a full base_commit from change-set show: {show.stdout}"
@@ -1002,7 +1006,7 @@ class ScenarioRun:
         self.provider.close()
         self._work.cleanup()
 
-    def __enter__(self) -> "ScenarioRun":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -1631,9 +1635,7 @@ def run_approved(
             calls = [event for event in wms_events if event.get("event") == "call"]
             wms_started = sum(event.get("event") == "started" for event in wms_events)
             wms_stopped = sum(event.get("event") == "stopped" for event in wms_events)
-            if not any(
-                event.get("tool") == "blocked_work_query" for event in calls
-            ):
+            if not any(event.get("tool") == "blocked_work_query" for event in calls):
                 raise AssertionError(f"WMS blocked work was not read: {wms_events!r}")
             if wms_started == 0 or wms_started != wms_stopped:
                 raise AssertionError(
@@ -1879,8 +1881,7 @@ def run_rejection(
         if harness.git_head() != head_before:
             raise AssertionError("revision committed without explicit approval")
         if any(
-            event.get("before") != event.get("after")
-            or event.get("mutation") != "none"
+            event.get("before") != event.get("after") or event.get("mutation") != "none"
             for event in wms_calls(wms_log)
         ):
             raise AssertionError("revision changed WMS records")
@@ -1930,7 +1931,9 @@ def run_rejection(
             },
             "git": {
                 "pr_create_count": 0,
-                "working_tree_status_paths": sorted(vision_revision["git_status_paths"]),
+                "working_tree_status_paths": sorted(
+                    vision_revision["git_status_paths"]
+                ),
             },
             "wms": {
                 "blocked_item": fixture["blocked_work_item"]["id"],
@@ -2007,7 +2010,9 @@ def run_wms_unavailable(
         if any(event.get("event") == "started" for event in wms_events):
             raise AssertionError(f"the WMS stub served while down: {wms_events!r}")
         if not any(event.get("event") == "failed-start" for event in wms_events):
-            raise AssertionError(f"the WMS stub did not record its failed start: {wms_events!r}")
+            raise AssertionError(
+                f"the WMS stub did not record its failed start: {wms_events!r}"
+            )
         gh_events = read_jsonl(gh_log)
         if any(event.get("event") != "list" for event in gh_events):
             raise AssertionError(
@@ -2100,9 +2105,7 @@ def run_stale(
             candidate, expectation["start_before_first_write"]
         )
         if expectation["requirement_id"] not in candidate_result:
-            raise AssertionError(
-                f"stale candidate was not written: {candidate_result}"
-            )
+            raise AssertionError(f"stale candidate was not written: {candidate_result}")
 
         review = turns["stale-review"]
         sid_review, review_result = harness.new_role_session(
@@ -2297,14 +2300,12 @@ def run_stale(
                 f"pull request used unexpected binding fields: {gh_args!r}"
             )
         if any(
-            event.get("event") not in ("list", "create", "merge")
-            for event in gh_events
+            event.get("event") not in ("list", "create", "merge") for event in gh_events
         ):
             raise AssertionError(f"unexpected Git host action: {gh_events!r}")
         assert_git_status(project, env, [])
         if any(
-            event.get("before") != event.get("after")
-            or event.get("mutation") != "none"
+            event.get("before") != event.get("after") or event.get("mutation") != "none"
             for event in wms_calls(wms_log)
         ):
             raise AssertionError("stale-state scenario changed WMS records")

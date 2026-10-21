@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import replay  # noqa: E402
+import replay
 
 DEMO_SCENARIOS = ("approved-handoff", "rejection-revision")
 OUTPUT = replay.ROOT / "docs/architecture/fixtures/drafting-table-opencode-demo.md"

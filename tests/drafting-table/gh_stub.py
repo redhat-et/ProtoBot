@@ -87,7 +87,14 @@ def host_merge() -> str | None:
             capture_output=True,
         )
         subprocess.run(
-            ["git", "merge", "--quiet", "--no-ff", "--no-edit", "origin/" + pull["head"]],
+            [
+                "git",
+                "merge",
+                "--quiet",
+                "--no-ff",
+                "--no-edit",
+                "origin/" + pull["head"],
+            ],
             cwd=clone,
             check=True,
             env=env,

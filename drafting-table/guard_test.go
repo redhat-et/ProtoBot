@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -848,10 +849,24 @@ func TestRunStatusAndSingleLineContract(t *testing.T) {
 }
 
 func TestGuardExecutableRefusesControlFlowGovernedWrite(t *testing.T) {
+	// The fixture PATH prepends the directory holding git, which on a CI
+	// runner can shadow the module toolchain with a distro Go too old for
+	// go.work; build with the toolchain running this test instead. The
+	// fixture also redirects HOME, which would move the module cache into
+	// a test TempDir whose read-only module files break cleanup, so pin
+	// the real module cache before the redirect.
+	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
+	cache, err := exec.Command(goBin, "env", "GOMODCACHE").Output()
+	if err != nil {
+		t.Fatalf("read GOMODCACHE: %v", err)
+	}
 	fixture := newFixture(t, true, false)
 	binary := filepath.Join(t.TempDir(), "drafting-table-guard")
-	build := exec.Command("go", "build", "-o", binary, "./cmd/drafting-table-guard")
-	build.Env = safeCommandEnv()
+	build := exec.Command(goBin, "build", "-o", binary, "./cmd/drafting-table-guard")
+	build.Env = append(
+		safeCommandEnv(),
+		"GOMODCACHE="+strings.TrimSpace(string(cache)),
+	)
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build guard executable: %v: %s", err, output)
 	}

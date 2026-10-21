@@ -71,9 +71,7 @@ def main() -> int:
     ).hexdigest()
     entries = []
     if log.exists():
-        entries = [
-            json.loads(line) for line in log.read_text().splitlines() if line
-        ]
+        entries = [json.loads(line) for line in log.read_text().splitlines() if line]
     prior = next(
         (entry for entry in entries if entry["change_set"] == change_set), None
     )
@@ -97,7 +95,9 @@ def main() -> int:
         }
         entries.append(entry)
         with log.open("a", encoding="utf-8") as output:
-            output.write(json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n")
+            output.write(
+                json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
+            )
     sys.stdout.write(json.dumps(result, separators=(",", ":")) + "\n")
     return 0
 
