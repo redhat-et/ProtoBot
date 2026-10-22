@@ -35,8 +35,11 @@ OpenCode behavior named here was observed on OpenCode 1.18.30 with a
 replayed model ([Observed OpenCode behaviors](#observed-opencode-behaviors)).
 The fixture ran in #77 against the pinned OpenCode 1.18.30 binary, with
 real skills, permissions, plugin, MCP clients, shell, `ears-manager`, the
-Source Control Manager, and the guard, plus recording WMS and `gh` stubs.
-The recorded fixture covers the baseline guard vectors. Guard unit tests
+Source Control Manager, and the guard, plus recording WMS and `gh` stubs;
+#173 extended it to the four deterministic scenarios
+(approved-handoff, rejection-revision, stale-state, and
+WMS-unavailable). The recorded fixture covers the baseline guard
+vectors. Guard unit tests
 cover expanded Rule 4 and Rule 7 cases, but not all are represented in the
 fixture; the statuses below record the fixture evidence and the gaps it left
 open. See
