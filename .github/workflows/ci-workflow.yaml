@@ -344,22 +344,25 @@ jobs:
           path: ~/.cache/opencode-fixture
           key: opencode-1.18.30-linux-x64
 
-      # The tarball digest is verified on download, and the extracted
-      # binary digest is verified on every run, including a cache restore.
+      # The binary is never executed until its digest matches: the cached
+      # file is digest-checked before use, the tarball digest is verified
+      # on download, and the extracted binary digest is re-verified before
+      # the version check runs.
       - name: Install the pinned OpenCode 1.18.30 binary
         run: |
           set -eu
           dest="$HOME/.cache/opencode-fixture"
+          binary_digest="87bd160e053af86b5b409daabf71f8dc05bbc3a2a3a5f563f36011cdf706a999"
           mkdir -p "$dest"
-          if [ ! -x "$dest/opencode" ] || [ "$("$dest/opencode" --version)" != "1.18.30" ]; then
+          if [ ! -x "$dest/opencode" ] || ! echo "$binary_digest  $dest/opencode" | sha256sum -c --quiet; then
             curl -fsSL -o "$RUNNER_TEMP/opencode.tar.gz" \
               "https://github.com/sst/opencode/releases/download/v1.18.30/opencode-linux-x64.tar.gz"
             echo "55007246858165496ff85ba1c2b648f7421e8e2013bf4189a680c9ff8e699d17  $RUNNER_TEMP/opencode.tar.gz" | sha256sum -c -
             rm -rf "$dest"
             mkdir -p "$dest"
             tar -xzf "$RUNNER_TEMP/opencode.tar.gz" -C "$dest"
+            echo "$binary_digest  $dest/opencode" | sha256sum -c -
           fi
-          echo "87bd160e053af86b5b409daabf71f8dc05bbc3a2a3a5f563f36011cdf706a999  $dest/opencode" | sha256sum -c -
           test "$("$dest/opencode" --version)" = "1.18.30"
 
       - name: Replay the deterministic Drafting Table fixture
