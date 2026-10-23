@@ -15,12 +15,13 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "docs/architecture/fixtures/drafting-table-opencode-golden.jsonl"
 WMS_STUB = ROOT / "tests/drafting-table/wms_stub.py"
 GH_STUB = ROOT / "tests/drafting-table/gh_stub.py"
+REGISTER_STUB = ROOT / "tests/drafting-table/register_stub.py"
 PINNED_OPENCODE = "1.18.30"
 PROJECT_ID = "fixture-project"
 CHANGE_SET_ID = "CS-00002"
@@ -33,12 +34,27 @@ V2_ENV = (
 )
 
 
-def read_golden() -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Any]]:
+def read_golden() -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     records = [json.loads(line) for line in GOLDEN.read_text().splitlines() if line]
     fixture = next(record for record in records if record["kind"] == "fixture")
-    turns = {record["name"]: record for record in records if record["kind"] == "turn"}
-    expectation = next(record for record in records if record["kind"] == "expectation")
-    return fixture, turns, expectation
+    scenarios = {
+        record["name"]: {"expectation": record["expectation"], "turns": {}}
+        for record in records
+        if record["kind"] == "scenario"
+    }
+    for record in records:
+        if record["kind"] != "turn":
+            continue
+        name = record.get("scenario")
+        if name not in scenarios:
+            raise AssertionError(
+                f"golden turn {record.get('name')!r} references unknown scenario {name!r}"
+            )
+        scenarios[name]["turns"][record["name"]] = record
+    for name in fixture["scenarios"]:
+        if name not in scenarios:
+            raise AssertionError(f"golden fixture scenario {name!r} has no records")
+    return fixture, scenarios
 
 
 def sha256(path: Path) -> str:
@@ -192,6 +208,8 @@ class ReplayServer:
             for action in turn.get("actions", []):
                 args = json.dumps(action["arguments"], ensure_ascii=False)
                 args = args.replace("<PROJECT>", str(project))
+                for marker, value in self.replacements.items():
+                    args = args.replace(marker, value)
                 self.actions.append(
                     {"tool": action["tool"], "arguments": json.loads(args)}
                 )
@@ -309,6 +327,11 @@ def build_binaries(temp: Path, env: dict[str, str]) -> Path:
         f"#!{sys.executable}\nimport os, sys\nos.execv(sys.executable, [sys.executable, {str(GH_STUB)!r}, *sys.argv[1:]])\n"
     )
     gh.chmod(0o755)
+    register = bindir / "register-approved-change-set"
+    register.write_text(
+        f"#!{sys.executable}\nimport os, sys\nos.execv(sys.executable, [sys.executable, {str(REGISTER_STUB)!r}, *sys.argv[1:]])\n"
+    )
+    register.chmod(0o755)
     return bindir
 
 
@@ -341,13 +364,23 @@ def prepare_project(
     scm: Path,
     provider_url: str,
     wms_log: Path,
+    *,
+    wms_mode: str = "serving",
+    scenario_change_set: str = "CS-00002",
 ) -> dict[str, str]:
     bare = project.parent / "origin.git"
-    run(["git", "init", "--bare", str(bare)], cwd=project.parent, env=env)
+    run(
+        ["git", "init", "--bare", "--initial-branch=main", str(bare)],
+        cwd=project.parent,
+        env=env,
+    )
     project.mkdir()
     copy_project_inputs(project)
     (project / "opencode.json").write_text(
-        json.dumps(open_config(project, provider_url, wms_log), indent=2) + "\n"
+        json.dumps(
+            open_config(project, provider_url, wms_log, wms_mode=wms_mode), indent=2
+        )
+        + "\n"
     )
     run(["git", "init", "--initial-branch=main"], cwd=project, env=env)
     run(["git", "config", "user.name", "Fixture User"], cwd=project, env=env)
@@ -449,10 +482,57 @@ def prepare_project(
         env=env,
     )
     change_set = json_output(created)["data"]["change_set"]["id"]
-    if change_set != CHANGE_SET_ID:
-        raise AssertionError(
-            f"fixture setup made {change_set}, expected {CHANGE_SET_ID}"
+    if change_set != "CS-00002":
+        raise AssertionError(f"fixture setup made {change_set}, expected CS-00002")
+    if scenario_change_set == "CS-00002":
+        # The session under test starts on proposed CS-00002.
+        pass
+    else:
+        # Merge CS-00002 into the default branch so the scenario change
+        # set is cut from the merged baseline, as the adapter fixture
+        # session table specifies.
+        run(["git", "add", "-A"], cwd=project, env=env)
+        run(
+            ["git", "commit", "--quiet", "-m", "Fixture second change set"],
+            cwd=project,
+            env=env,
         )
+        second_branch = run(
+            ["git", "branch", "--show-current"], cwd=project, env=env
+        ).stdout.strip()
+        run(["git", "switch", "--quiet", "main"], cwd=project, env=env)
+        run(
+            ["git", "merge", "--quiet", "--no-ff", "--no-edit", second_branch],
+            cwd=project,
+            env=env,
+        )
+        run(["git", "push", "--quiet", "origin", "main"], cwd=project, env=env)
+        third = run(
+            [
+                str(ears),
+                "--output",
+                "json",
+                "change-set",
+                "create",
+                "--intent",
+                "Exercise the stale-state refresh sequence",
+                "--implementation-required",
+                "false",
+                "--implementation-rationale",
+                "Specification-only fixture change.",
+                "--created",
+                "2026-10-12T10:02:00Z",
+                "--affected-scope",
+                "drafting-table",
+            ],
+            cwd=project,
+            env=env,
+        )
+        third_id = json_output(third)["data"]["change_set"]["id"]
+        if third_id != scenario_change_set:
+            raise AssertionError(
+                f"fixture setup made {third_id}, expected {scenario_change_set}"
+            )
 
     (project / ".netrc").write_text(
         f"machine fixture.invalid login fixture password {SENTINEL}\n"
@@ -466,15 +546,19 @@ def prepare_project(
     return {"canonical_remote": canonical, "bare": str(bare)}
 
 
-def open_config(project: Path, provider_url: str, wms_log: Path) -> dict[str, Any]:
+def open_config(
+    project: Path, provider_url: str, wms_log: Path, *, wms_mode: str = "serving"
+) -> dict[str, Any]:
+    wms_command = [sys.executable, str(WMS_STUB), "--log", str(wms_log)]
+    if wms_mode == "fail-start":
+        wms_command.append("--fail-start")
+    elif wms_mode != "serving":
+        raise AssertionError(f"unknown WMS fixture mode {wms_mode!r}")
     return {
         "$schema": "https://opencode.ai/config.json",
         "share": "disabled",
         "mcp": {
-            "wms": {
-                "type": "local",
-                "command": [sys.executable, str(WMS_STUB), "--log", str(wms_log)],
-            },
+            "wms": {"type": "local", "command": wms_command},
             "scm": {
                 "type": "local",
                 "command": [
@@ -597,6 +681,7 @@ def canonical_tool_event(event: dict[str, Any]) -> str:
         "change-set compare",
         "requirement list",
         "artifact get",
+        "artifact put",
         "impact",
         "check",
     ):
@@ -613,6 +698,7 @@ def assert_resume_reads_before_write(
     write_names = {
         "apply_patch",
         "requirement add",
+        "artifact put",
         "change-set update --impact-file",
         "scm_commit",
         "scm_publish",
@@ -640,129 +726,321 @@ def skill_files() -> list[Path]:
     return [path for path in paths if path.is_file()]
 
 
-def run_scenario(
-    binary: str,
-    fixture: dict[str, Any],
-    turns: dict[str, dict[str, Any]],
-    expectation: dict[str, Any],
-) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="opencode-drafting-table-") as work:
-        temp = Path(work)
-        home = temp / "home"
-        project = temp / "project"
-        home.mkdir()
-        env = clean_env(os.environ, project=project, home=home)
-        bindir = build_binaries(temp, env)
-        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
-        env["DT_GH_LOG"] = str(temp / "gh-events.jsonl")
-        provider = ReplayServer()
-        wms_log = temp / "wms-events.jsonl"
-        project_context = prepare_project(
-            project,
-            env,
-            bindir / "ears-manager",
-            bindir / "source-control-manager",
-            provider.url,
-            wms_log,
+EXPECTED_SKILLS = "skills:drafting-specifications,eliciting-requirements"
+
+
+def source_hashes() -> dict[str, str]:
+    hashes = {
+        str(path.relative_to(ROOT)): sha256(path) for path in sorted(skill_files())
+    }
+    for path in (WMS_STUB, GH_STUB, REGISTER_STUB):
+        hashes[str(path.relative_to(ROOT))] = sha256(path)
+    driver = Path(__file__).resolve()
+    hashes[str(driver.relative_to(ROOT))] = sha256(driver)
+    hashes[str(GOLDEN.relative_to(ROOT))] = sha256(GOLDEN)
+    return hashes
+
+
+def wms_calls(wms_log: Path) -> list[dict[str, Any]]:
+    return [event for event in read_jsonl(wms_log) if event.get("event") == "call"]
+
+
+def assert_git_status(project: Path, env: dict[str, str], expected: list[str]) -> None:
+    status = run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=project,
+        env=env,
+    ).stdout.splitlines()
+    paths = sorted(line[3:] for line in status if line)
+    if paths != sorted(expected):
+        raise AssertionError(
+            f"working tree status {paths!r} differs from golden output {sorted(expected)!r}"
         )
+
+
+class ScenarioRun:
+    """One replay run: temp project, provider, and binding environment checks."""
+
+    def __init__(
+        self,
+        binary: str,
+        fixture: dict[str, Any],
+        bindir: Path,
+        *,
+        wms_mode: str = "serving",
+        change_set_id: str = "CS-00002",
+    ) -> None:
+        self.binary = binary
+        self.fixture = fixture
+        self.bindir = bindir
+        self.change_set_id = change_set_id
+        self._work = tempfile.TemporaryDirectory(prefix="opencode-drafting-table-")
+        self.temp = Path(self._work.name)
+        self.home = self.temp / "home"
+        self.project = self.temp / "project"
+        self.home.mkdir()
+        self.env = clean_env(os.environ, project=self.project, home=self.home)
+        self.env["PATH"] = str(bindir) + os.pathsep + self.env.get("PATH", "")
+        self.env["DT_GH_LOG"] = str(self.temp / "gh-events.jsonl")
+        self.provider = ReplayServer()
+        self.wms_log = self.temp / "wms-events.jsonl"
+        self._disposed = False
+        # Per-turn tool evidence for the recorded demonstration; never
+        # part of the deterministic scenario summary.
+        self.narrative: list[dict[str, Any]] = []
+        try:
+            self.project_context = prepare_project(
+                self.project,
+                self.env,
+                bindir / "ears-manager",
+                bindir / "source-control-manager",
+                self.provider.url,
+                self.wms_log,
+                wms_mode=wms_mode,
+                scenario_change_set=change_set_id,
+            )
+            self._verify_environment()
+        except BaseException:
+            self.provider.close()
+            self._work.cleanup()
+            raise
+
+    def _verify_environment(self) -> None:
+        project = self.project
+        env = self.env
         effective_remote = run(
             ["git", "remote", "get-url", "origin"], cwd=project, env=env
         ).stdout.strip()
         if not effective_remote.startswith("file://"):
             raise AssertionError(
-                f"fixture Git origin is not rewritten to the local bare repository: {effective_remote!r}"
+                "fixture Git origin is not rewritten to the local bare repository: "
+                f"{effective_remote!r}"
             )
-        vision_path = project / "docs/vision.md"
-        vision_before_patch = vision_path.read_bytes()
-
-        # The project's native rules remain the binding's real rules; the
-        # WMS contract placeholder is the one fixture override.
-        # OpenCode skill discovery is checked from a nested directory.
-        nested = project / "src/subdirectory"
-        nested.mkdir(parents=True)
-
+        self.effective_remote = effective_remote
         binary_version = run(
-            [binary, "--version"], cwd=project, env=env, timeout=30
+            [self.binary, "--version"], cwd=project, env=env, timeout=30
         ).stdout.strip()
         if binary_version != PINNED_OPENCODE:
             raise AssertionError(
                 f"OpenCode must be pinned to {PINNED_OPENCODE}, got {binary_version!r}"
             )
+        self.binary_version = binary_version
+        # OpenCode skill discovery is checked from a nested directory.
+        self.nested = project / "src/subdirectory"
+        self.nested.mkdir(parents=True)
+        discovered = opencode_command(
+            self.binary, ["debug", "skill"], project=self.nested, env=env
+        )
+        discovered_skills = json.loads(discovered.stdout)
+        discovered_names = {item.get("name") for item in discovered_skills}
+        required_names = {
+            "drafting-specifications",
+            "eliciting-requirements",
+            "review-pr",
+        }
+        missing_skills = sorted(required_names - discovered_names)
+        if missing_skills:
+            raise AssertionError(
+                f"OpenCode did not discover {missing_skills!r}; "
+                f"discovered={sorted(str(name) for name in discovered_names)}"
+            )
+        agent_debug = opencode_command(
+            self.binary, ["debug", "agent", "drafting-table"], project=project, env=env
+        ).stdout
+        config_debug = opencode_command(
+            self.binary, ["debug", "config"], project=project, env=env
+        ).stdout
+        resolved_agent = json.loads(agent_debug)
+        resolved_rules = resolved_agent.get("permission", [])
+        own_rules_start = max(
+            (
+                index
+                for index, rule in enumerate(resolved_rules)
+                if rule.get("permission") == "*" and rule.get("action") == "deny"
+            ),
+            default=len(resolved_rules),
+        )
+        own_rules = resolved_rules[own_rules_start:]
+        if any(rule.get("action") == "ask" for rule in own_rules):
+            raise AssertionError(
+                "Drafting Table agent rules introduce an ask permission"
+            )
+        if '"disabled"' not in config_debug and "disabled" not in config_debug.lower():
+            raise AssertionError(
+                "resolved OpenCode config does not show share=disabled"
+            )
+
+    def base_commit(self, change_set: str) -> str:
+        # Record the authoritative base revision for explicit approval
+        # messages; never bind approval to conversational memory.
+        show = run(
+            [
+                str(self.bindir / "ears-manager"),
+                "--output",
+                "json",
+                "change-set",
+                "show",
+                "--change-set",
+                change_set,
+            ],
+            cwd=self.project,
+            env=self.env,
+        )
+        show_data = json_output(show)["data"]
+        base_commit = show_data.get("change_set", {}).get(
+            "base_commit"
+        ) or show_data.get("base_commit")
+        if not isinstance(base_commit, str) or len(base_commit) != 40:
+            raise AssertionError(
+                f"could not read a full base_commit from change-set show: {show.stdout}"
+            )
+        return base_commit
+
+    def git_head(self) -> str:
+        return run(
+            ["git", "rev-parse", "HEAD"], cwd=self.project, env=self.env
+        ).stdout.strip()
+
+    def turn_output(
+        self, turn: dict[str, Any], args: list[str], cwd: Path | None = None
+    ) -> str:
+        output = invoke_turn(
+            self.binary,
+            self.provider,
+            turn,
+            turn["name"],
+            args,
+            self.project,
+            self.env,
+            cwd,
+        )
+        self.narrative.append(
+            {
+                "turn": turn["name"],
+                "tools": [
+                    {
+                        "tool": canonical_tool_event(event),
+                        "status": event["status"],
+                    }
+                    for event in tool_events(output)
+                ],
+            }
+        )
+        return output
+
+    def new_role_session(
+        self,
+        turn: dict[str, Any],
+        required_reads: list[str],
+        cwd: Path | None = None,
+    ) -> tuple[str, str]:
+        """Start a session through the Drafting Table command entry point."""
+        before = len(self.provider.requests)
+        output = self.turn_output(
+            turn,
+            [
+                "run",
+                "--agent",
+                "drafting-table",
+                "--command",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                self.fixture["model"],
+                turn["prompt"],
+            ],
+            cwd,
+        )
+        assert_resume_reads_before_write(output, turn["name"], required_reads)
+        skill_list = next(
+            (
+                item
+                for item in check_call_order(self.provider, before)
+                if item.startswith("skills:")
+            ),
+            "",
+        )
+        if EXPECTED_SKILLS not in skill_list.replace(" ", ""):
+            raise AssertionError(
+                f"session {turn['name']!r} did not receive the Toolkit allowlist: {skill_list!r}"
+            )
+        return session_id(output), output
+
+    def resume_session(self, turn: dict[str, Any], sid: str) -> str:
+        return self.turn_output(
+            turn,
+            [
+                "run",
+                "--session",
+                sid,
+                "--agent",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                self.fixture["model"],
+                turn["prompt"],
+            ],
+        )
+
+    def export(
+        self,
+        session: str,
+        expected_skill_markers: tuple[str, ...] = ("# Drafting Specifications",),
+        expected_agent: str = "drafting-table",
+    ) -> tuple[str, str]:
+        return export_session(
+            self.binary,
+            session,
+            self.project,
+            self.env,
+            expected_skill_markers=expected_skill_markers,
+            expected_agent=expected_agent,
+        )
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self.provider.close()
+        self._work.cleanup()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.dispose()
+
+
+def run_approved(
+    binary: str,
+    fixture: dict[str, Any],
+    scenario: dict[str, Any],
+    bindir: Path,
+) -> dict[str, Any]:
+    turns = scenario["turns"]
+    expectation = scenario["expectation"]
+    harness = ScenarioRun(binary, fixture, bindir)
+    with harness:
+        project = harness.project
+        env = harness.env
+        provider = harness.provider
+        bindir = harness.bindir
+        nested = harness.nested
+        binary_version = harness.binary_version
+        effective_remote = harness.effective_remote
+        wms_log = harness.wms_log
+        project_context = harness.project_context
+        vision_path = project / "docs/vision.md"
+        vision_before_patch = vision_path.read_bytes()
+
+        # Record the authoritative base revision for the two explicit
+        # approval messages; never bind approval to conversational memory.
+        base_commit = harness.base_commit(CHANGE_SET_ID)
+        provider.replacements["<BASE_COMMIT>"] = base_commit
 
         try:
-            discovered = opencode_command(
-                binary, ["debug", "skill"], project=nested, env=env
-            )
-            discovered_skills = json.loads(discovered.stdout)
-            discovered_names = {item.get("name") for item in discovered_skills}
-            required_names = {
-                "drafting-specifications",
-                "eliciting-requirements",
-                "review-pr",
-            }
-            missing_skills = sorted(required_names - discovered_names)
-            if missing_skills:
-                raise AssertionError(
-                    f"OpenCode did not discover {missing_skills!r}; "
-                    f"discovered={sorted(str(name) for name in discovered_names)}"
-                )
-            agent_debug = opencode_command(
-                binary, ["debug", "agent", "drafting-table"], project=project, env=env
-            ).stdout
-            config_debug = opencode_command(
-                binary, ["debug", "config"], project=project, env=env
-            ).stdout
-            resolved_agent = json.loads(agent_debug)
-            resolved_rules = resolved_agent.get("permission", [])
-            own_rules_start = max(
-                (
-                    index
-                    for index, rule in enumerate(resolved_rules)
-                    if rule.get("permission") == "*" and rule.get("action") == "deny"
-                ),
-                default=len(resolved_rules),
-            )
-            own_rules = resolved_rules[own_rules_start:]
-            if any(rule.get("action") == "ask" for rule in own_rules):
-                raise AssertionError(
-                    "Drafting Table agent rules introduce an ask permission"
-                )
-            if (
-                '"disabled"' not in config_debug
-                and "disabled" not in config_debug.lower()
-            ):
-                raise AssertionError(
-                    "resolved OpenCode config does not show share=disabled"
-                )
-
-            # Record the authoritative base revision for the two explicit
-            # approval messages; never bind approval to conversational memory.
-            show = run(
-                [
-                    str(bindir / "ears-manager"),
-                    "--output",
-                    "json",
-                    "change-set",
-                    "show",
-                    "--change-set",
-                    CHANGE_SET_ID,
-                ],
-                cwd=project,
-                env=env,
-            )
-            show_data = json_output(show)["data"]
-            base_commit = show_data.get("change_set", {}).get(
-                "base_commit"
-            ) or show_data.get("base_commit")
-            if not isinstance(base_commit, str) or len(base_commit) != 40:
-                raise AssertionError(
-                    f"could not read a full base_commit from change-set show: {show.stdout}"
-                )
-            provider.replacements["<BASE_COMMIT>"] = base_commit
-
-            run_turn = lambda turn, args, cwd=None: invoke_turn(
-                binary, provider, turn, turn["name"], args, project, env, cwd
-            )
             # Session A begins outside the role, then resumes through the
             # actual Drafting Table command before any governed write.
             outside = turns["outside-role-prelude"]
@@ -790,7 +1068,7 @@ def run_scenario(
 
             start = turns["start-and-resume-reads"]
             start_from = len(provider.requests)
-            start_result = run_turn(
+            start_result = harness.turn_output(
                 start,
                 [
                     "run",
@@ -823,63 +1101,17 @@ def run_scenario(
             toolkit_prompt = next(
                 (item for item in skill_prompts if item.startswith("skills:")), ""
             )
-            expected_skills = (
-                "skills: drafting-specifications, eliciting-requirements".replace(
-                    " ", ""
-                )
-            )
 
-            def start_role_session(
-                turn: dict[str, Any], cwd: Path | None = None
-            ) -> tuple[str, str]:
-                before = len(provider.requests)
-                output = run_turn(
-                    turn,
-                    [
-                        "run",
-                        "--agent",
-                        "drafting-table",
-                        "--command",
-                        "drafting-table",
-                        "--format",
-                        "json",
-                        "--model",
-                        fixture["model"],
-                        turn["prompt"],
-                    ],
-                    cwd,
-                )
-                assert_resume_reads_before_write(
-                    output,
-                    turn["name"],
-                    expectation["start_before_first_write"],
-                )
-                skill_list = next(
-                    (
-                        item
-                        for item in check_call_order(provider, before)
-                        if item.startswith("skills:")
-                    ),
-                    "",
-                )
-                if expected_skills not in skill_list.replace(" ", ""):
-                    raise AssertionError(
-                        f"session {turn['name']!r} did not receive the Toolkit allowlist: {skill_list!r}"
-                    )
-                return session_id(output), output
-
-            if expected_skills not in toolkit_prompt.replace(" ", ""):
+            if EXPECTED_SKILLS not in toolkit_prompt.replace(" ", ""):
                 raise AssertionError(
                     f"model did not receive exactly the Toolkit skills: {toolkit_prompt!r}"
                 )
 
-            session_a_export, session_a_sanitized = export_session(
-                binary, sid_a, project, env
-            )
+            session_a_export, session_a_sanitized = harness.export(sid_a)
 
             skill_turn = turns["skill-discovery-refusals"]
             skill_from = len(provider.requests)
-            skill_result = run_turn(
+            skill_result = harness.turn_output(
                 skill_turn,
                 [
                     "run",
@@ -909,7 +1141,7 @@ def run_scenario(
                 ),
                 "",
             )
-            if expected_skills not in skill_toolkit_prompt.replace(" ", ""):
+            if EXPECTED_SKILLS not in skill_toolkit_prompt.replace(" ", ""):
                 raise AssertionError(
                     f"skill/refusal session did not receive the Toolkit allowlist: {skill_toolkit_prompt!r}"
                 )
@@ -936,22 +1168,78 @@ def run_scenario(
                 raise AssertionError(
                     f"both unapproved review-pr routes were not refused: {refusal_events!r}"
                 )
-            session_b_export, session_b_sanitized = export_session(
-                binary,
+            session_b_export, session_b_sanitized = harness.export(
                 sid_b,
-                project,
-                env,
                 expected_skill_markers=(
                     "# Drafting Specifications",
                     "# Eliciting Requirements",
                 ),
             )
 
+            # A Drafting Table caller cannot invoke Job Site lifecycle
+            # operations: OpenCode offers only the manifest-listed governed
+            # tools to the role, and the guard refuses unlisted ones
+            # outright, so the operation never reaches the WMS stub.
+            jobsite = turns["jobsite-lifecycle-refusal"]
+            jobsite_from = len(provider.requests)
+            sid_jobsite, jobsite_result = harness.new_role_session(
+                jobsite, expectation["start_before_first_write"]
+            )
+            jobsite_refusal = expectation["jobsite_lifecycle_refusal"]
+            offered: set[str] = set()
+            with provider.lock:
+                for request in provider.requests[jobsite_from:]:
+                    for tool in request.get("tools") or []:
+                        offered.add(str(tool.get("function", {}).get("name")))
+            if jobsite_refusal["tool"] in offered:
+                raise AssertionError(
+                    f"Job Site lifecycle operation {jobsite_refusal['tool']!r} was "
+                    f"offered to the drafting-table role"
+                )
+            jobsite_input = {
+                "hook_event_name": "PreToolUse",
+                "session_id": sid_jobsite,
+                "cwd": str(project),
+                "tool_name": jobsite_refusal["tool"],
+                "tool_input": {},
+            }
+            jobsite_guard = run(
+                [
+                    str(bindir / "drafting-table-guard"),
+                    "--harness",
+                    "opencode",
+                    "--role",
+                    "drafting-table",
+                ],
+                cwd=project,
+                env=env,
+                check=False,
+                input_text=json.dumps(jobsite_input),
+            )
+            if (
+                jobsite_guard.returncode != 2
+                or jobsite_refusal["guard_reason"] not in jobsite_guard.stderr
+            ):
+                raise AssertionError(
+                    f"Job Site lifecycle guard vector failed: "
+                    f"exit={jobsite_guard.returncode}, stderr={jobsite_guard.stderr!r}"
+                )
+            if any(
+                event.get("tool") == jobsite_refusal["tool"]
+                for event in wms_calls(wms_log)
+            ):
+                raise AssertionError(
+                    "Job Site lifecycle operation reached the recording WMS stub"
+                )
+            session_jobsite_export, session_jobsite_sanitized = harness.export(
+                sid_jobsite
+            )
+
             # A new session must repeat the resume reads before the candidate
             # write; it does not inherit authoritative state from chat.
             fresh = turns["fresh-session-resume"]
             fresh_from = len(provider.requests)
-            fresh_result = run_turn(
+            fresh_result = harness.turn_output(
                 fresh,
                 [
                     "run",
@@ -975,13 +1263,13 @@ def run_scenario(
             fresh_toolkit_prompt = next(
                 (item for item in fresh_skills if item.startswith("skills:")), ""
             )
-            if expected_skills not in fresh_toolkit_prompt.replace(" ", ""):
+            if EXPECTED_SKILLS not in fresh_toolkit_prompt.replace(" ", ""):
                 raise AssertionError(
                     f"fresh session did not receive exactly the Toolkit skills: {fresh_toolkit_prompt!r}"
                 )
 
             failure = turns["failed-candidate-write"]
-            failure_result = run_turn(
+            failure_result = harness.turn_output(
                 failure,
                 [
                     "run",
@@ -1001,14 +1289,14 @@ def run_scenario(
                 raise AssertionError(
                     f"ears-manager validation failure was not returned unchanged: {failure_result}"
                 )
-            session_c_export, session_c_sanitized = export_session(
-                binary, sid_c, project, env
-            )
+            session_c_export, session_c_sanitized = harness.export(sid_c)
 
             candidate_resume = turns["candidate-present-resume"]
-            sid_d, candidate_resume_result = start_role_session(candidate_resume)
+            sid_d, candidate_resume_result = harness.new_role_session(
+                candidate_resume, expectation["start_before_first_write"]
+            )
             accepted_write = turns["accepted-candidate-write"]
-            accepted_write_result = run_turn(
+            accepted_write_result = harness.turn_output(
                 accepted_write,
                 [
                     "run",
@@ -1024,12 +1312,12 @@ def run_scenario(
                 ],
             )
             provider.assert_consumed(accepted_write)
-            session_d_export, session_d_sanitized = export_session(
-                binary, sid_d, project, env
-            )
+            session_d_export, session_d_sanitized = harness.export(sid_d)
 
             review = turns["review-proposal"]
-            sid_e, review_result = start_role_session(review)
+            sid_e, review_result = harness.new_role_session(
+                review, expectation["start_before_first_write"]
+            )
             if (
                 base_commit not in review_result
                 or fixture["requirement_id"] not in review_result
@@ -1052,12 +1340,12 @@ def run_scenario(
                     "the golden unsafe shell command did not receive an active guard refusal: "
                     f"{tool_events(review_result)!r}"
                 )
-            session_e_export, session_e_sanitized = export_session(
-                binary, sid_e, project, env
-            )
+            session_e_export, session_e_sanitized = harness.export(sid_e)
 
             approved_resume = turns["approved-proposal-resume"]
-            sid_f, approved_resume_result = start_role_session(approved_resume)
+            sid_f, approved_resume_result = harness.new_role_session(
+                approved_resume, expectation["start_before_first_write"]
+            )
             if (
                 base_commit not in approved_resume_result
                 or fixture["requirement_id"] not in approved_resume_result
@@ -1069,7 +1357,7 @@ def run_scenario(
             approval = turns["explicit-approval-and-handoff"]
             approval_prompt = approval["prompt"].replace("<BASE_COMMIT>", base_commit)
             approval = {**approval, "prompt": approval_prompt}
-            approval_result = run_turn(
+            approval_result = harness.turn_output(
                 approval,
                 [
                     "run",
@@ -1099,12 +1387,12 @@ def run_scenario(
                         f"explicit approval did not complete {tool_name}: {approval_tools!r}"
                     )
 
-            session_f_export, session_f_sanitized = export_session(
-                binary, sid_f, project, env
-            )
+            session_f_export, session_f_sanitized = harness.export(sid_f)
 
             patch_turn = turns["subdirectory-apply-patch"]
-            sid_g, patch_result = start_role_session(patch_turn, cwd=nested)
+            sid_g, patch_result = harness.new_role_session(
+                patch_turn, expectation["start_before_first_write"], cwd=nested
+            )
             patch_vector = expectation["apply_patch_guard_vector"]
             if nested.relative_to(project).as_posix() != patch_vector["cwd"]:
                 raise AssertionError(
@@ -1181,12 +1469,10 @@ def run_scenario(
                 raise AssertionError(
                     "subdirectory apply_patch changed the registered Vision bytes"
                 )
-            session_g_export, session_g_sanitized = export_session(
-                binary, sid_g, project, env
-            )
+            session_g_export, session_g_sanitized = harness.export(sid_g)
 
             non_role_turn = turns["non-role-redirection-vectors"]
-            non_role_result = run_turn(
+            non_role_result = harness.turn_output(
                 non_role_turn,
                 [
                     "run",
@@ -1232,13 +1518,8 @@ def run_scenario(
                     "Vision byte-preservation evidence differs from golden output"
                 )
             sid_h = session_id(non_role_result)
-            session_h_export, session_h_sanitized = export_session(
-                binary,
-                sid_h,
-                project,
-                env,
-                expected_skill_markers=(),
-                expected_agent="build",
+            session_h_export, session_h_sanitized = harness.export(
+                sid_h, expected_skill_markers=(), expected_agent="build"
             )
             exports = (
                 session_a_export,
@@ -1248,6 +1529,7 @@ def run_scenario(
                 session_e_export,
                 session_f_export,
                 session_g_export,
+                session_jobsite_export,
                 session_h_export,
             )
             if not any(
@@ -1350,18 +1632,16 @@ def run_scenario(
                 )
 
             wms_events = read_jsonl(wms_log)
-            wms_calls = [event for event in wms_events if event.get("event") == "call"]
+            calls = [event for event in wms_events if event.get("event") == "call"]
             wms_started = sum(event.get("event") == "started" for event in wms_events)
             wms_stopped = sum(event.get("event") == "stopped" for event in wms_events)
-            if not any(
-                event.get("tool") == "blocked_work_query" for event in wms_calls
-            ):
+            if not any(event.get("tool") == "blocked_work_query" for event in calls):
                 raise AssertionError(f"WMS blocked work was not read: {wms_events!r}")
             if wms_started == 0 or wms_started != wms_stopped:
                 raise AssertionError(
                     f"recording WMS MCP process did not stop cleanly: {wms_events!r}"
                 )
-            if any(event.get("before") != event.get("after") for event in wms_calls):
+            if any(event.get("before") != event.get("after") for event in calls):
                 raise AssertionError(
                     f"WMS lifecycle state changed in the recording stub: {wms_events!r}"
                 )
@@ -1387,10 +1667,13 @@ def run_scenario(
                 review_result,
                 approved_resume_result,
                 approval_result,
+                jobsite_result,
                 session_a_export,
                 session_a_sanitized,
                 session_b_export,
                 session_b_sanitized,
+                session_jobsite_export,
+                session_jobsite_sanitized,
                 session_c_export,
                 session_c_sanitized,
                 session_d_export,
@@ -1418,16 +1701,7 @@ def run_scenario(
                     "headless replay emitted a permission prompt/rejection"
                 )
 
-            source_hashes = {
-                str(path.relative_to(ROOT)): sha256(path)
-                for path in sorted(skill_files())
-            }
-            for path in (WMS_STUB, GH_STUB):
-                source_hashes[str(path.relative_to(ROOT))] = sha256(path)
-            source_hashes[str(Path(__file__).resolve().relative_to(ROOT))] = sha256(
-                Path(__file__).resolve()
-            )
-            source_hashes[str(GOLDEN.relative_to(ROOT))] = sha256(GOLDEN)
+            input_hashes = source_hashes()
             summary = {
                 "fixture": fixture["name"],
                 "opencode_version": binary_version,
@@ -1455,6 +1729,8 @@ def run_scenario(
                     ),
                     "explicit_approval_and_handoff": "pull request"
                     in approval_result.lower(),
+                    "jobsite_lifecycle_refused": jobsite_guard.returncode == 2
+                    and jobsite_refusal["tool"] not in offered,
                     "session_exported": True,
                     "session_export_count": len(exports),
                     "vision_unchanged_after_write_probes": vision_unchanged,
@@ -1481,17 +1757,626 @@ def run_scenario(
                     "state_after": fixture["blocked_work_item"]["state"],
                     "mutations": 0,
                 },
-                "source_input_sha256": source_hashes,
+                "source_input_sha256": input_hashes,
             }
+            if summary["chat"]["session_export_count"] != expectation["exports"]:
+                raise AssertionError(
+                    f"golden expects {expectation['exports']} exports, got "
+                    f"{summary['chat']['session_export_count']}"
+                )
             stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
             return {
                 "summary": summary,
                 "stable": stable,
-                "session_ids": [sid_a, sid_b, sid_c, sid_d, sid_e, sid_f, sid_g, sid_h],
+                "narrative": harness.narrative,
+                "session_ids": [
+                    sid_a,
+                    sid_b,
+                    sid_jobsite,
+                    sid_c,
+                    sid_d,
+                    sid_e,
+                    sid_f,
+                    sid_g,
+                    sid_h,
+                ],
                 "project_context": project_context,
             }
         finally:
-            provider.close()
+            harness.dispose()
+
+
+def run_rejection(
+    binary: str,
+    fixture: dict[str, Any],
+    scenario: dict[str, Any],
+    bindir: Path,
+) -> dict[str, Any]:
+    """Rejection returns to the prior checkpoint; revision goes through
+    ears-manager only and stays uncommitted for renewed review."""
+    turns = scenario["turns"]
+    expectation = scenario["expectation"]
+    harness = ScenarioRun(binary, fixture, bindir)
+    with harness:
+        provider = harness.provider
+        project = harness.project
+        env = harness.env
+        wms_log = harness.wms_log
+        gh_log = Path(env["DT_GH_LOG"])
+        ears = str(harness.bindir / "ears-manager")
+
+        base_commit = harness.base_commit(CHANGE_SET_ID)
+        provider.replacements["<BASE_COMMIT>"] = base_commit
+
+        presentation = turns["rejection-presentation"]
+        sid, presentation_result = harness.new_role_session(
+            presentation, expectation["start_before_first_write"]
+        )
+        if (
+            base_commit not in presentation_result
+            or fixture["requirement_id"] not in presentation_result
+        ):
+            raise AssertionError(
+                "rejection presentation did not identify the exact proposal and base: "
+                f"{presentation_result}"
+            )
+
+        # Rejection is rejection-as-revision: no tool call, no WMS record,
+        # no host action, no commit, and the draft is preserved.
+        rejection = turns["explicit-rejection"]
+        calls_before = wms_calls(wms_log)
+        gh_before = read_jsonl(gh_log)
+        status_before = run(
+            ["git", "status", "--porcelain"], cwd=project, env=env
+        ).stdout
+        head_before = harness.git_head()
+        rejection_result = harness.resume_session(rejection, sid)
+        if tool_events(rejection_result):
+            raise AssertionError(
+                f"explicit rejection made tool calls: {tool_events(rejection_result)!r}"
+            )
+        if wms_calls(wms_log) != calls_before:
+            raise AssertionError("explicit rejection changed WMS records")
+        if (
+            run(["git", "status", "--porcelain"], cwd=project, env=env).stdout
+            != status_before
+        ):
+            raise AssertionError("explicit rejection changed the working tree")
+        if harness.git_head() != head_before:
+            raise AssertionError("explicit rejection moved the checked-out branch")
+        if read_jsonl(gh_log) != gh_before:
+            raise AssertionError(
+                f"explicit rejection reached the Git host: {read_jsonl(gh_log)!r}"
+            )
+        req_list = run(
+            [ears, "--output", "json", "requirement", "list"], cwd=project, env=env
+        )
+        if fixture["requirement_id"] not in req_list.stdout:
+            raise AssertionError(
+                f"rejected proposal did not preserve the draft candidate: {req_list.stdout}"
+            )
+
+        # The requested revision is written through ears-manager only in a
+        # fresh session that reconstructs state first, then validation and
+        # impact rerun; no commit or publish follows.
+        revision = turns["rejection-vision-revision"]
+        sid_revision, revision_result = harness.new_role_session(
+            revision, expectation["start_before_first_write"]
+        )
+        revision_events = tool_events(revision_result)
+        if any(
+            event["tool"] in ("scm_commit", "scm_publish") for event in revision_events
+        ):
+            raise AssertionError(
+                f"revision attempted a Git operation: {revision_events!r}"
+            )
+        vision_revision = expectation["vision_revision"]
+        vision_path = project / "docs/vision.md"
+        if vision_path.read_text() != vision_revision["content"]:
+            raise AssertionError(
+                "revised Vision content differs from golden output: "
+                f"{vision_path.read_text()!r}"
+            )
+        assert_git_status(project, env, vision_revision["git_status_paths"])
+        if harness.git_head() != head_before:
+            raise AssertionError("revision committed without explicit approval")
+        if any(
+            event.get("before") != event.get("after") or event.get("mutation") != "none"
+            for event in wms_calls(wms_log)
+        ):
+            raise AssertionError("revision changed WMS records")
+        if any(event.get("event") != "list" for event in read_jsonl(gh_log)):
+            raise AssertionError(
+                f"revision reached the Git host: {read_jsonl(gh_log)!r}"
+            )
+        check = run(
+            [ears, "--output", "json", "check", "--change-set", CHANGE_SET_ID],
+            cwd=project,
+            env=env,
+        )
+        if "artifact.digest_mismatch" in check.stdout:
+            raise AssertionError(
+                f"revised Vision failed the registry digest check: {check.stdout}"
+            )
+
+        session_export, session_sanitized = harness.export(sid)
+        if SENTINEL in session_export or SENTINEL in session_sanitized:
+            raise AssertionError(
+                "a planted token-shaped secret appeared in a session export"
+            )
+        revision_export, revision_sanitized = harness.export(sid_revision)
+        if SENTINEL in revision_export or SENTINEL in revision_sanitized:
+            raise AssertionError(
+                "a planted token-shaped secret appeared in a session export"
+            )
+
+        summary = {
+            "fixture": fixture["name"],
+            "opencode_version": harness.binary_version,
+            "recorded_model": fixture["model"],
+            "chat": {
+                "candidate_presented": fixture["requirement_id"],
+                "explicit_rejection": {
+                    "tool_calls": 0,
+                    "returned_to_prior_checkpoint": True,
+                    "baseline_commit_unchanged": True,
+                },
+                "revision": {
+                    "vision_revised": True,
+                    "vision_content": vision_revision["content"],
+                    "committed": False,
+                },
+                "session_exported": True,
+                "session_export_count": 2,
+            },
+            "git": {
+                "pr_create_count": 0,
+                "working_tree_status_paths": sorted(
+                    vision_revision["git_status_paths"]
+                ),
+            },
+            "wms": {
+                "blocked_item": fixture["blocked_work_item"]["id"],
+                "state_before": fixture["blocked_work_item"]["state"],
+                "state_after": expectation["wms_state_after"],
+                "mutations": 0,
+            },
+            "source_input_sha256": source_hashes(),
+        }
+        if summary["chat"]["session_export_count"] != expectation["exports"]:
+            raise AssertionError(
+                f"golden expects {expectation['exports']} exports, got "
+                f"{summary['chat']['session_export_count']}"
+            )
+        stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+        return {
+            "summary": summary,
+            "stable": stable,
+            "narrative": harness.narrative,
+            "session_ids": [sid, sid_revision],
+        }
+
+
+def run_wms_unavailable(
+    binary: str,
+    fixture: dict[str, Any],
+    scenario: dict[str, Any],
+    bindir: Path,
+) -> dict[str, Any]:
+    """A session started with the WMS stub stopped marks blocked work
+    unavailable and continues drafting without any WMS call."""
+    turns = scenario["turns"]
+    expectation = scenario["expectation"]
+    harness = ScenarioRun(binary, fixture, bindir, wms_mode="fail-start")
+    with harness:
+        project = harness.project
+        env = harness.env
+        gh_log = Path(env["DT_GH_LOG"])
+
+        turn = turns["wms-down-start"]
+        sid, output = harness.new_role_session(
+            turn, expectation["start_before_first_write"]
+        )
+        if "unavailable" not in output.lower():
+            raise AssertionError(
+                f"session did not mark blocked work unavailable: {output}"
+            )
+        events = tool_events(output)
+        if any(event["tool"].startswith("wms_") for event in events):
+            raise AssertionError(f"a WMS call was attempted: {events!r}")
+        # The stub never served, so OpenCode could not offer WMS tools at all.
+        for request in harness.provider.requests:
+            offered = {
+                tool.get("function", {}).get("name")
+                for tool in request.get("tools") or []
+            }
+            wms_offered = sorted(
+                str(name) for name in offered if str(name).startswith("wms_")
+            )
+            if wms_offered:
+                raise AssertionError(
+                    f"WMS tools were offered while the stub was down: {wms_offered!r}"
+                )
+        names = [canonical_tool_event(event) for event in events]
+        for name in expectation["start_before_first_write"]:
+            if name not in names:
+                raise AssertionError(
+                    f"governed read {name!r} did not complete while the WMS was down; "
+                    f"tool sequence={names!r}"
+                )
+        wms_events = read_jsonl(harness.wms_log)
+        if any(event.get("event") == "call" for event in wms_events):
+            raise AssertionError(f"WMS calls were recorded: {wms_events!r}")
+        if any(event.get("event") == "started" for event in wms_events):
+            raise AssertionError(f"the WMS stub served while down: {wms_events!r}")
+        if not any(event.get("event") == "failed-start" for event in wms_events):
+            raise AssertionError(
+                f"the WMS stub did not record its failed start: {wms_events!r}"
+            )
+        gh_events = read_jsonl(gh_log)
+        if any(event.get("event") != "list" for event in gh_events):
+            raise AssertionError(
+                f"WMS-unavailable session reached the Git host: {gh_events!r}"
+            )
+        assert_git_status(project, env, expectation["git_status_paths"])
+
+        session_export, session_sanitized = harness.export(sid)
+        if SENTINEL in session_export or SENTINEL in session_sanitized:
+            raise AssertionError(
+                "a planted token-shaped secret appeared in a session export"
+            )
+
+        summary = {
+            "fixture": fixture["name"],
+            "opencode_version": harness.binary_version,
+            "recorded_model": fixture["model"],
+            "chat": {
+                "blocked_work_marked_unavailable": True,
+                "drafting_continued": True,
+                "wms_tools_offered": 0,
+                "session_exported": True,
+                "session_export_count": 1,
+            },
+            "git": {"working_tree_clean": True, "pr_create_count": 0},
+            "wms": {
+                "wms_available": False,
+                "wms_calls_succeeded": 0,
+                "mutations": 0,
+            },
+            "source_input_sha256": source_hashes(),
+        }
+        if summary["chat"]["session_export_count"] != expectation["exports"]:
+            raise AssertionError(
+                f"golden expects {expectation['exports']} exports, got "
+                f"{summary['chat']['session_export_count']}"
+            )
+        stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+        return {
+            "summary": summary,
+            "stable": stable,
+            "narrative": harness.narrative,
+            "session_ids": [sid],
+        }
+
+
+def push_default_move(harness: ScenarioRun) -> str:
+    """Push one commit to the default branch of the bare origin from
+    outside any session; returns the new default-branch head."""
+    env = harness.env
+    mover = harness.temp / "mover"
+    bare = Path(harness.project_context["bare"])
+    run(["git", "clone", "--quiet", str(bare), str(mover)], cwd=harness.temp, env=env)
+    (mover / "default-move.md").write_text("The default branch moved.\n")
+    run(["git", "add", "default-move.md"], cwd=mover, env=env)
+    run(["git", "commit", "--quiet", "-m", "Default branch move"], cwd=mover, env=env)
+    run(["git", "push", "--quiet", "origin", "main"], cwd=mover, env=env)
+    return run(["git", "rev-parse", "HEAD"], cwd=mover, env=env).stdout.strip()
+
+
+def run_stale(
+    binary: str,
+    fixture: dict[str, Any],
+    scenario: dict[str, Any],
+    bindir: Path,
+) -> dict[str, Any]:
+    """A default-branch move between session pause and resume is detected
+    on resume, publish fails DEFAULT_MOVED, and the refresh sequence ends
+    in one pull request, one host merge, and one idempotent registration."""
+    turns = scenario["turns"]
+    expectation = scenario["expectation"]
+    change_set = expectation["change_set"]
+    harness = ScenarioRun(binary, fixture, bindir, change_set_id=change_set)
+    with harness:
+        provider = harness.provider
+        project = harness.project
+        env = harness.env
+        wms_log = harness.wms_log
+        gh_log = Path(env["DT_GH_LOG"])
+        env["DT_GH_STATE"] = str(harness.temp / "gh-state.json")
+        env["DT_GH_ORIGIN"] = harness.project_context["bare"]
+        env["DT_REG_LOG"] = str(harness.temp / "register-events.jsonl")
+        env["DT_REG_PROJECT"] = fixture["project_id"]
+
+        base_commit = harness.base_commit(change_set)
+        provider.replacements["<BASE_COMMIT>"] = base_commit
+
+        candidate = turns["stale-candidate"]
+        sid_candidate, candidate_result = harness.new_role_session(
+            candidate, expectation["start_before_first_write"]
+        )
+        if expectation["requirement_id"] not in candidate_result:
+            raise AssertionError(f"stale candidate was not written: {candidate_result}")
+
+        review = turns["stale-review"]
+        sid_review, review_result = harness.new_role_session(
+            review, expectation["start_before_first_write"]
+        )
+        if (
+            base_commit not in review_result
+            or expectation["requirement_id"] not in review_result
+        ):
+            raise AssertionError(
+                "the stale review did not identify the exact proposal and base: "
+                f"{review_result}"
+            )
+
+        # The default branch moves from outside the session.
+        new_head = push_default_move(harness)
+        provider.replacements["<NEW_BASE>"] = new_head
+
+        # The resumed session re-presents CS-00003, its branch, and the
+        # recorded base from governed reads, not from conversation.
+        resume = turns["stale-resume-after-move"]
+        resume_result = harness.resume_session(resume, sid_review)
+        repo_event = next(
+            (
+                event
+                for event in tool_events(resume_result)
+                if event["tool"] == "scm_repo_state"
+            ),
+            None,
+        )
+        if (
+            base_commit not in resume_result
+            or repo_event is None
+            or '"default_moved":true' not in repo_event["output"]
+        ):
+            raise AssertionError(
+                f"resume did not detect the default-branch move: {resume_result}"
+            )
+
+        # Explicit approval bound to the reviewed base: the commit lands,
+        # and publish refuses because the default branch moved.
+        approval = turns["stale-approval-default-moved"]
+        approval_prompt = approval["prompt"].replace("<BASE_COMMIT>", base_commit)
+        approval = {**approval, "prompt": approval_prompt}
+        sid_approval, approval_result = harness.new_role_session(
+            approval, expectation["start_before_first_write"]
+        )
+        if base_commit not in approval_result:
+            raise AssertionError(
+                f"approval session lost the exact base: {approval_result}"
+            )
+        approval_events = tool_events(approval_result)
+        if not any(
+            event["tool"] == "scm_commit" and event["status"] == "completed"
+            for event in approval_events
+        ):
+            raise AssertionError(
+                f"explicit approval did not complete scm_commit: {approval_events!r}"
+            )
+        publish_event = next(
+            (event for event in approval_events if event["tool"] == "scm_publish"),
+            None,
+        )
+        if (
+            publish_event is None
+            or publish_event["status"] != "error"
+            or expectation["publish_failure"]
+            not in publish_event["error"] + str(publish_event["output"])
+        ):
+            raise AssertionError(
+                f"publish did not fail {expectation['publish_failure']}: "
+                f"{approval_events!r}"
+            )
+        if any(event.get("event") == "create" for event in read_jsonl(gh_log)):
+            raise AssertionError("a failed publish still created a pull request")
+
+        # The refresh sequence: merge the moved default, rebind the base
+        # commit, rerun impact and validation, and commit again.
+        refresh = turns["stale-refresh-and-update"]
+        sid_refresh, refresh_result = harness.new_role_session(
+            refresh, expectation["start_before_first_write"]
+        )
+        refresh_events = tool_events(refresh_result)
+        for tool_name in ("scm_refresh", "scm_repo_state"):
+            if not any(
+                event["tool"] == tool_name and event["status"] == "completed"
+                for event in refresh_events
+            ):
+                raise AssertionError(
+                    f"refresh sequence did not complete {tool_name}: {refresh_events!r}"
+                )
+        parents = run(
+            ["git", "rev-list", "--parents", "-n", "1", "HEAD"],
+            cwd=project,
+            env=env,
+        ).stdout.split()
+        if len(parents) < 3:
+            raise AssertionError(
+                f"refresh did not merge the moved default branch: {parents!r}"
+            )
+        if harness.base_commit(change_set) != new_head:
+            raise AssertionError(
+                "change-set update did not rebind the base commit to the new head"
+            )
+
+        republish = turns["stale-recommit-and-publish"]
+        sid_republish, republish_result = harness.new_role_session(
+            republish, expectation["start_before_first_write"]
+        )
+        republish_events = tool_events(republish_result)
+        for tool_name in ("scm_commit", "scm_publish"):
+            if not any(
+                event["tool"] == tool_name and event["status"] == "completed"
+                for event in republish_events
+            ):
+                raise AssertionError(
+                    f"re-publish did not complete {tool_name}: {republish_events!r}"
+                )
+        if "pull request" not in republish_result.lower():
+            raise AssertionError(
+                f"re-publish did not hand off a pull request: {republish_result}"
+            )
+
+        # The user merges the pull request on the host.
+        merged = run(
+            [str(harness.bindir / "gh"), "pr", "merge", "1", "--merge"],
+            cwd=project,
+            env=env,
+            check=False,
+        )
+        if merged.returncode:
+            raise AssertionError(
+                f"host merge failed: {merged.returncode}\n{merged.stdout}\n{merged.stderr}"
+            )
+
+        register = turns["stale-register"]
+        sid_register, register_result = harness.new_role_session(
+            register, expectation["start_before_first_write"]
+        )
+        register_events = tool_events(register_result)
+        if not any(
+            event["tool"] == "bash"
+            and event["input"].get("command")
+            == f"register-approved-change-set --change-set {change_set}"
+            and event["status"] == "completed"
+            for event in register_events
+        ):
+            raise AssertionError(
+                f"registration command did not complete: {register_events!r}"
+            )
+
+        # A retry after registration is the same idempotent call.
+        register_again = turns["stale-register-again"]
+        register_again_result = harness.resume_session(register_again, sid_register)
+        again_events = tool_events(register_again_result)
+        if not any(
+            event["tool"] == "bash"
+            and event["input"].get("command")
+            == f"register-approved-change-set --change-set {change_set}"
+            and event["status"] == "completed"
+            for event in again_events
+        ):
+            raise AssertionError(
+                f"idempotent registration retry did not complete: {again_events!r}"
+            )
+        registrations = read_jsonl(Path(env["DT_REG_LOG"]))
+        if len(registrations) != expectation["registration"]["calls"]:
+            raise AssertionError(
+                f"expected {expectation['registration']['calls']} registration "
+                f"record(s), got {registrations!r}"
+            )
+        if registrations[0]["change_set"] != change_set:
+            raise AssertionError(
+                f"registration named the wrong change set: {registrations!r}"
+            )
+
+        gh_events = read_jsonl(gh_log)
+        pr_creates = [event for event in gh_events if event.get("event") == "create"]
+        pr_merges = [event for event in gh_events if event.get("event") == "merge"]
+        if len(pr_creates) != 1 or len(pr_merges) != 1:
+            raise AssertionError(
+                f"expected one pull-request create and one merge, got {gh_events!r}"
+            )
+        gh_args = pr_creates[0]["argv"]
+        if (
+            gh_args[gh_args.index("--repo") + 1]
+            != "github.com/protobot-fixture/fixture"
+            or gh_args[gh_args.index("--base") + 1] != "main"
+            or gh_args[gh_args.index("--head") + 1] != expectation["pr_head"]
+        ):
+            raise AssertionError(
+                f"pull request used unexpected binding fields: {gh_args!r}"
+            )
+        if any(
+            event.get("event") not in ("list", "create", "merge") for event in gh_events
+        ):
+            raise AssertionError(f"unexpected Git host action: {gh_events!r}")
+        assert_git_status(project, env, [])
+        if any(
+            event.get("before") != event.get("after") or event.get("mutation") != "none"
+            for event in wms_calls(wms_log)
+        ):
+            raise AssertionError("stale-state scenario changed WMS records")
+
+        exports = []
+        for sid in (
+            sid_candidate,
+            sid_review,
+            sid_approval,
+            sid_refresh,
+            sid_republish,
+            sid_register,
+        ):
+            raw, sanitized = harness.export(sid)
+            if SENTINEL in raw or SENTINEL in sanitized:
+                raise AssertionError(
+                    "a planted token-shaped secret appeared in a session export"
+                )
+            exports.append(raw)
+
+        summary = {
+            "fixture": fixture["name"],
+            "opencode_version": harness.binary_version,
+            "recorded_model": fixture["model"],
+            "chat": {
+                "candidate_reviewed": expectation["requirement_id"],
+                "default_moved_detected": True,
+                "publish_failed_default_moved": True,
+                "refresh_merge_parents": len(parents) - 1,
+                "base_commit_updated": harness.base_commit(change_set) == new_head,
+                "explicit_approval_and_handoff": True,
+                "registered": len(registrations) == 1,
+                "registration_idempotent": True,
+                "session_exported": True,
+                "session_export_count": len(exports),
+            },
+            "git": {
+                "branch": expectation["pr_head"],
+                "pr_create_count": len(pr_creates),
+                "pr_merge_count": len(pr_merges),
+                "pr_base": "main",
+                "merged": True,
+                "working_tree_clean": True,
+            },
+            "wms": {
+                "blocked_item": fixture["blocked_work_item"]["id"],
+                "state_before": fixture["blocked_work_item"]["state"],
+                "state_after": expectation["wms_state_after"],
+                "mutations": 0,
+            },
+            "source_input_sha256": source_hashes(),
+        }
+        if summary["chat"]["session_export_count"] != expectation["exports"]:
+            raise AssertionError(
+                f"golden expects {expectation['exports']} exports, got "
+                f"{summary['chat']['session_export_count']}"
+            )
+        stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+        return {
+            "summary": summary,
+            "stable": stable,
+            "narrative": harness.narrative,
+            "session_ids": [
+                sid_candidate,
+                sid_review,
+                sid_approval,
+                sid_refresh,
+                sid_republish,
+                sid_register,
+            ],
+        }
 
 
 def export_session(
@@ -1621,28 +2506,37 @@ def main() -> int:
     binary = shutil.which(args.opencode_bin) or args.opencode_bin
     if not Path(binary).exists() and shutil.which(binary) is None:
         parser.error(f"OpenCode binary not found: {args.opencode_bin}")
-    fixture, turns, expectation = read_golden()
+    fixture, scenarios = read_golden()
     if fixture.get("opencode_version") != PINNED_OPENCODE:
         raise AssertionError(
             "golden fixture version does not match the pinned OpenCode version"
         )
     verify_binary(binary)
-    first = run_scenario(binary, fixture, turns, expectation)
-    second = run_scenario(binary, fixture, turns, expectation)
-    if first["stable"] != second["stable"]:
-        raise AssertionError(
-            "repeat-run semantic/state summaries differ\n"
-            f"first:  {first['stable']}\nsecond: {second['stable']}"
-        )
-    summary = first["summary"]
-    if summary["chat"]["session_export_count"] != expectation["exports"]:
-        raise AssertionError(
-            f"golden expects {expectation['exports']} exports, got "
-            f"{summary['chat']['session_export_count']}"
-        )
+    runners = {
+        "approved-handoff": run_approved,
+        "rejection-revision": run_rejection,
+        "wms-unavailable": run_wms_unavailable,
+        "stale-state": run_stale,
+    }
+    results: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory(prefix="opencode-drafting-table-bin-") as work:
+        bindir = build_binaries(Path(work), os.environ)
+        for name in fixture["scenarios"]:
+            runner = runners.get(name)
+            if runner is None:
+                raise AssertionError(f"no replay driver for golden scenario {name!r}")
+            scenario = scenarios[name]
+            first = runner(binary, fixture, scenario, bindir)
+            second = runner(binary, fixture, scenario, bindir)
+            if first["stable"] != second["stable"]:
+                raise AssertionError(
+                    f"repeat-run semantic/state summaries differ for scenario "
+                    f"{name!r}\nfirst:  {first['stable']}\nsecond: {second['stable']}"
+                )
+            results[name] = first["summary"]
     print(
         json.dumps(
-            {"result": "passed", "repeat_runs": 2, "summary": summary},
+            {"result": "passed", "repeat_runs": 2, "scenarios": results},
             indent=2,
             sort_keys=True,
         )

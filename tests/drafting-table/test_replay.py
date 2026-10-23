@@ -35,10 +35,37 @@ class OpenCodeReplayTest(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["result"], "passed")
         self.assertEqual(result["repeat_runs"], 2)
-        self.assertTrue(result["summary"]["chat"]["session_exported"])
-        self.assertEqual(result["summary"]["chat"]["session_export_count"], 8)
-        self.assertEqual(result["summary"]["wms"]["state_before"], "blocked")
-        self.assertEqual(result["summary"]["wms"]["state_after"], "blocked")
+        self.assertEqual(
+            list(result["scenarios"]),
+            [
+                "approved-handoff",
+                "rejection-revision",
+                "stale-state",
+                "wms-unavailable",
+            ],
+        )
+        approved = result["scenarios"]["approved-handoff"]
+        self.assertTrue(approved["chat"]["session_exported"])
+        self.assertEqual(approved["chat"]["session_export_count"], 9)
+        self.assertTrue(approved["chat"]["jobsite_lifecycle_refused"])
+        self.assertEqual(approved["wms"]["state_before"], "blocked")
+        self.assertEqual(approved["wms"]["state_after"], "blocked")
+        rejection = result["scenarios"]["rejection-revision"]
+        self.assertEqual(rejection["chat"]["explicit_rejection"]["tool_calls"], 0)
+        self.assertTrue(rejection["chat"]["revision"]["vision_revised"])
+        self.assertFalse(rejection["chat"]["revision"]["committed"])
+        self.assertEqual(rejection["wms"]["mutations"], 0)
+        stale = result["scenarios"]["stale-state"]
+        self.assertTrue(stale["chat"]["default_moved_detected"])
+        self.assertTrue(stale["chat"]["publish_failed_default_moved"])
+        self.assertTrue(stale["chat"]["base_commit_updated"])
+        self.assertEqual(stale["git"]["pr_create_count"], 1)
+        self.assertEqual(stale["git"]["pr_merge_count"], 1)
+        self.assertTrue(stale["chat"]["registered"])
+        self.assertTrue(stale["chat"]["registration_idempotent"])
+        wms_unavailable = result["scenarios"]["wms-unavailable"]
+        self.assertFalse(wms_unavailable["wms"]["wms_available"])
+        self.assertTrue(wms_unavailable["chat"]["drafting_continued"])
 
 
 if __name__ == "__main__":

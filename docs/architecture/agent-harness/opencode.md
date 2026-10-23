@@ -36,7 +36,10 @@ replayed model ([Observed OpenCode behaviors](#observed-opencode-behaviors)).
 The fixture ran in #77 against the pinned OpenCode 1.18.30 binary, with
 real skills, permissions, plugin, MCP clients, shell, `ears-manager`, the
 Source Control Manager, and the guard, plus recording WMS and `gh` stubs.
-The recorded fixture covers the baseline guard vectors. Guard unit tests
+Issue #173 extended it to the four deterministic scenarios
+(approved-handoff, rejection-revision, stale-state, and
+WMS-unavailable). The recorded fixture covers the baseline guard vectors.
+Guard unit tests
 cover expanded Rule 4 and Rule 7 cases, but not all are represented in the
 fixture; the statuses below record the fixture evidence and the gaps it left
 open. See
@@ -403,7 +406,7 @@ entry point's name must differ from every skill name.
 | H4 | Resume on every entry, continued session, and compaction | Command prompt and session skill; `--continue` and `--session` continue a session | Met; fresh and continued sessions repeated the resume reads before any governed write |
 | H5 | Nothing on idle or exit | The shim registers no idle or exit hook | Met; no commit, push, or registration ran without request, and the recording WMS process stopped cleanly. A dedicated SCM-process idle/exit assertion is deferred |
 | H6 | Replayable session record | OpenCode's session record and `opencode export`; the resolved rules come from `opencode debug agent` | Met; the fixture exported every session with the agent, model, harness version, tool calls, and guard refusals |
-| H7 | Headless replay with no permission prompt | `opencode run --format json`, a replay provider, no `ask` rules | Met; the whole scenario replayed twice with byte-stable summaries and no permission prompt |
+| H7 | Headless replay with no permission prompt | `opencode run --format json`, a replay provider, no `ask` rules | Met; every scenario replayed twice with byte-stable summaries and no permission prompt |
 | H8 | Invoke the guard on each tool call and enforce its decision | The shim | Met on the active-hook path; guard refusals reached the model and the session record. If the plugin is absent or no hook is registered, allowed `ears-manager` commands bypass guard-only shell restrictions, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (recorded gap); `"*": deny` still refuses `git` and `gh` |
 | H9 | Hide file-writing, subagent, and web tools | `"*": deny` | Met; the resolved tool set offers neither `edit`, `write`, `task`, `webfetch`, nor `websearch`. OpenCode 1.18.30 does not register a native `apply_patch` tool for this agent; the guard vocabulary still covers it, and the fixture exercised the documented hook shape directly |
 | H10 | Toolkit skills only | `skill` rule with `"*": deny` first; other skills are hidden from the model's list and refused | Met; the `<available_skills>` block the model received named exactly the Toolkit skills, and both `review-pr` load routes were refused |
@@ -411,8 +414,10 @@ entry point's name must differ from every skill name.
 | H12 | Publish this status | This table | Met |
 | H13 | Remote `wms` server with OAuth 2.1 | Not checked; the fixture is single-player | Open |
 
-"Met" means the #77 fixture demonstrated the obligation against the pinned
-OpenCode 1.18.30 binary with real governed tools; where an obligation holds
+"Met" means the fixture demonstrated the obligation against the pinned
+OpenCode 1.18.30 binary with real governed tools — the #77 approved-handoff
+scenario, extended in #173 with the rejection-revision, stale-state, and
+WMS-unavailable scenarios; where an obligation holds
 only on a checked path, the gap stays in the row. Deferred fixture steps are
 recorded in the golden fixture's expectation record
 ([Running the fixture on OpenCode](#running-the-fixture-on-opencode)).
@@ -506,6 +511,8 @@ harness commands. For OpenCode:
 | Headless turn outside the role (steps 2, 7, 9) | `opencode run --agent build --format json` |
 | Resolved native rules | `opencode debug agent drafting-table` and `opencode debug config` |
 | Session export (step 15) | `opencode export <session>`, with and without `--sanitize` |
+| User merges the pull request (step 14) | the driver runs the `gh` stub shim outside the session: `gh pr merge 1 --merge` |
+| Register an approved change set (step 14) | the shell operation `register-approved-change-set --change-set CS-<nnnnn>`, served by a local stand-in that reads the SCM's `approved-merge` face |
 
 **Replayed model.** A local OpenAI-compatible endpoint returns the
 recorded model turns in order. It is registered as a custom provider:
@@ -541,8 +548,9 @@ clients, and shell.
   manifest's `toolkit_skills`.
 - No headless run prints an automatic permission rejection.
 
-**Running the #77 fixture.** The implemented driver replays the recorded
-scenario twice and compares the semantic summaries and source-input hashes:
+**Running the fixture.** The implemented driver replays the recorded
+scenarios twice and compares each scenario's semantic summary and
+source-input hashes:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 OPENCODE_BIN=/path/to/opencode-1.18.30/bin/opencode \
@@ -559,6 +567,28 @@ steps are recorded in
 OpenCode 1.18.30 does not register a native `apply_patch` tool in the
 resolved agent tool set; the fixture records that fact and exercises the
 documented `apply_patch` hook shape against the built guard directly.
+
+The golden fixture names four scenarios. The approved-handoff scenario is
+the #77 path extended with the Job Site lifecycle refusal: OpenCode offers
+the role only the manifest-listed governed tools, and the guard refuses the
+unlisted lifecycle tool with rule 4 before the WMS stub can see it. The
+rejection-revision scenario records an explicit rejection at the approval
+boundary (no tool call, no WMS record, no host action, baseline unchanged)
+followed by a Vision revision through `ears-manager artifact put` in a fresh
+session. The stale-state scenario runs on `CS-00003` per the fixture
+session table: the default branch moves between session pause and resume,
+publish fails `DEFAULT_MOVED`, and the refresh sequence ends in one pull
+request, one host-side merge through the `gh` stub, and one idempotent
+`register-approved-change-set`. The wms-unavailable scenario starts a
+session with the WMS stub stopped; blocked work is marked unavailable and
+drafting continues with no WMS tool offered.
+
+The `drafting-table` job in `.github/workflows/ci-workflow.yaml` runs the
+same replay in CI, together with the guard module's Go tests and a
+digest-verified download of the pinned OpenCode 1.18.30 binary. The
+recorded demonstration — one approved path and one rejected path — is
+[`docs/architecture/fixtures/drafting-table-opencode-demo.md`](../fixtures/drafting-table-opencode-demo.md),
+regenerated by `python3 tests/drafting-table/render_demo.py`.
 
 ---
 

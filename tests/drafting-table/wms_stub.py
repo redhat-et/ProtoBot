@@ -35,6 +35,10 @@ TOOLS = [
     "lifecycle_preflight",
     "blocked_work_submit_resolution",
     "blocked_work_acknowledge",
+    # Job Site lifecycle operations a real adapter serves to other roles;
+    # the drafting-table guard refuses them before they reach the stub.
+    "claim",
+    "record_merge",
 ]
 
 
@@ -180,7 +184,15 @@ def serve(log: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True, type=Path)
+    parser.add_argument(
+        "--fail-start",
+        action="store_true",
+        help="record a failed start and exit without serving (WMS unavailable)",
+    )
     args = parser.parse_args()
+    if args.fail_start:
+        record(args.log, {"event": "failed-start", "state": ITEM["state"]})
+        return 1
     serve(args.log)
     return 0
 
