@@ -1019,6 +1019,10 @@ def run_approved(
     scenario: dict[str, Any],
     bindir: Path,
 ) -> dict[str, Any]:
+    """The approved-handoff scenario: explicit approval messages bind the
+    base revision, every governed write goes through ears-manager, and
+    the sequence ends in one pull request, one host merge, and one
+    registration."""
     turns = scenario["turns"]
     expectation = scenario["expectation"]
     harness = ScenarioRun(binary, fixture, bindir)
@@ -1040,750 +1044,747 @@ def run_approved(
         base_commit = harness.base_commit(CHANGE_SET_ID)
         provider.replacements["<BASE_COMMIT>"] = base_commit
 
-        try:
-            # Session A begins outside the role, then resumes through the
-            # actual Drafting Table command before any governed write.
-            outside = turns["outside-role-prelude"]
-            provider.set_turn(outside, project)
-            prelude = opencode_command(
-                binary,
-                [
-                    "run",
-                    "--print-logs",
-                    "--log-level",
-                    "DEBUG",
-                    "--agent",
-                    "build",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    outside["prompt"],
-                ],
-                project=project,
-                env=env,
-            )
-            provider.assert_consumed(outside)
-            sid_a = session_id(prelude.stdout)
+        # Session A begins outside the role, then resumes through the
+        # actual Drafting Table command before any governed write.
+        outside = turns["outside-role-prelude"]
+        provider.set_turn(outside, project)
+        prelude = opencode_command(
+            binary,
+            [
+                "run",
+                "--print-logs",
+                "--log-level",
+                "DEBUG",
+                "--agent",
+                "build",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                outside["prompt"],
+            ],
+            project=project,
+            env=env,
+        )
+        provider.assert_consumed(outside)
+        sid_a = session_id(prelude.stdout)
 
-            start = turns["start-and-resume-reads"]
-            start_from = len(provider.requests)
-            start_result = harness.turn_output(
-                start,
-                [
-                    "run",
-                    "--session",
-                    sid_a,
-                    "--agent",
-                    "drafting-table",
-                    "--command",
-                    "drafting-table",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    start["prompt"],
-                ],
+        start = turns["start-and-resume-reads"]
+        start_from = len(provider.requests)
+        start_result = harness.turn_output(
+            start,
+            [
+                "run",
+                "--session",
+                sid_a,
+                "--agent",
+                "drafting-table",
+                "--command",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                start["prompt"],
+            ],
+        )
+        provider.assert_consumed(start)
+        assert_resume_reads_before_write(
+            start_result, start["name"], expectation["start_before_first_write"]
+        )
+        if (
+            fixture["blocked_work_item"]["id"] not in start_result
+            or fixture["candidate_status"] not in start_result
+            or "records the session on this machine" not in start_result
+        ):
+            raise AssertionError(
+                f"start summary omitted the blocked item, review status, or recording notice: {start_result}"
             )
-            provider.assert_consumed(start)
-            assert_resume_reads_before_write(
-                start_result, start["name"], expectation["start_before_first_write"]
-            )
-            if (
-                fixture["blocked_work_item"]["id"] not in start_result
-                or fixture["candidate_status"] not in start_result
-                or "records the session on this machine" not in start_result
-            ):
-                raise AssertionError(
-                    f"start summary omitted the blocked item, review status, or recording notice: {start_result}"
-                )
-            skill_prompts = check_call_order(provider, start_from)
-            toolkit_prompt = next(
-                (item for item in skill_prompts if item.startswith("skills:")), ""
+        skill_prompts = check_call_order(provider, start_from)
+        toolkit_prompt = next(
+            (item for item in skill_prompts if item.startswith("skills:")), ""
+        )
+
+        if EXPECTED_SKILLS not in toolkit_prompt.replace(" ", ""):
+            raise AssertionError(
+                f"model did not receive exactly the Toolkit skills: {toolkit_prompt!r}"
             )
 
-            if EXPECTED_SKILLS not in toolkit_prompt.replace(" ", ""):
-                raise AssertionError(
-                    f"model did not receive exactly the Toolkit skills: {toolkit_prompt!r}"
-                )
+        session_a_export, session_a_sanitized = harness.export(sid_a)
 
-            session_a_export, session_a_sanitized = harness.export(sid_a)
+        skill_turn = turns["skill-discovery-refusals"]
+        skill_from = len(provider.requests)
+        skill_result = harness.turn_output(
+            skill_turn,
+            [
+                "run",
+                "--agent",
+                "drafting-table",
+                "--command",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                skill_turn["prompt"],
+            ],
+        )
+        provider.assert_consumed(skill_turn)
+        assert_resume_reads_before_write(
+            skill_result,
+            skill_turn["name"],
+            expectation["start_before_first_write"],
+        )
+        sid_b = session_id(skill_result)
+        skill_toolkit_prompt = next(
+            (
+                item
+                for item in check_call_order(provider, skill_from)
+                if item.startswith("skills:")
+            ),
+            "",
+        )
+        if EXPECTED_SKILLS not in skill_toolkit_prompt.replace(" ", ""):
+            raise AssertionError(
+                f"skill/refusal session did not receive the Toolkit allowlist: {skill_toolkit_prompt!r}"
+            )
+        if "drafting-table-guard" not in skill_result:
+            raise AssertionError(
+                f"unapproved skill or review-pr read was not guard-refused: {skill_result}"
+            )
+        refusal_events = [
+            event
+            for event in tool_events(skill_result)
+            if event["status"] == "error"
+            and "drafting-table-guard" in event["error"]
+        ]
+        if not any(
+            event["tool"] == "skill" and event["input"].get("name") == "review-pr"
+            for event in refusal_events
+        ) or not any(
+            event["tool"] == "read"
+            and str(event["input"].get("filePath", "")).endswith(
+                ".agents/skills/review-pr/SKILL.md"
+            )
+            for event in refusal_events
+        ):
+            raise AssertionError(
+                f"both unapproved review-pr routes were not refused: {refusal_events!r}"
+            )
+        session_b_export, session_b_sanitized = harness.export(
+            sid_b,
+            expected_skill_markers=(
+                "# Drafting Specifications",
+                "# Eliciting Requirements",
+            ),
+        )
 
-            skill_turn = turns["skill-discovery-refusals"]
-            skill_from = len(provider.requests)
-            skill_result = harness.turn_output(
-                skill_turn,
-                [
-                    "run",
-                    "--agent",
-                    "drafting-table",
-                    "--command",
-                    "drafting-table",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    skill_turn["prompt"],
-                ],
+        # A Drafting Table caller cannot invoke Job Site lifecycle
+        # operations: OpenCode offers only the manifest-listed governed
+        # tools to the role, and the guard refuses unlisted ones
+        # outright, so the operation never reaches the WMS stub.
+        jobsite = turns["jobsite-lifecycle-refusal"]
+        jobsite_from = len(provider.requests)
+        sid_jobsite, jobsite_result = harness.new_role_session(
+            jobsite, expectation["start_before_first_write"]
+        )
+        jobsite_refusal = expectation["jobsite_lifecycle_refusal"]
+        offered: set[str] = set()
+        with provider.lock:
+            for request in provider.requests[jobsite_from:]:
+                for tool in request.get("tools") or []:
+                    offered.add(str(tool.get("function", {}).get("name")))
+        if jobsite_refusal["tool"] in offered:
+            raise AssertionError(
+                f"Job Site lifecycle operation {jobsite_refusal['tool']!r} was "
+                f"offered to the drafting-table role"
             )
-            provider.assert_consumed(skill_turn)
-            assert_resume_reads_before_write(
-                skill_result,
-                skill_turn["name"],
-                expectation["start_before_first_write"],
+        jobsite_input = {
+            "hook_event_name": "PreToolUse",
+            "session_id": sid_jobsite,
+            "cwd": str(project),
+            "tool_name": jobsite_refusal["tool"],
+            "tool_input": {},
+        }
+        jobsite_guard = run(
+            [
+                str(bindir / "drafting-table-guard"),
+                "--harness",
+                "opencode",
+                "--role",
+                "drafting-table",
+            ],
+            cwd=project,
+            env=env,
+            check=False,
+            input_text=json.dumps(jobsite_input),
+        )
+        if (
+            jobsite_guard.returncode != 2
+            or jobsite_refusal["guard_reason"] not in jobsite_guard.stderr
+        ):
+            raise AssertionError(
+                f"Job Site lifecycle guard vector failed: "
+                f"exit={jobsite_guard.returncode}, stderr={jobsite_guard.stderr!r}"
             )
-            sid_b = session_id(skill_result)
-            skill_toolkit_prompt = next(
-                (
-                    item
-                    for item in check_call_order(provider, skill_from)
-                    if item.startswith("skills:")
-                ),
-                "",
+        if any(
+            event.get("tool") == jobsite_refusal["tool"]
+            for event in wms_calls(wms_log)
+        ):
+            raise AssertionError(
+                "Job Site lifecycle operation reached the recording WMS stub"
             )
-            if EXPECTED_SKILLS not in skill_toolkit_prompt.replace(" ", ""):
-                raise AssertionError(
-                    f"skill/refusal session did not receive the Toolkit allowlist: {skill_toolkit_prompt!r}"
-                )
-            if "drafting-table-guard" not in skill_result:
-                raise AssertionError(
-                    f"unapproved skill or review-pr read was not guard-refused: {skill_result}"
-                )
-            refusal_events = [
-                event
-                for event in tool_events(skill_result)
-                if event["status"] == "error"
-                and "drafting-table-guard" in event["error"]
-            ]
+        session_jobsite_export, session_jobsite_sanitized = harness.export(
+            sid_jobsite
+        )
+
+        # A new session must repeat the resume reads before the candidate
+        # write; it does not inherit authoritative state from chat.
+        fresh = turns["fresh-session-resume"]
+        fresh_from = len(provider.requests)
+        fresh_result = harness.turn_output(
+            fresh,
+            [
+                "run",
+                "--agent",
+                "drafting-table",
+                "--command",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                fresh["prompt"],
+            ],
+        )
+        provider.assert_consumed(fresh)
+        assert_resume_reads_before_write(
+            fresh_result, fresh["name"], expectation["start_before_first_write"]
+        )
+        sid_c = session_id(fresh_result)
+        fresh_skills = check_call_order(provider, fresh_from)
+        fresh_toolkit_prompt = next(
+            (item for item in fresh_skills if item.startswith("skills:")), ""
+        )
+        if EXPECTED_SKILLS not in fresh_toolkit_prompt.replace(" ", ""):
+            raise AssertionError(
+                f"fresh session did not receive exactly the Toolkit skills: {fresh_toolkit_prompt!r}"
+            )
+
+        failure = turns["failed-candidate-write"]
+        failure_result = harness.turn_output(
+            failure,
+            [
+                "run",
+                "--session",
+                sid_c,
+                "--agent",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                failure["prompt"],
+            ],
+        )
+        provider.assert_consumed(failure)
+        if expectation["failure_diagnostic"] not in failure_result:
+            raise AssertionError(
+                f"ears-manager validation failure was not returned unchanged: {failure_result}"
+            )
+        session_c_export, session_c_sanitized = harness.export(sid_c)
+
+        candidate_resume = turns["candidate-present-resume"]
+        sid_d, candidate_resume_result = harness.new_role_session(
+            candidate_resume, expectation["start_before_first_write"]
+        )
+        accepted_write = turns["accepted-candidate-write"]
+        accepted_write_result = harness.turn_output(
+            accepted_write,
+            [
+                "run",
+                "--session",
+                sid_d,
+                "--agent",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                accepted_write["prompt"],
+            ],
+        )
+        provider.assert_consumed(accepted_write)
+        session_d_export, session_d_sanitized = harness.export(sid_d)
+
+        review = turns["review-proposal"]
+        sid_e, review_result = harness.new_role_session(
+            review, expectation["start_before_first_write"]
+        )
+        if (
+            base_commit not in review_result
+            or fixture["requirement_id"] not in review_result
+        ):
+            raise AssertionError(
+                "the final-review response did not identify the exact proposal and base"
+            )
+        if "drafting-table-guard" not in review_result:
+            raise AssertionError(
+                "the unsafe shell write was not refused through the active guard"
+            )
+        if not any(
+            event["tool"] == "bash"
+            and event["input"].get("command") == expectation["guard_refusal"]
+            and event["status"] == "error"
+            and "drafting-table-guard" in event["error"]
+            for event in tool_events(review_result)
+        ):
+            raise AssertionError(
+                "the golden unsafe shell command did not receive an active guard refusal: "
+                f"{tool_events(review_result)!r}"
+            )
+        session_e_export, session_e_sanitized = harness.export(sid_e)
+
+        approved_resume = turns["approved-proposal-resume"]
+        sid_f, approved_resume_result = harness.new_role_session(
+            approved_resume, expectation["start_before_first_write"]
+        )
+        if (
+            base_commit not in approved_resume_result
+            or fixture["requirement_id"] not in approved_resume_result
+        ):
+            raise AssertionError(
+                "fresh approval session did not reconstruct the exact proposal and base"
+            )
+
+        approval = turns["explicit-approval-and-handoff"]
+        approval_prompt = approval["prompt"].replace("<BASE_COMMIT>", base_commit)
+        approval = {**approval, "prompt": approval_prompt}
+        approval_result = harness.turn_output(
+            approval,
+            [
+                "run",
+                "--session",
+                sid_f,
+                "--agent",
+                "drafting-table",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                approval_prompt,
+            ],
+        )
+        provider.assert_consumed(approval)
+        if "pull request" not in approval_result.lower():
+            raise AssertionError(
+                f"approval did not complete an SCM handoff: {approval_result}"
+            )
+        approval_tools = tool_events(approval_result)
+        for tool_name in ("scm_commit", "scm_publish"):
             if not any(
-                event["tool"] == "skill" and event["input"].get("name") == "review-pr"
-                for event in refusal_events
-            ) or not any(
-                event["tool"] == "read"
-                and str(event["input"].get("filePath", "")).endswith(
-                    ".agents/skills/review-pr/SKILL.md"
-                )
-                for event in refusal_events
+                event["tool"] == tool_name and event["status"] == "completed"
+                for event in approval_tools
             ):
                 raise AssertionError(
-                    f"both unapproved review-pr routes were not refused: {refusal_events!r}"
+                    f"explicit approval did not complete {tool_name}: {approval_tools!r}"
                 )
-            session_b_export, session_b_sanitized = harness.export(
-                sid_b,
-                expected_skill_markers=(
-                    "# Drafting Specifications",
-                    "# Eliciting Requirements",
-                ),
-            )
 
-            # A Drafting Table caller cannot invoke Job Site lifecycle
-            # operations: OpenCode offers only the manifest-listed governed
-            # tools to the role, and the guard refuses unlisted ones
-            # outright, so the operation never reaches the WMS stub.
-            jobsite = turns["jobsite-lifecycle-refusal"]
-            jobsite_from = len(provider.requests)
-            sid_jobsite, jobsite_result = harness.new_role_session(
-                jobsite, expectation["start_before_first_write"]
+        session_f_export, session_f_sanitized = harness.export(sid_f)
+
+        patch_turn = turns["subdirectory-apply-patch"]
+        sid_g, patch_result = harness.new_role_session(
+            patch_turn, expectation["start_before_first_write"], cwd=nested
+        )
+        patch_vector = expectation["apply_patch_guard_vector"]
+        if nested.relative_to(project).as_posix() != patch_vector["cwd"]:
+            raise AssertionError(
+                "subdirectory apply_patch guard vector used an unexpected working directory"
             )
-            jobsite_refusal = expectation["jobsite_lifecycle_refusal"]
-            offered: set[str] = set()
-            with provider.lock:
-                for request in provider.requests[jobsite_from:]:
-                    for tool in request.get("tools") or []:
-                        offered.add(str(tool.get("function", {}).get("name")))
-            if jobsite_refusal["tool"] in offered:
-                raise AssertionError(
-                    f"Job Site lifecycle operation {jobsite_refusal['tool']!r} was "
-                    f"offered to the drafting-table role"
-                )
-            jobsite_input = {
-                "hook_event_name": "PreToolUse",
-                "session_id": sid_jobsite,
-                "cwd": str(project),
-                "tool_name": jobsite_refusal["tool"],
-                "tool_input": {},
-            }
-            jobsite_guard = run(
+        patch_input = {
+            "hook_event_name": "PreToolUse",
+            "session_id": sid_g,
+            "cwd": str(nested),
+            "tool_name": "apply_patch",
+            "tool_input": {"patchText": patch_vector["patch_text"]},
+        }
+        patch_vectors = []
+        for role, expected_reason in (
+            ("drafting-table", expectation["apply_patch_drafting_table_refusal"]),
+            ("other", expectation["apply_patch_other_role_refusal"]),
+        ):
+            result = run(
                 [
                     str(bindir / "drafting-table-guard"),
                     "--harness",
                     "opencode",
                     "--role",
-                    "drafting-table",
+                    role,
                 ],
-                cwd=project,
+                cwd=nested,
                 env=env,
                 check=False,
-                input_text=json.dumps(jobsite_input),
+                input_text=json.dumps(patch_input),
             )
-            if (
-                jobsite_guard.returncode != 2
-                or jobsite_refusal["guard_reason"] not in jobsite_guard.stderr
-            ):
+            if result.returncode != 2 or expected_reason not in result.stderr:
                 raise AssertionError(
-                    f"Job Site lifecycle guard vector failed: "
-                    f"exit={jobsite_guard.returncode}, stderr={jobsite_guard.stderr!r}"
-                )
-            if any(
-                event.get("tool") == jobsite_refusal["tool"]
-                for event in wms_calls(wms_log)
-            ):
-                raise AssertionError(
-                    "Job Site lifecycle operation reached the recording WMS stub"
-                )
-            session_jobsite_export, session_jobsite_sanitized = harness.export(
-                sid_jobsite
-            )
-
-            # A new session must repeat the resume reads before the candidate
-            # write; it does not inherit authoritative state from chat.
-            fresh = turns["fresh-session-resume"]
-            fresh_from = len(provider.requests)
-            fresh_result = harness.turn_output(
-                fresh,
-                [
-                    "run",
-                    "--agent",
-                    "drafting-table",
-                    "--command",
-                    "drafting-table",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    fresh["prompt"],
-                ],
-            )
-            provider.assert_consumed(fresh)
-            assert_resume_reads_before_write(
-                fresh_result, fresh["name"], expectation["start_before_first_write"]
-            )
-            sid_c = session_id(fresh_result)
-            fresh_skills = check_call_order(provider, fresh_from)
-            fresh_toolkit_prompt = next(
-                (item for item in fresh_skills if item.startswith("skills:")), ""
-            )
-            if EXPECTED_SKILLS not in fresh_toolkit_prompt.replace(" ", ""):
-                raise AssertionError(
-                    f"fresh session did not receive exactly the Toolkit skills: {fresh_toolkit_prompt!r}"
-                )
-
-            failure = turns["failed-candidate-write"]
-            failure_result = harness.turn_output(
-                failure,
-                [
-                    "run",
-                    "--session",
-                    sid_c,
-                    "--agent",
-                    "drafting-table",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    failure["prompt"],
-                ],
-            )
-            provider.assert_consumed(failure)
-            if expectation["failure_diagnostic"] not in failure_result:
-                raise AssertionError(
-                    f"ears-manager validation failure was not returned unchanged: {failure_result}"
-                )
-            session_c_export, session_c_sanitized = harness.export(sid_c)
-
-            candidate_resume = turns["candidate-present-resume"]
-            sid_d, candidate_resume_result = harness.new_role_session(
-                candidate_resume, expectation["start_before_first_write"]
-            )
-            accepted_write = turns["accepted-candidate-write"]
-            accepted_write_result = harness.turn_output(
-                accepted_write,
-                [
-                    "run",
-                    "--session",
-                    sid_d,
-                    "--agent",
-                    "drafting-table",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    accepted_write["prompt"],
-                ],
-            )
-            provider.assert_consumed(accepted_write)
-            session_d_export, session_d_sanitized = harness.export(sid_d)
-
-            review = turns["review-proposal"]
-            sid_e, review_result = harness.new_role_session(
-                review, expectation["start_before_first_write"]
-            )
-            if (
-                base_commit not in review_result
-                or fixture["requirement_id"] not in review_result
-            ):
-                raise AssertionError(
-                    "the final-review response did not identify the exact proposal and base"
-                )
-            if "drafting-table-guard" not in review_result:
-                raise AssertionError(
-                    "the unsafe shell write was not refused through the active guard"
-                )
-            if not any(
-                event["tool"] == "bash"
-                and event["input"].get("command") == expectation["guard_refusal"]
-                and event["status"] == "error"
-                and "drafting-table-guard" in event["error"]
-                for event in tool_events(review_result)
-            ):
-                raise AssertionError(
-                    "the golden unsafe shell command did not receive an active guard refusal: "
-                    f"{tool_events(review_result)!r}"
-                )
-            session_e_export, session_e_sanitized = harness.export(sid_e)
-
-            approved_resume = turns["approved-proposal-resume"]
-            sid_f, approved_resume_result = harness.new_role_session(
-                approved_resume, expectation["start_before_first_write"]
-            )
-            if (
-                base_commit not in approved_resume_result
-                or fixture["requirement_id"] not in approved_resume_result
-            ):
-                raise AssertionError(
-                    "fresh approval session did not reconstruct the exact proposal and base"
-                )
-
-            approval = turns["explicit-approval-and-handoff"]
-            approval_prompt = approval["prompt"].replace("<BASE_COMMIT>", base_commit)
-            approval = {**approval, "prompt": approval_prompt}
-            approval_result = harness.turn_output(
-                approval,
-                [
-                    "run",
-                    "--session",
-                    sid_f,
-                    "--agent",
-                    "drafting-table",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    approval_prompt,
-                ],
-            )
-            provider.assert_consumed(approval)
-            if "pull request" not in approval_result.lower():
-                raise AssertionError(
-                    f"approval did not complete an SCM handoff: {approval_result}"
-                )
-            approval_tools = tool_events(approval_result)
-            for tool_name in ("scm_commit", "scm_publish"):
-                if not any(
-                    event["tool"] == tool_name and event["status"] == "completed"
-                    for event in approval_tools
-                ):
-                    raise AssertionError(
-                        f"explicit approval did not complete {tool_name}: {approval_tools!r}"
-                    )
-
-            session_f_export, session_f_sanitized = harness.export(sid_f)
-
-            patch_turn = turns["subdirectory-apply-patch"]
-            sid_g, patch_result = harness.new_role_session(
-                patch_turn, expectation["start_before_first_write"], cwd=nested
-            )
-            patch_vector = expectation["apply_patch_guard_vector"]
-            if nested.relative_to(project).as_posix() != patch_vector["cwd"]:
-                raise AssertionError(
-                    "subdirectory apply_patch guard vector used an unexpected working directory"
-                )
-            patch_input = {
-                "hook_event_name": "PreToolUse",
-                "session_id": sid_g,
-                "cwd": str(nested),
-                "tool_name": "apply_patch",
-                "tool_input": {"patchText": patch_vector["patch_text"]},
-            }
-            patch_vectors = []
-            for role, expected_reason in (
-                ("drafting-table", expectation["apply_patch_drafting_table_refusal"]),
-                ("other", expectation["apply_patch_other_role_refusal"]),
-            ):
-                result = run(
-                    [
-                        str(bindir / "drafting-table-guard"),
-                        "--harness",
-                        "opencode",
-                        "--role",
-                        role,
-                    ],
-                    cwd=nested,
-                    env=env,
-                    check=False,
-                    input_text=json.dumps(patch_input),
-                )
-                if result.returncode != 2 or expected_reason not in result.stderr:
-                    raise AssertionError(
-                        f"subdirectory apply_patch guard vector failed for {role}: "
-                        f"exit={result.returncode}, stderr={result.stderr!r}"
-                    )
-                if (
-                    patch_vector["project_root_relative_target"]
-                    not in patch_vector["patch_text"]
-                ):
-                    raise AssertionError(
-                        "apply_patch guard vector omitted the project-root-relative target"
-                    )
-                patch_vectors.append(
-                    {
-                        "role": role,
-                        "exit": result.returncode,
-                        "reason": result.stderr.strip(),
-                    }
-                )
-                if vision_path.read_bytes() != vision_before_patch:
-                    raise AssertionError(
-                        f"apply_patch guard vector for {role} changed registered Vision bytes"
-                    )
-            native_tools = json.loads(
-                opencode_command(
-                    binary,
-                    ["debug", "agent", "drafting-table"],
-                    project=nested,
-                    env=env,
-                ).stdout
-            ).get("tools", {})
-            native_apply_patch_available = bool(native_tools.get("apply_patch", False))
-            if (
-                native_apply_patch_available
-                != expectation["opencode_native_apply_patch_tool_available"]
-            ):
-                raise AssertionError(
-                    "the pinned OpenCode apply_patch tool registry differs from golden output"
-                )
-            vision_unchanged_after_patch = (
-                vision_path.read_bytes() == vision_before_patch
-            )
-            if not vision_unchanged_after_patch:
-                raise AssertionError(
-                    "subdirectory apply_patch changed the registered Vision bytes"
-                )
-            session_g_export, session_g_sanitized = harness.export(sid_g)
-
-            non_role_turn = turns["non-role-redirection-vectors"]
-            non_role_result = harness.turn_output(
-                non_role_turn,
-                [
-                    "run",
-                    "--agent",
-                    "build",
-                    "--format",
-                    "json",
-                    "--model",
-                    fixture["model"],
-                    non_role_turn["prompt"],
-                ],
-            )
-            provider.assert_consumed(non_role_turn)
-            non_role_events = tool_events(non_role_result)
-            for expected_command in expectation["non_role_redirections"]:
-                event = next(
-                    (
-                        event
-                        for event in non_role_events
-                        if event["tool"] == "bash"
-                        and event["input"].get("command") == expected_command
-                    ),
-                    None,
-                )
-                if (
-                    event is None
-                    or event["status"] != "error"
-                    or "drafting-table-guard" not in event["error"]
-                ):
-                    raise AssertionError(
-                        f"non-role redirection was not refused by the active guard: {event!r}"
-                    )
-            vision_unchanged = vision_path.read_bytes() == vision_before_patch
-            if not vision_unchanged:
-                raise AssertionError(
-                    "an apply_patch or non-role shell redirection changed registered Vision"
+                    f"subdirectory apply_patch guard vector failed for {role}: "
+                    f"exit={result.returncode}, stderr={result.stderr!r}"
                 )
             if (
-                expectation["vision_unchanged_after_non_role_redirects"]
-                != vision_unchanged
+                patch_vector["project_root_relative_target"]
+                not in patch_vector["patch_text"]
             ):
                 raise AssertionError(
-                    "Vision byte-preservation evidence differs from golden output"
+                    "apply_patch guard vector omitted the project-root-relative target"
                 )
-            sid_h = session_id(non_role_result)
-            session_h_export, session_h_sanitized = harness.export(
-                sid_h, expected_skill_markers=(), expected_agent="build"
+            patch_vectors.append(
+                {
+                    "role": role,
+                    "exit": result.returncode,
+                    "reason": result.stderr.strip(),
+                }
             )
-            exports = (
-                session_a_export,
-                session_b_export,
-                session_c_export,
-                session_d_export,
-                session_e_export,
-                session_f_export,
-                session_g_export,
-                session_jobsite_export,
-                session_h_export,
-            )
-            if not any(
-                "drafting-table-guard" in content
-                or "requirement.ears_pattern_mismatch" in content
-                for content in exports
-            ):
+            if vision_path.read_bytes() != vision_before_patch:
                 raise AssertionError(
-                    "session exports do not preserve tool refusal/failure evidence"
+                    f"apply_patch guard vector for {role} changed registered Vision bytes"
                 )
-
-            # Verify real persistent state independently of the chat trace.
-            req_list = run(
-                [
-                    str(bindir / "ears-manager"),
-                    "--output",
-                    "json",
-                    "requirement",
-                    "list",
-                ],
-                cwd=project,
+        native_tools = json.loads(
+            opencode_command(
+                binary,
+                ["debug", "agent", "drafting-table"],
+                project=nested,
                 env=env,
+            ).stdout
+        ).get("tools", {})
+        native_apply_patch_available = bool(native_tools.get("apply_patch", False))
+        if (
+            native_apply_patch_available
+            != expectation["opencode_native_apply_patch_tool_available"]
+        ):
+            raise AssertionError(
+                "the pinned OpenCode apply_patch tool registry differs from golden output"
             )
-            reqs = json_output(req_list)["data"].get("requirements", [])
-            req = next(
-                (item for item in reqs if item.get("id") == fixture["requirement_id"]),
+        vision_unchanged_after_patch = (
+            vision_path.read_bytes() == vision_before_patch
+        )
+        if not vision_unchanged_after_patch:
+            raise AssertionError(
+                "subdirectory apply_patch changed the registered Vision bytes"
+            )
+        session_g_export, session_g_sanitized = harness.export(sid_g)
+
+        non_role_turn = turns["non-role-redirection-vectors"]
+        non_role_result = harness.turn_output(
+            non_role_turn,
+            [
+                "run",
+                "--agent",
+                "build",
+                "--format",
+                "json",
+                "--model",
+                fixture["model"],
+                non_role_turn["prompt"],
+            ],
+        )
+        provider.assert_consumed(non_role_turn)
+        non_role_events = tool_events(non_role_result)
+        for expected_command in expectation["non_role_redirections"]:
+            event = next(
+                (
+                    event
+                    for event in non_role_events
+                    if event["tool"] == "bash"
+                    and event["input"].get("command") == expected_command
+                ),
                 None,
             )
             if (
-                req is None
-                or req.get("text") != fixture["requirement_text"]
-                or req.get("verification", {}).get("rationale")
-                != fixture["verification_rationale"]
+                event is None
+                or event["status"] != "error"
+                or "drafting-table-guard" not in event["error"]
             ):
                 raise AssertionError(
-                    f"approved candidate is not in authoritative state: {req_list.stdout}; "
-                    f"candidate write event={accepted_write_result}"
+                    f"non-role redirection was not refused by the active guard: {event!r}"
                 )
-            artifact_list = run(
-                [str(bindir / "ears-manager"), "--output", "json", "artifact", "list"],
-                cwd=project,
-                env=env,
+        vision_unchanged = vision_path.read_bytes() == vision_before_patch
+        if not vision_unchanged:
+            raise AssertionError(
+                "an apply_patch or non-role shell redirection changed registered Vision"
             )
-            artifacts = json_output(artifact_list)["data"].get("artifacts", [])
-            if {item.get("id") for item in artifacts} != {"architecture", "vision"}:
+        if (
+            expectation["vision_unchanged_after_non_role_redirects"]
+            != vision_unchanged
+        ):
+            raise AssertionError(
+                "Vision byte-preservation evidence differs from golden output"
+            )
+        sid_h = session_id(non_role_result)
+        session_h_export, session_h_sanitized = harness.export(
+            sid_h, expected_skill_markers=(), expected_agent="build"
+        )
+        exports = (
+            session_a_export,
+            session_b_export,
+            session_c_export,
+            session_d_export,
+            session_e_export,
+            session_f_export,
+            session_g_export,
+            session_jobsite_export,
+            session_h_export,
+        )
+        if not any(
+            "drafting-table-guard" in content
+            or "requirement.ears_pattern_mismatch" in content
+            for content in exports
+        ):
+            raise AssertionError(
+                "session exports do not preserve tool refusal/failure evidence"
+            )
+
+        # Verify real persistent state independently of the chat trace.
+        req_list = run(
+            [
+                str(bindir / "ears-manager"),
+                "--output",
+                "json",
+                "requirement",
+                "list",
+            ],
+            cwd=project,
+            env=env,
+        )
+        reqs = json_output(req_list)["data"].get("requirements", [])
+        req = next(
+            (item for item in reqs if item.get("id") == fixture["requirement_id"]),
+            None,
+        )
+        if (
+            req is None
+            or req.get("text") != fixture["requirement_text"]
+            or req.get("verification", {}).get("rationale")
+            != fixture["verification_rationale"]
+        ):
+            raise AssertionError(
+                f"approved candidate is not in authoritative state: {req_list.stdout}; "
+                f"candidate write event={accepted_write_result}"
+            )
+        artifact_list = run(
+            [str(bindir / "ears-manager"), "--output", "json", "artifact", "list"],
+            cwd=project,
+            env=env,
+        )
+        artifacts = json_output(artifact_list)["data"].get("artifacts", [])
+        if {item.get("id") for item in artifacts} != {"architecture", "vision"}:
+            raise AssertionError(
+                f"real ears-manager artifact list returned unexpected entries: {artifact_list.stdout}"
+            )
+        git_status = run(
+            ["git", "status", "--porcelain"], cwd=project, env=env
+        ).stdout
+        if git_status.strip():
+            raise AssertionError(
+                f"SCM did not leave the change-set worktree clean: {git_status}"
+            )
+        paths = run(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+            cwd=project,
+            env=env,
+        ).stdout.splitlines()
+        gh_events = read_jsonl(Path(env["DT_GH_LOG"]))
+        pr_creates = [
+            event for event in gh_events if event.get("event") == "create"
+        ]
+        if len(pr_creates) != 1:
+            raise AssertionError(
+                f"expected one recording gh PR create, got {gh_events!r}"
+            )
+        gh_args = pr_creates[0]["argv"]
+        if (
+            "--repo" not in gh_args
+            or "--base" not in gh_args
+            or "--head" not in gh_args
+        ):
+            raise AssertionError(
+                f"SCM omitted canonical PR binding fields: {gh_args!r}"
+            )
+        if (
+            "--repo" in gh_args
+            and gh_args[gh_args.index("--repo") + 1]
+            != "github.com/protobot-fixture/fixture"
+        ):
+            raise AssertionError(f"PR used a non-canonical repository: {gh_args!r}")
+        if gh_args[gh_args.index("--base") + 1] != "main":
+            raise AssertionError(f"PR used an unexpected base branch: {gh_args!r}")
+        if (
+            gh_args[gh_args.index("--head") + 1]
+            != "cs/00002-exercise-the-opencode-drafting-table"
+        ):
+            raise AssertionError(
+                f"PR used an unexpected change-set head: {gh_args!r}"
+            )
+        if len(pr_creates) != expectation["handoff"]["gh_pr_create"]:
+            raise AssertionError(
+                "recorded Git host create count differs from golden output"
+            )
+        if any(event.get("event") not in ("list", "create") for event in gh_events):
+            raise AssertionError(
+                f"unexpected Git host action after handoff: {gh_events!r}"
+            )
+
+        wms_events = read_jsonl(wms_log)
+        calls = [event for event in wms_events if event.get("event") == "call"]
+        wms_started = sum(event.get("event") == "started" for event in wms_events)
+        wms_stopped = sum(event.get("event") == "stopped" for event in wms_events)
+        if not any(event.get("tool") == "blocked_work_query" for event in calls):
+            raise AssertionError(f"WMS blocked work was not read: {wms_events!r}")
+        if wms_started == 0 or wms_started != wms_stopped:
+            raise AssertionError(
+                f"recording WMS MCP process did not stop cleanly: {wms_events!r}"
+            )
+        if any(event.get("before") != event.get("after") for event in calls):
+            raise AssertionError(
+                f"WMS lifecycle state changed in the recording stub: {wms_events!r}"
+            )
+        for request in provider.requests:
+            if SENTINEL in json.dumps(request, ensure_ascii=False):
                 raise AssertionError(
-                    f"real ears-manager artifact list returned unexpected entries: {artifact_list.stdout}"
+                    "a planted token-shaped secret reached the replay model"
                 )
-            git_status = run(
-                ["git", "status", "--porcelain"], cwd=project, env=env
-            ).stdout
-            if git_status.strip():
+        for record in (*gh_events, *wms_events):
+            if SENTINEL in json.dumps(record, ensure_ascii=False):
                 raise AssertionError(
-                    f"SCM did not leave the change-set worktree clean: {git_status}"
-                )
-            paths = run(
-                ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
-                cwd=project,
-                env=env,
-            ).stdout.splitlines()
-            gh_events = read_jsonl(Path(env["DT_GH_LOG"]))
-            pr_creates = [
-                event for event in gh_events if event.get("event") == "create"
-            ]
-            if len(pr_creates) != 1:
-                raise AssertionError(
-                    f"expected one recording gh PR create, got {gh_events!r}"
-                )
-            gh_args = pr_creates[0]["argv"]
-            if (
-                "--repo" not in gh_args
-                or "--base" not in gh_args
-                or "--head" not in gh_args
-            ):
-                raise AssertionError(
-                    f"SCM omitted canonical PR binding fields: {gh_args!r}"
-                )
-            if (
-                "--repo" in gh_args
-                and gh_args[gh_args.index("--repo") + 1]
-                != "github.com/protobot-fixture/fixture"
-            ):
-                raise AssertionError(f"PR used a non-canonical repository: {gh_args!r}")
-            if gh_args[gh_args.index("--base") + 1] != "main":
-                raise AssertionError(f"PR used an unexpected base branch: {gh_args!r}")
-            if (
-                gh_args[gh_args.index("--head") + 1]
-                != "cs/00002-exercise-the-opencode-drafting-table"
-            ):
-                raise AssertionError(
-                    f"PR used an unexpected change-set head: {gh_args!r}"
-                )
-            if len(pr_creates) != expectation["handoff"]["gh_pr_create"]:
-                raise AssertionError(
-                    "recorded Git host create count differs from golden output"
-                )
-            if any(event.get("event") not in ("list", "create") for event in gh_events):
-                raise AssertionError(
-                    f"unexpected Git host action after handoff: {gh_events!r}"
+                    "a planted token-shaped secret reached a local recording stub"
                 )
 
-            wms_events = read_jsonl(wms_log)
-            calls = [event for event in wms_events if event.get("event") == "call"]
-            wms_started = sum(event.get("event") == "started" for event in wms_events)
-            wms_stopped = sum(event.get("event") == "stopped" for event in wms_events)
-            if not any(event.get("tool") == "blocked_work_query" for event in calls):
-                raise AssertionError(f"WMS blocked work was not read: {wms_events!r}")
-            if wms_started == 0 or wms_started != wms_stopped:
-                raise AssertionError(
-                    f"recording WMS MCP process did not stop cleanly: {wms_events!r}"
-                )
-            if any(event.get("before") != event.get("after") for event in calls):
-                raise AssertionError(
-                    f"WMS lifecycle state changed in the recording stub: {wms_events!r}"
-                )
-            for request in provider.requests:
-                if SENTINEL in json.dumps(request, ensure_ascii=False):
-                    raise AssertionError(
-                        "a planted token-shaped secret reached the replay model"
-                    )
-            for record in (*gh_events, *wms_events):
-                if SENTINEL in json.dumps(record, ensure_ascii=False):
-                    raise AssertionError(
-                        "a planted token-shaped secret reached a local recording stub"
-                    )
+        all_output = [
+            prelude.stdout,
+            start_result,
+            failure_result,
+            fresh_result,
+            skill_result,
+            candidate_resume_result,
+            accepted_write_result,
+            review_result,
+            approved_resume_result,
+            approval_result,
+            jobsite_result,
+            session_a_export,
+            session_a_sanitized,
+            session_b_export,
+            session_b_sanitized,
+            session_jobsite_export,
+            session_jobsite_sanitized,
+            session_c_export,
+            session_c_sanitized,
+            session_d_export,
+            session_d_sanitized,
+            session_e_export,
+            session_e_sanitized,
+            session_f_export,
+            session_f_sanitized,
+            patch_result,
+            session_g_export,
+            session_g_sanitized,
+            non_role_result,
+            session_h_export,
+            session_h_sanitized,
+        ]
+        if any(
+            re.search(
+                r"permission (?:prompt|rejection|request)|automatic permission",
+                output,
+                re.IGNORECASE,
+            )
+            for output in all_output
+        ):
+            raise AssertionError(
+                "headless replay emitted a permission prompt/rejection"
+            )
 
-            all_output = [
-                prelude.stdout,
-                start_result,
-                failure_result,
-                fresh_result,
-                skill_result,
-                candidate_resume_result,
-                accepted_write_result,
-                review_result,
-                approved_resume_result,
-                approval_result,
-                jobsite_result,
-                session_a_export,
-                session_a_sanitized,
-                session_b_export,
-                session_b_sanitized,
-                session_jobsite_export,
-                session_jobsite_sanitized,
-                session_c_export,
-                session_c_sanitized,
-                session_d_export,
-                session_d_sanitized,
-                session_e_export,
-                session_e_sanitized,
-                session_f_export,
-                session_f_sanitized,
-                patch_result,
-                session_g_export,
-                session_g_sanitized,
-                non_role_result,
-                session_h_export,
-                session_h_sanitized,
-            ]
-            if any(
-                re.search(
-                    r"permission (?:prompt|rejection|request)|automatic permission",
-                    output,
-                    re.IGNORECASE,
-                )
-                for output in all_output
-            ):
-                raise AssertionError(
-                    "headless replay emitted a permission prompt/rejection"
-                )
-
-            input_hashes = source_hashes()
-            summary = {
-                "fixture": fixture["name"],
-                "opencode_version": binary_version,
-                "recorded_model": fixture["model"],
-                "chat": {
-                    "candidate_reviewed": fixture["requirement_id"],
-                    "candidate_status": fixture["candidate_status"],
-                    "validation_failure_reported": "requirement.ears_pattern_mismatch"
-                    in failure_result,
-                    "active_guard_refusal_reported": "drafting-table-guard"
-                    in review_result,
-                    "subdirectory_apply_patch_refused": len(patch_vectors) == 2,
-                    "subdirectory_apply_patch_target": expectation[
-                        "apply_patch_guard_vector"
-                    ]["project_root_relative_target"],
-                    "opencode_native_apply_patch_tool_available": native_apply_patch_available,
-                    "apply_patch_guard_roles": [
-                        vector["role"] for vector in patch_vectors
-                    ],
-                    "non_role_redirections_refused": all(
-                        event["status"] == "error"
-                        and "drafting-table-guard" in event["error"]
-                        for event in non_role_events
-                        if event["tool"] == "bash"
-                    ),
-                    "explicit_approval_and_handoff": "pull request"
-                    in approval_result.lower(),
-                    "jobsite_lifecycle_refused": jobsite_guard.returncode == 2
-                    and jobsite_refusal["tool"] not in offered,
-                    "session_exported": True,
-                    "session_export_count": len(exports),
-                    "vision_unchanged_after_write_probes": vision_unchanged,
-                    "vision_unchanged_after_apply_patch": vision_unchanged_after_patch,
-                    "vision_sha256": hashlib.sha256(
-                        vision_path.read_bytes()
-                    ).hexdigest(),
-                },
-                "git": {
-                    "branch": "cs/00002-exercise-the-opencode-drafting-table",
-                    "local_bare_origin_only": effective_remote.startswith("file://"),
-                    "change_set_committed": fixture["requirement_id"]
-                    in req_list.stdout,
-                    "pr_create_count": len(pr_creates),
-                    "pr_repository": "github.com/protobot-fixture/fixture",
-                    "pr_base": "main",
-                    "merged": expectation["handoff"]["merged"],
-                    "committed_paths": sorted(paths),
-                    "working_tree_clean": True,
-                },
-                "wms": {
-                    "blocked_item": fixture["blocked_work_item"]["id"],
-                    "state_before": fixture["blocked_work_item"]["state"],
-                    "state_after": fixture["blocked_work_item"]["state"],
-                    "mutations": 0,
-                },
-                "source_input_sha256": input_hashes,
-            }
-            if summary["chat"]["session_export_count"] != expectation["exports"]:
-                raise AssertionError(
-                    f"golden expects {expectation['exports']} exports, got "
-                    f"{summary['chat']['session_export_count']}"
-                )
-            stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
-            return {
-                "summary": summary,
-                "stable": stable,
-                "narrative": harness.narrative,
-                "session_ids": [
-                    sid_a,
-                    sid_b,
-                    sid_jobsite,
-                    sid_c,
-                    sid_d,
-                    sid_e,
-                    sid_f,
-                    sid_g,
-                    sid_h,
+        input_hashes = source_hashes()
+        summary = {
+            "fixture": fixture["name"],
+            "opencode_version": binary_version,
+            "recorded_model": fixture["model"],
+            "chat": {
+                "candidate_reviewed": fixture["requirement_id"],
+                "candidate_status": fixture["candidate_status"],
+                "validation_failure_reported": "requirement.ears_pattern_mismatch"
+                in failure_result,
+                "active_guard_refusal_reported": "drafting-table-guard"
+                in review_result,
+                "subdirectory_apply_patch_refused": len(patch_vectors) == 2,
+                "subdirectory_apply_patch_target": expectation[
+                    "apply_patch_guard_vector"
+                ]["project_root_relative_target"],
+                "opencode_native_apply_patch_tool_available": native_apply_patch_available,
+                "apply_patch_guard_roles": [
+                    vector["role"] for vector in patch_vectors
                 ],
-                "project_context": project_context,
-            }
-        finally:
-            harness.dispose()
+                "non_role_redirections_refused": all(
+                    event["status"] == "error"
+                    and "drafting-table-guard" in event["error"]
+                    for event in non_role_events
+                    if event["tool"] == "bash"
+                ),
+                "explicit_approval_and_handoff": "pull request"
+                in approval_result.lower(),
+                "jobsite_lifecycle_refused": jobsite_guard.returncode == 2
+                and jobsite_refusal["tool"] not in offered,
+                "session_exported": True,
+                "session_export_count": len(exports),
+                "vision_unchanged_after_write_probes": vision_unchanged,
+                "vision_unchanged_after_apply_patch": vision_unchanged_after_patch,
+                "vision_sha256": hashlib.sha256(
+                    vision_path.read_bytes()
+                ).hexdigest(),
+            },
+            "git": {
+                "branch": "cs/00002-exercise-the-opencode-drafting-table",
+                "local_bare_origin_only": effective_remote.startswith("file://"),
+                "change_set_committed": fixture["requirement_id"]
+                in req_list.stdout,
+                "pr_create_count": len(pr_creates),
+                "pr_repository": "github.com/protobot-fixture/fixture",
+                "pr_base": "main",
+                "merged": expectation["handoff"]["merged"],
+                "committed_paths": sorted(paths),
+                "working_tree_clean": True,
+            },
+            "wms": {
+                "blocked_item": fixture["blocked_work_item"]["id"],
+                "state_before": fixture["blocked_work_item"]["state"],
+                "state_after": fixture["blocked_work_item"]["state"],
+                "mutations": 0,
+            },
+            "source_input_sha256": input_hashes,
+        }
+        if summary["chat"]["session_export_count"] != expectation["exports"]:
+            raise AssertionError(
+                f"golden expects {expectation['exports']} exports, got "
+                f"{summary['chat']['session_export_count']}"
+            )
+        stable = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+        return {
+            "summary": summary,
+            "stable": stable,
+            "narrative": harness.narrative,
+            "session_ids": [
+                sid_a,
+                sid_b,
+                sid_jobsite,
+                sid_c,
+                sid_d,
+                sid_e,
+                sid_f,
+                sid_g,
+                sid_h,
+            ],
+            "project_context": project_context,
+        }
 
 
 def run_rejection(
