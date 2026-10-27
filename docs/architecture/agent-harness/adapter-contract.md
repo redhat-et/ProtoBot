@@ -46,11 +46,12 @@ binding per harness:
 - **[OpenCode Harness Binding](opencode.md) is the first binding.** It
   defines the OpenCode files that meet this contract, designed against
   OpenCode 1.18.30. Its fixture ran in #77 against the pinned binary;
-  the recorded fixture covers the baseline guard vectors. Guard unit
-  tests cover expanded Rule 4 and Rule 7 cases, but not all are
-  represented in that fixture. H1 to H12 describe the recorded run, with the
-  plugin-absent fail-open path and deferred steps recorded as gaps, and
-  H13 was not checked.
+  #173 extended it with the rejection-revision, stale-state, and
+  WMS-unavailable scenarios. The recorded fixture covers the baseline
+  guard vectors. Guard unit tests cover expanded Rule 4 and Rule 7
+  cases, but not all are represented in that fixture. H1 to H12
+  describe the recorded runs, with the plugin-absent fail-open path
+  and deferred steps recorded as gaps, and H13 was not checked.
 - **[Claude Code Harness Binding](claude-code.md) is the second.** It
   defines the Claude Code files, designed against the Claude Code
   2.1.273 documentation and CLI help. Its fixture has not run yet.
