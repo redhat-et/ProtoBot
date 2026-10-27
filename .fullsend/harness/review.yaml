@@ -1,5 +1,5 @@
 ---
-base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.45.0/harness/review.yaml#sha256=3e9302d8143fcfd93df8e4542162776e98893c8ef367450679e2ffa89e5b0c53"
+base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.48.1/harness/review.yaml#sha256=083fb43c4c1c5c75282410c4b8381f391eb760eb37b8bf49112a036b02269f4b"
 
 # Lock the review budget at the upstream default so spec-document PRs
 # are not killed mid-synthesis. TIMEOUT_SECONDS must equal
