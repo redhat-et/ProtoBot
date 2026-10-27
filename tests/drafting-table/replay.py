@@ -71,6 +71,17 @@ def clean_env(base: dict[str, str], *, project: Path, home: Path) -> dict[str, s
         "GITHUB_TOKEN",
         "GH_TOKEN",
         "GITLAB_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_RUNTIME_URL",
+        "ACTIONS_CACHE_URL",
+        "ACTIONS_RESULTS_URL",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "GITHUB_ENV",
+        "GITHUB_PATH",
+        "GITHUB_OUTPUT",
+        "GITHUB_STATE",
+        "GITHUB_STEP_SUMMARY",
     ):
         env.pop(name, None)
     env.update(
@@ -1155,8 +1166,7 @@ def run_approved(
         refusal_events = [
             event
             for event in tool_events(skill_result)
-            if event["status"] == "error"
-            and "drafting-table-guard" in event["error"]
+            if event["status"] == "error" and "drafting-table-guard" in event["error"]
         ]
         if not any(
             event["tool"] == "skill" and event["input"].get("name") == "review-pr"
@@ -1228,15 +1238,12 @@ def run_approved(
                 f"exit={jobsite_guard.returncode}, stderr={jobsite_guard.stderr!r}"
             )
         if any(
-            event.get("tool") == jobsite_refusal["tool"]
-            for event in wms_calls(wms_log)
+            event.get("tool") == jobsite_refusal["tool"] for event in wms_calls(wms_log)
         ):
             raise AssertionError(
                 "Job Site lifecycle operation reached the recording WMS stub"
             )
-        session_jobsite_export, session_jobsite_sanitized = harness.export(
-            sid_jobsite
-        )
+        session_jobsite_export, session_jobsite_sanitized = harness.export(sid_jobsite)
 
         # A new session must repeat the resume reads before the candidate
         # write; it does not inherit authoritative state from chat.
@@ -1465,9 +1472,7 @@ def run_approved(
             raise AssertionError(
                 "the pinned OpenCode apply_patch tool registry differs from golden output"
             )
-        vision_unchanged_after_patch = (
-            vision_path.read_bytes() == vision_before_patch
-        )
+        vision_unchanged_after_patch = vision_path.read_bytes() == vision_before_patch
         if not vision_unchanged_after_patch:
             raise AssertionError(
                 "subdirectory apply_patch changed the registered Vision bytes"
@@ -1513,10 +1518,7 @@ def run_approved(
             raise AssertionError(
                 "an apply_patch or non-role shell redirection changed registered Vision"
             )
-        if (
-            expectation["vision_unchanged_after_non_role_redirects"]
-            != vision_unchanged
-        ):
+        if expectation["vision_unchanged_after_non_role_redirects"] != vision_unchanged:
             raise AssertionError(
                 "Vision byte-preservation evidence differs from golden output"
             )
@@ -1581,9 +1583,7 @@ def run_approved(
             raise AssertionError(
                 f"real ears-manager artifact list returned unexpected entries: {artifact_list.stdout}"
             )
-        git_status = run(
-            ["git", "status", "--porcelain"], cwd=project, env=env
-        ).stdout
+        git_status = run(["git", "status", "--porcelain"], cwd=project, env=env).stdout
         if git_status.strip():
             raise AssertionError(
                 f"SCM did not leave the change-set worktree clean: {git_status}"
@@ -1594,9 +1594,7 @@ def run_approved(
             env=env,
         ).stdout.splitlines()
         gh_events = read_jsonl(Path(env["DT_GH_LOG"]))
-        pr_creates = [
-            event for event in gh_events if event.get("event") == "create"
-        ]
+        pr_creates = [event for event in gh_events if event.get("event") == "create"]
         if len(pr_creates) != 1:
             raise AssertionError(
                 f"expected one recording gh PR create, got {gh_events!r}"
@@ -1622,9 +1620,7 @@ def run_approved(
             gh_args[gh_args.index("--head") + 1]
             != "cs/00002-exercise-the-opencode-drafting-table"
         ):
-            raise AssertionError(
-                f"PR used an unexpected change-set head: {gh_args!r}"
-            )
+            raise AssertionError(f"PR used an unexpected change-set head: {gh_args!r}")
         if len(pr_creates) != expectation["handoff"]["gh_pr_create"]:
             raise AssertionError(
                 "recorded Git host create count differs from golden output"
@@ -1721,9 +1717,7 @@ def run_approved(
                     "apply_patch_guard_vector"
                 ]["project_root_relative_target"],
                 "opencode_native_apply_patch_tool_available": native_apply_patch_available,
-                "apply_patch_guard_roles": [
-                    vector["role"] for vector in patch_vectors
-                ],
+                "apply_patch_guard_roles": [vector["role"] for vector in patch_vectors],
                 "non_role_redirections_refused": all(
                     event["status"] == "error"
                     and "drafting-table-guard" in event["error"]
@@ -1738,15 +1732,12 @@ def run_approved(
                 "session_export_count": len(exports),
                 "vision_unchanged_after_write_probes": vision_unchanged,
                 "vision_unchanged_after_apply_patch": vision_unchanged_after_patch,
-                "vision_sha256": hashlib.sha256(
-                    vision_path.read_bytes()
-                ).hexdigest(),
+                "vision_sha256": hashlib.sha256(vision_path.read_bytes()).hexdigest(),
             },
             "git": {
                 "branch": "cs/00002-exercise-the-opencode-drafting-table",
                 "local_bare_origin_only": effective_remote.startswith("file://"),
-                "change_set_committed": fixture["requirement_id"]
-                in req_list.stdout,
+                "change_set_committed": fixture["requirement_id"] in req_list.stdout,
                 "pr_create_count": len(pr_creates),
                 "pr_repository": "github.com/protobot-fixture/fixture",
                 "pr_base": "main",
@@ -2038,7 +2029,10 @@ def run_wms_unavailable(
                 "session_exported": True,
                 "session_export_count": 1,
             },
-            "git": {"working_tree_clean": True, "pr_create_count": 0},
+            "git": {
+                "pr_create_count": 0,
+                "working_tree_status_paths": sorted(expectation["git_status_paths"]),
+            },
             "wms": {
                 "wms_available": False,
                 "wms_calls_succeeded": 0,

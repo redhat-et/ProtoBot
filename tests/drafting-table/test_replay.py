@@ -66,6 +66,10 @@ class OpenCodeReplayTest(unittest.TestCase):
         wms_unavailable = result["scenarios"]["wms-unavailable"]
         self.assertFalse(wms_unavailable["wms"]["wms_available"])
         self.assertTrue(wms_unavailable["chat"]["drafting_continued"])
+        self.assertEqual(
+            wms_unavailable["git"]["working_tree_status_paths"],
+            [".protobot/change-sets/cs-00002.yaml", ".protobot/project.yaml"],
+        )
 
 
 if __name__ == "__main__":
