@@ -209,7 +209,7 @@ Vision.md                       # authoritative: purpose, users, outcomes
 Architecture.md                 # authoritative: components, interfaces; organizes constraint references
 spec/
   requirements/
-    REQ-<AREA>-<NNNNN>.yaml     # authoritative: one file per requirement
+    REQ-<SCOPE>-<NNNNN>.yaml    # authoritative: one file per requirement
   interfaces/
     <interface-name>.yaml       # authoritative: named external interfaces
 src/                            # derived: implementation
@@ -251,7 +251,7 @@ status: active
 
 | Field | Meaning |
 | --- | --- |
-| `id` | Stable, unique, immutable. Format `REQ-<AREA>-<NNNNN>`. |
+| `id` | Stable, unique, immutable. Format `REQ-<SCOPE>-<NNNNN>`. |
 | `type` | EARS pattern: `ubiquitous`, `event-driven`, `state-driven`, `unwanted-behavior`, `optional-feature`, `complex`. |
 | `text` | The complete EARS obligation. Exactly one `shall`. |
 | `applies_to` | At least one interface or scope. Applicability metadata, not a second obligation. |
@@ -1066,6 +1066,14 @@ required.
    inference configuration. No Fullsend upgrade is a prerequisite; initial
    built-in automatic triage and its automatic promotion to coding
    (`TRIAGE_AUTO_CODE`) are disabled, not coordinator-triggered Fullsend coding.
+5. **Remaining V1 scope dispositions.** How should V2 address Specification
+   Toolkit packaging in §12's methodology, Kits and Kit source imports, the
+   hosted Web deployment mode (including the Web Drafting Table and its
+   session state), Gate approval records, the deployment-level registry, and
+   their related OAuth 2.1 and Bridge/Gate constraints? Should it retain V1's
+   reserved `project` applicability scope for project-wide and environmental
+   requirements? These are unresolved future V2 scope questions, not decisions
+   to retain, drop, or adopt those V1 capabilities or constraints.
 
 ## 15. Relationship to V1
 
@@ -1223,14 +1231,19 @@ actions before any coordination mutation, then enforces §8.5–§8.7. Invalid
 schema permits no assignment, dispatch, or closure mutations; model output
 never authorizes an unchecked mutation.
 
-The existing [mint trust boundary][mint-trust] checks repository/owner and
-`job_workflow_ref` host/basename, not caller `workflow_ref`, `workflow_sha`,
-`event_name`, or `job_workflow_sha`. This call retains that trusted upstream
-identity; no new caller allowlist is a prerequisite. Generated repository
-inference WIF binds `assertion.repository`, not a workflow ref. Live private
-policies were not queried; validate the new local composition through §8.4's
-smoke tests, not by changing hosted mint configuration, roles, permissions,
-hosts, inference services, or model secrets under a fallback.
+The documented open-source [mint trust boundary][mint-trust] checks
+repository/owner and `job_workflow_ref` host/basename, not caller
+`workflow_ref`, `workflow_sha`, `event_name`, or `job_workflow_sha`. However,
+the live hosted mint policy was not queried directly. Before adoption, confirm
+whether the live deployment binds or restricts caller workflow identity. If the
+hosted mint policy does not bind the caller workflow, caller authorization
+must be established by restricting execution to the reviewed caller workflow on
+the default branch (protected branch and PR merge rules) and validating caller
+ref before minting, rather than assuming no caller allowlist is required.
+Generated repository inference WIF binds `assertion.repository`, not a workflow
+ref. Validate the new local composition through §8.4's smoke tests without
+changing hosted mint configuration, roles, permissions, hosts, inference
+services, or model secrets under a fallback.
 
 [harness-enumeration]: https://github.com/fullsend-ai/fullsend/blob/3454a2e4ee2b667e2ed71fa9d384edc6de3d4f74/internal/harnessdispatch/enumerate.go#L76-L94
 [phase-privileges]: https://github.com/fullsend-ai/fullsend/blob/3454a2e4ee2b667e2ed71fa9d384edc6de3d4f74/internal/harness/privilege.go#L9-L51
