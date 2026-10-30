@@ -46,11 +46,12 @@ binding per harness:
 - **[OpenCode Harness Binding](opencode.md) is the first binding.** It
   defines the OpenCode files that meet this contract, designed against
   OpenCode 1.18.30. Its fixture ran in #77 against the pinned binary;
-  the recorded fixture covers the baseline guard vectors. Guard unit
-  tests cover expanded Rule 4 and Rule 7 cases, but not all are
-  represented in that fixture. H1 to H12 describe the recorded run, with the
-  plugin-absent fail-open path and deferred steps recorded as gaps, and
-  H13 was not checked.
+  #173 extended it with the rejection-revision, stale-state, and
+  WMS-unavailable scenarios. The recorded fixture covers the baseline
+  guard vectors. Guard unit tests cover expanded Rule 4 and Rule 7
+  cases, but not all are represented in that fixture. H1 to H12
+  describe the recorded runs, with the plugin-absent fail-open path
+  and deferred steps recorded as gaps, and H13 was not checked.
 - **[Claude Code Harness Binding](claude-code.md) is the second.** It
   defines the Claude Code files, designed against the Claude Code
   2.1.273 documentation and CLI help. Its fixture has not run yet.
@@ -1489,7 +1490,7 @@ establish file-source provenance when a hook fails open, as described under
 
 | Harness | Binding | Status |
 | --- | --- | --- |
-| OpenCode | [OpenCode Harness Binding](opencode.md) | The #77 fixture ran against OpenCode 1.18.30 with real governed tools and recording WMS/`gh` stubs. It covers the baseline guard vectors; guard unit tests cover expanded Rule 4 and Rule 7 cases, but not all are represented in the fixture. H1 to H12 describe the recorded run, with the plugin-absent fail-open path and deferred steps recorded as gaps; H13 not checked. No later full-fixture run is recorded here |
+| OpenCode | [OpenCode Harness Binding](opencode.md) | The #77 fixture ran against OpenCode 1.18.30 with real governed tools and recording WMS/`gh` stubs, and #173 extended it with the rejection-revision, stale-state, and WMS-unavailable scenarios. It covers the baseline guard vectors; guard unit tests cover expanded Rule 4 and Rule 7 cases, but not all are represented in the fixture. H1 to H12 describe the recorded runs, with the plugin-absent fail-open path and deferred steps recorded as gaps; H13 not checked |
 | Claude Code | [Claude Code Harness Binding](claude-code.md) | Designed against Claude Code 2.1.273; the fixture has not run, so no H1 to H11 obligation is marked met; H12 is met |
 | Codex | [Codex Harness Binding](codex.md) | Designed against Codex CLI 0.154.0, with skill visibility, tools, the profile, and the hook observed against a stub model; the fixture has not run, so no H1 to H11 obligation is marked met; H12 is met. The Codex sandbox stays on, so the user runs a branch-cutting `change-set create`, which writes `.git/`, and registration, which needs the network. Git and the Git host go through the `scm` server, which runs outside the sandbox |
 
@@ -1519,7 +1520,9 @@ status names it.
 
 The table records what each harness offers for each obligation. The
 OpenCode column is bound in [OpenCode Harness Binding](opencode.md)
-and its recorded #77 fixture ran against the pinned binary and covers
+and its recorded fixture — the #77 approved-handoff scenario, extended
+in #173 with the rejection-revision, stale-state, and WMS-unavailable
+scenarios — ran against the pinned binary and covers
 the baseline guard vectors. Guard unit tests cover expanded Rule 4 and
 Rule 7 cases, but not all are represented in the fixture. H1 to H12
 record that run, with the plugin-absent fail-open path and deferred steps
@@ -1606,7 +1609,19 @@ keeps the real harness and asserts the binding and the guard. Merge and
 registration are covered by step 8 of #34's
 [repository fixture](../git-integration.md#repository-fixture), and the
 SCM's operations and refusals by the same fixture run against the SCM
-([Repository fixture against the SCM][scm-fixture]).
+([Repository fixture against the SCM][scm-fixture]). The recorded
+OpenCode fixture additionally covers, in its own scenarios, the
+rejection checkpoint with a Vision revision through `artifact put`
+(rejection-as-revision), the WMS-unavailable session, the Job Site
+lifecycle refusal, and the stale-state steps 12–14 through the
+refresh sequence, renewed approval bound to the new base, the host merge,
+and `register-approved-change-set` with a WMS readback of the materialized
+work item. The stale-state scenario pushes the default-branch move after
+the approved commit and before `publish`, so the approval binds to a base
+that was current when the user gave it.
+The implemented approved-path scenario keeps #77's simplification of
+running on proposed `CS-00002`; the stale-state scenario follows this
+table's setup and runs on `CS-00003`.
 
 ### Setup
 
@@ -1676,7 +1691,7 @@ repository state.
 | 11 | Start a new session, without continuing, through the entry point | A new session ID. The resume reads present `CS-00003`, its branch, and the step-5 requirement and Vision as uncommitted drafts. No call reads an earlier session. |
 | 12 | Push a commit to the default branch of `origin` from outside the session, then continue the session through the entry point | The resume reads run again and present `CS-00003`, its branch, and `base_commit` from governed reads and `repo_state`, not from the conversation. The summary makes no claim about the default branch; step 14 detects the move. |
 | 13 | Start a session with the `wms` stub stopped | The summary marks blocked work as unavailable. Drafting continues. No `wms` call succeeds. |
-| 14 | The user approves and asks for a commit and a pull request | Only `scm` tools and `ears-manager` shell operations run. `commit` makes one commit in #34's message format. `publish` fetches and fails with `DEFAULT_MOVED`, because the default branch moved since `base_commit` (step 12), as #34's [failure table](../git-integration.md#failure-behavior) states. The role runs `refresh`, which adds a merge commit, then reads `repo_state`; in this fixture, `remote.reachable` is `true`, `default_branch.local` is `fast-forwarded`, and `default_branch.head` equals the `base_commit_update` from `refresh`. If the fetch is unreachable, the role retries; if the head differs, it repeats `refresh` and `repo_state`; if the local state is `behind` or `diverged`, it stops for user action under the [SCM refresh recovery rule](../source-control-manager.md#refresh). In #34's [refresh sequence](../git-integration.md#refreshing-from-the-default-branch), the role then uses the verified head for `change-set update --base-commit`, runs `impact`, records any new disposition with a reviewed `change-set update --impact-file -`, runs `check --change-set CS-00003`, and commits again. `publish` pushes the branch to `origin`. The `gh` stub records one `pr create` whose `--repo` is the canonical repository, `--base` is `main`, and `--head` is `cs/00003-<slug>`, and whose body on standard input is the SCM's rendering. No merge and no other call follows the handoff. |
+| 14 | The user approves and asks for a commit and a pull request | Only `scm` tools and `ears-manager` shell operations run. `commit` makes one commit in #34's message format. `publish` fetches and fails with `DEFAULT_MOVED`, because the default branch moved since `base_commit` (step 12), as #34's [failure table](../git-integration.md#failure-behavior) states. The role runs `refresh`, which adds a merge commit, then reads `repo_state`; in this fixture, `remote.reachable` is `true`, `default_branch.local` is `fast-forwarded`, and `default_branch.head` equals the `base_commit_update` from `refresh`. If the fetch is unreachable, the role retries; if the head differs, it repeats `refresh` and `repo_state`; if the local state is `behind` or `diverged`, it stops for user action under the [SCM refresh recovery rule](../source-control-manager.md#refresh). In #34's [refresh sequence](../git-integration.md#refreshing-from-the-default-branch), the role then uses the verified head for `change-set update --base-commit`, runs `impact`, records any new disposition with a reviewed `change-set update --impact-file -`, and runs `check --change-set CS-00003`. The earlier approval is stale, so the role commits and publishes nothing more until it presents the refreshed revision and its new base and the user gives renewed approval bound to them ([stale invalidation][ux-invariants]). It then commits again, and `publish` pushes the branch to `origin`. The `gh` stub records one `pr create` whose `--repo` is the canonical repository, `--base` is `main`, and `--head` is `cs/00003-<slug>`, and whose body on standard input is the SCM's rendering. No merge and no other call follows the handoff. |
 | 15 | Export every session | Each export names the role, the model, and the harness version, and holds the adapter line and every tool call with its status and error text. |
 
 A session started in one bound harness and resumed in another, at step
@@ -1830,6 +1845,7 @@ material.
 [ux-evidence]: ../drafting-table-ux.md#acceptance-evidence
 [ux-failure]: ../drafting-table-ux.md#failure-behavior
 [ux-gaps]: ../drafting-table-ux.md#hybrid-gap-surfacing-ux
+[ux-invariants]: ../drafting-table-ux.md#protocol-invariants
 [ux-leak]: ../drafting-table-ux.md#anti-leakage-rule
 [ux-resume]: ../drafting-table-ux.md#resuming-an-existing-session
 [ux-stale]: ../drafting-table-ux.md#stale-git-or-wms-state
