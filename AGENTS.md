@@ -77,12 +77,12 @@ later, agents must follow these rules:
    intra-entry terminology drift, not only sibling-entry
    terminology matching.
 
-Examples of sibling entries for each governed scope listed above:
+Sibling entries per governed scope:
 
 - **Numbered rules in `AGENTS.md`:** the other numbered
   rules in that same list.
-- **Specification documents under `docs/`:** every other
-  governed Markdown document under `docs/`.
+- **Specification documents under `docs/`:** sections of other
+  same-directory documents with the edit's added or changed terms.
 - **Skill files under `.agents/skills/`:** every other
   skill file under `.agents/skills/`.
 
