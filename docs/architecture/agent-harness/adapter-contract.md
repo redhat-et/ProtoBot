@@ -1614,7 +1614,11 @@ OpenCode fixture additionally covers, in its own scenarios, the
 rejection checkpoint with a Vision revision through `artifact put`
 (rejection-as-revision), the WMS-unavailable session, the Job Site
 lifecycle refusal, and the stale-state steps 12–14 through the
-refresh sequence, the host merge, and `register-approved-change-set`.
+refresh sequence, renewed approval bound to the new base, the host merge,
+and `register-approved-change-set` with a WMS readback of the materialized
+work item. The stale-state scenario pushes the default-branch move after
+the approved commit and before `publish`, so the approval binds to a base
+that was current when the user gave it.
 The implemented approved-path scenario keeps #77's simplification of
 running on proposed `CS-00002`; the stale-state scenario follows this
 table's setup and runs on `CS-00003`.
@@ -1687,7 +1691,7 @@ repository state.
 | 11 | Start a new session, without continuing, through the entry point | A new session ID. The resume reads present `CS-00003`, its branch, and the step-5 requirement and Vision as uncommitted drafts. No call reads an earlier session. |
 | 12 | Push a commit to the default branch of `origin` from outside the session, then continue the session through the entry point | The resume reads run again and present `CS-00003`, its branch, and `base_commit` from governed reads and `repo_state`, not from the conversation. The summary makes no claim about the default branch; step 14 detects the move. |
 | 13 | Start a session with the `wms` stub stopped | The summary marks blocked work as unavailable. Drafting continues. No `wms` call succeeds. |
-| 14 | The user approves and asks for a commit and a pull request | Only `scm` tools and `ears-manager` shell operations run. `commit` makes one commit in #34's message format. `publish` fetches and fails with `DEFAULT_MOVED`, because the default branch moved since `base_commit` (step 12), as #34's [failure table](../git-integration.md#failure-behavior) states. The role runs `refresh`, which adds a merge commit, then reads `repo_state`; in this fixture, `remote.reachable` is `true`, `default_branch.local` is `fast-forwarded`, and `default_branch.head` equals the `base_commit_update` from `refresh`. If the fetch is unreachable, the role retries; if the head differs, it repeats `refresh` and `repo_state`; if the local state is `behind` or `diverged`, it stops for user action under the [SCM refresh recovery rule](../source-control-manager.md#refresh). In #34's [refresh sequence](../git-integration.md#refreshing-from-the-default-branch), the role then uses the verified head for `change-set update --base-commit`, runs `impact`, records any new disposition with a reviewed `change-set update --impact-file -`, runs `check --change-set CS-00003`, and commits again. `publish` pushes the branch to `origin`. The `gh` stub records one `pr create` whose `--repo` is the canonical repository, `--base` is `main`, and `--head` is `cs/00003-<slug>`, and whose body on standard input is the SCM's rendering. No merge and no other call follows the handoff. |
+| 14 | The user approves and asks for a commit and a pull request | Only `scm` tools and `ears-manager` shell operations run. `commit` makes one commit in #34's message format. `publish` fetches and fails with `DEFAULT_MOVED`, because the default branch moved since `base_commit` (step 12), as #34's [failure table](../git-integration.md#failure-behavior) states. The role runs `refresh`, which adds a merge commit, then reads `repo_state`; in this fixture, `remote.reachable` is `true`, `default_branch.local` is `fast-forwarded`, and `default_branch.head` equals the `base_commit_update` from `refresh`. If the fetch is unreachable, the role retries; if the head differs, it repeats `refresh` and `repo_state`; if the local state is `behind` or `diverged`, it stops for user action under the [SCM refresh recovery rule](../source-control-manager.md#refresh). In #34's [refresh sequence](../git-integration.md#refreshing-from-the-default-branch), the role then uses the verified head for `change-set update --base-commit`, runs `impact`, records any new disposition with a reviewed `change-set update --impact-file -`, and runs `check --change-set CS-00003`. The earlier approval is stale, so the role commits and publishes nothing more until it presents the refreshed revision and its new base and the user gives renewed approval bound to them ([stale invalidation][ux-invariants]). It then commits again, and `publish` pushes the branch to `origin`. The `gh` stub records one `pr create` whose `--repo` is the canonical repository, `--base` is `main`, and `--head` is `cs/00003-<slug>`, and whose body on standard input is the SCM's rendering. No merge and no other call follows the handoff. |
 | 15 | Export every session | Each export names the role, the model, and the harness version, and holds the adapter line and every tool call with its status and error text. |
 
 A session started in one bound harness and resumed in another, at step
@@ -1841,6 +1845,7 @@ material.
 [ux-evidence]: ../drafting-table-ux.md#acceptance-evidence
 [ux-failure]: ../drafting-table-ux.md#failure-behavior
 [ux-gaps]: ../drafting-table-ux.md#hybrid-gap-surfacing-ux
+[ux-invariants]: ../drafting-table-ux.md#protocol-invariants
 [ux-leak]: ../drafting-table-ux.md#anti-leakage-rule
 [ux-resume]: ../drafting-table-ux.md#resuming-an-existing-session
 [ux-stale]: ../drafting-table-ux.md#stale-git-or-wms-state

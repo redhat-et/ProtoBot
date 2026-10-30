@@ -576,12 +576,18 @@ rejection-revision scenario records an explicit rejection at the approval
 boundary (no tool call, no WMS record, no host action, baseline unchanged)
 followed by a Vision revision through `ears-manager artifact put` in a fresh
 session. The stale-state scenario runs on `CS-00003` per the fixture
-session table: the default branch moves between session pause and resume,
-publish fails `DEFAULT_MOVED`, and the refresh sequence ends in one pull
-request, one host-side merge through the `gh` stub, and one idempotent
-`register-approved-change-set`. The wms-unavailable scenario starts a
-session with the WMS stub stopped; blocked work is marked unavailable and
-drafting continues with no WMS tool offered.
+session table: after an explicit approval bound to the current base, the
+approved commit lands and the default branch moves before publish, so
+publish fails `DEFAULT_MOVED`, and the resume detects the move from governed
+reads. The refresh sequence commits and publishes nothing; it re-presents
+the refreshed revision and its new base, and only a renewed approval bound
+to that base commits and publishes. The scenario ends in one pull request,
+one host-side merge through the `gh` stub, and one idempotent
+`register-approved-change-set` whose materialized work item the role reads
+back through the WMS stub, with the unrelated blocked item unchanged. The
+wms-unavailable scenario starts a session with the WMS stub stopped;
+blocked work is marked unavailable and drafting continues with no WMS tool
+offered.
 
 The `drafting-table` job in `.github/workflows/ci-workflow.yaml` runs the
 same replay in CI, together with the guard module's Go tests and a
