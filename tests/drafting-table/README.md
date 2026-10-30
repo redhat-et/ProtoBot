@@ -29,11 +29,16 @@ semantic summary for byte stability:
   makes no tool call and leaves WMS, Git-host, and baseline state
   unchanged; the requested Vision revision goes through
   `ears-manager artifact put` in a fresh session and stays uncommitted.
-- `stale-state` — the default branch moves between session pause and
-  resume; the resume detects the move from governed reads, publish fails
-  `DEFAULT_MOVED`, and the refresh sequence (refresh, base-commit rebind,
-  impact, validation, commit, publish) ends in one pull request, one
-  host-side merge, and one idempotent `register-approved-change-set`.
+- `stale-state` — after an explicit approval bound to the current base, the
+  approved commit lands and the default branch moves before publish, so
+  publish fails `DEFAULT_MOVED`; the resume detects the move from governed
+  reads. The refresh sequence (refresh, base-commit rebind, impact,
+  validation) commits and publishes nothing and re-presents the refreshed
+  revision and its new base; only a renewed approval bound to that base
+  commits and publishes. It ends in one pull request, one host-side merge,
+  and one idempotent `register-approved-change-set` whose materialized work
+  item the role reads back through `wms_work_item_query`, with the unrelated
+  blocked item unchanged.
 - `wms-unavailable` — a session started with the WMS stub stopped
   (`--fail-start`) marks blocked work unavailable and continues drafting;
   OpenCode offers no WMS tool while the server is down, so the turn
@@ -52,11 +57,16 @@ checked-out binding permission is changed.
 Stubs: `wms_stub.py` serves the twelve Drafting Table WMS operations plus the
 Job Site lifecycle operations `claim` and `record_merge` (advertised but never
 offered to the role), and `--fail-start` records a failed start and exits
-without serving. `gh_stub.py` records pull-request state and performs the
-host-side merge on `pr merge` when `DT_GH_STATE` and `DT_GH_ORIGIN` are set.
+without serving. With `--state`, its read operations also serve work items
+that its `materialize` function persisted in that file. `gh_stub.py`
+records pull-request state and performs the host-side merge on `pr merge`
+when `DT_GH_STATE` and `DT_GH_ORIGIN` are set.
 `register_stub.py` is the local `register-approved-change-set` stand-in: it
-reads the merge commit through the SCM's `approved-merge` face and appends one
-durable, idempotent registration record to `DT_REG_LOG`.
+reads the merge commit through the SCM's `approved-merge` face, calls the
+Materializer stand-in (`wms_stub.materialize`), which persists one
+`ready-for-building` work item per materialization key in `DT_WMS_STATE` and
+records the write in `DT_WMS_LOG`, and appends one durable, idempotent
+registration record to `DT_REG_LOG`. A retry replays both.
 
 The recorded demonstration (one approved path, one rejected path) is
 `docs/architecture/fixtures/drafting-table-opencode-demo.md`, regenerated with:

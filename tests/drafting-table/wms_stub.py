@@ -1,9 +1,15 @@
-"""Recording, backend-free WMS MCP server used only by the OpenCode fixture."""
+"""Recording, backend-free WMS MCP server used only by the OpenCode fixture.
+
+With `--state`, work items materialized by the Materializer stand-in
+(`materialize`) persist in that file and are served by the read
+operations alongside the fixed blocked item.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -47,7 +53,102 @@ def record(path: Path, value: dict[str, Any]) -> None:
         output.write(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
 
 
-def tool_result(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def read_state(state: Path | None) -> dict[str, Any]:
+    if state is None or not state.exists():
+        return {"materializations": []}
+    return json.loads(state.read_text())
+
+
+def work_items(state: Path | None) -> list[dict[str, Any]]:
+    return [ITEM] + [
+        entry["work_item"] for entry in read_state(state)["materializations"]
+    ]
+
+
+def materialize(
+    state: Path,
+    log: Path,
+    *,
+    change_set: str,
+    merge_commit: str,
+    materialization_key: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Materializer-role write: create one ready-for-building work item per
+    materialization key; a repeat with the same keys replays the result."""
+    data = read_state(state)
+    prior = next(
+        (
+            entry
+            for entry in data["materializations"]
+            if entry["materialization_key"] == materialization_key
+        ),
+        None,
+    )
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "operation": "materialize",
+        "diagnostics": [],
+    }
+    if prior is not None and prior["idempotency_key"] != idempotency_key:
+        result.update(
+            ok=False,
+            outcome="rejected",
+            mutation="none",
+            error={"code": "IDEMPOTENCY_CONFLICT"},
+        )
+        return result
+    if prior is None:
+        item = {
+            "id": f"WI-{change_set}",
+            "state": "ready-for-building",
+            "dependencies": [],
+            "contract_version": 1,
+            "change_set_id": change_set,
+        }
+        data["materializations"].append(
+            {
+                "materialization_key": materialization_key,
+                "idempotency_key": idempotency_key,
+                "merge_commit": merge_commit,
+                "work_item": item,
+            }
+        )
+        temporary = state.with_name(state.name + ".tmp")
+        temporary.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n")
+        os.replace(temporary, state)
+        before = "initial"
+        result.update(outcome="applied", mutation="applied", idempotency="new")
+    else:
+        item = prior["work_item"]
+        before = item["state"]
+        result.update(outcome="replayed", mutation="none", idempotency="replayed")
+    result.update(
+        ok=True,
+        work_item_id=item["id"],
+        work_item_state=item["state"],
+        contract_version=item["contract_version"],
+    )
+    record(
+        log,
+        {
+            "event": "materialize",
+            "role": "materializer",
+            "work_item_id": item["id"],
+            "change_set": change_set,
+            "materialization_key": materialization_key,
+            "before": before,
+            "after": item["state"],
+            "mutation": result["mutation"],
+            "idempotency": result["idempotency"],
+        },
+    )
+    return result
+
+
+def tool_result(
+    name: str, arguments: dict[str, Any], state: Path | None = None
+) -> dict[str, Any]:
     operation = name.replace("_", "-")
     result: dict[str, Any] = {
         "schema_version": 1,
@@ -57,8 +158,11 @@ def tool_result(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "mutation": "none",
         "diagnostics": [],
     }
-    if name in ("blocked_work_query", "work_item_query"):
-        result["items"] = [ITEM]
+    items = work_items(state)
+    if name == "blocked_work_query":
+        result["items"] = [item for item in items if item["state"] == "blocked"]
+    elif name == "work_item_query":
+        result["items"] = items
     elif name in (
         "work_item_get",
         "blocked_work_submit_resolution",
@@ -87,7 +191,7 @@ def send(value: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
-def serve(log: Path) -> None:
+def serve(log: Path, state: Path | None) -> None:
     record(log, {"event": "started", "state": ITEM["state"]})
     try:
         for raw in sys.stdin:
@@ -142,7 +246,7 @@ def serve(log: Path) -> None:
                 params = request.get("params", {})
                 name = params.get("name", "")
                 arguments = params.get("arguments", {})
-                result = tool_result(name, arguments)
+                result = tool_result(name, arguments, state)
                 record(
                     log,
                     {
@@ -184,6 +288,7 @@ def serve(log: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True, type=Path)
+    parser.add_argument("--state", type=Path)
     parser.add_argument(
         "--fail-start",
         action="store_true",
@@ -193,7 +298,7 @@ def main() -> int:
     if args.fail_start:
         record(args.log, {"event": "failed-start", "state": ITEM["state"]})
         return 1
-    serve(args.log)
+    serve(args.log, args.state)
     return 0
 
 

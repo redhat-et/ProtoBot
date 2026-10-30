@@ -2,10 +2,13 @@
 """Local `register-approved-change-set` stand-in for the OpenCode fixture.
 
 Reads the merge commit through the Source Control Manager's
-`approved-merge` CLI face, appends one durable registration record to
-the log named by `DT_REG_LOG`, and replays the recorded result for a
-repeat call with the same change set and merge commit (idempotent
-retry). A different merge commit for the same change set is refused.
+`approved-merge` CLI face, hands the change set, merge commit, and both
+derived keys to the Materializer stand-in, which persists the build work
+item in the recording WMS state named by `DT_WMS_STATE`, then appends one
+durable registration record to the log named by `DT_REG_LOG`. A repeat
+call with the same change set and merge commit replays both the
+materialization and the recorded result (idempotent retry). A different
+merge commit for the same change set is refused.
 """
 
 from __future__ import annotations
@@ -18,14 +21,21 @@ import sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-def registration_result(change_set: str, merge_commit: str) -> dict[str, Any]:
+from wms_stub import materialize
+
+
+def registration_result(
+    change_set: str, merge_commit: str, work_item_id: str
+) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "ok": True,
         "operation": "register-approved-change-set",
         "change_set": change_set,
         "merge_commit": merge_commit,
+        "work_item_id": work_item_id,
         "registered": True,
     }
 
@@ -75,16 +85,29 @@ def main() -> int:
     prior = next(
         (entry for entry in entries if entry["change_set"] == change_set), None
     )
+    if prior is not None and prior["merge_commit"] != merge_commit:
+        print(
+            "registration conflict: a different merge commit is registered",
+            file=sys.stderr,
+        )
+        return 3
+    materialized = materialize(
+        Path(os.environ["DT_WMS_STATE"]),
+        Path(os.environ["DT_WMS_LOG"]),
+        change_set=change_set,
+        merge_commit=merge_commit,
+        materialization_key=materialization_key,
+        idempotency_key=idempotency_key,
+    )
+    if not materialized["ok"]:
+        sys.stdout.write(json.dumps(materialized, separators=(",", ":")) + "\n")
+        return 3
     if prior is not None:
-        if prior["merge_commit"] != merge_commit:
-            print(
-                "registration conflict: a different merge commit is registered",
-                file=sys.stderr,
-            )
-            return 3
         result = prior["result"]
     else:
-        result = registration_result(change_set, merge_commit)
+        result = registration_result(
+            change_set, merge_commit, materialized["work_item_id"]
+        )
         entry = {
             "event": "register",
             "change_set": change_set,

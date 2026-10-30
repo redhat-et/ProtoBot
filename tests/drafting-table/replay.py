@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Self
 
@@ -155,6 +156,10 @@ class ReplayServer:
         self.replacements: dict[str, str] = {}
         self.cursor = 0
         self.requests: list[dict[str, Any]] = []
+        # One-shot callbacks run just before the named recorded tool call is
+        # served, i.e. after every earlier call in the turn has completed.
+        self.before_tool: dict[str, Callable[[], None]] = {}
+        self.hook_error: BaseException | None = None
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -178,6 +183,12 @@ class ReplayServer:
                                 f"recorded tool {action['tool']!r} was not offered; "
                                 f"offered={sorted(str(name) for name in offered)}"
                             )
+                        hook = owner.before_tool.pop(action["tool"], None)
+                        if hook is not None:
+                            try:
+                                hook()
+                            except BaseException as error:  # noqa: BLE001
+                                owner.hook_error = error
                     body = owner.response(request, action)
                 encoded = json.dumps(body, separators=(",", ":")).encode()
                 if request.get("stream"):
@@ -232,6 +243,11 @@ class ReplayServer:
         expected = len(turn.get("actions", []))
         with self.lock:
             actual = self.cursor
+            hook_error, self.hook_error = self.hook_error, None
+        if hook_error is not None:
+            raise AssertionError(
+                f"replay phase {turn['name']!r} hook failed: {hook_error!r}"
+            ) from hook_error
         if actual != expected:
             raise AssertionError(
                 f"replay phase {turn['name']!r} consumed {actual}/{expected} tool calls"
@@ -557,10 +573,21 @@ def prepare_project(
     return {"canonical_remote": canonical, "bare": str(bare)}
 
 
+def wms_state_path(wms_log: Path) -> Path:
+    return wms_log.with_name("wms-state.json")
+
+
 def open_config(
     project: Path, provider_url: str, wms_log: Path, *, wms_mode: str = "serving"
 ) -> dict[str, Any]:
-    wms_command = [sys.executable, str(WMS_STUB), "--log", str(wms_log)]
+    wms_command = [
+        sys.executable,
+        str(WMS_STUB),
+        "--log",
+        str(wms_log),
+        "--state",
+        str(wms_state_path(wms_log)),
+    ]
     if wms_mode == "fail-start":
         wms_command.append("--fail-start")
     elif wms_mode != "serving":
@@ -686,6 +713,10 @@ def canonical_tool_event(event: dict[str, Any]) -> str:
     command = event["input"].get("command", "")
     if "change-set update" in command and "--impact-file" in command:
         return "change-set update --impact-file"
+    if "change-set update" in command and "--base-commit" in command:
+        return "change-set update --base-commit"
+    if command.startswith("register-approved-change-set"):
+        return "register-approved-change-set"
     for name in (
         "requirement add",
         "change-set show",
@@ -701,23 +732,35 @@ def canonical_tool_event(event: dict[str, Any]) -> str:
     return "bash"
 
 
+WRITE_NAMES = frozenset(
+    {
+        "apply_patch",
+        "requirement add",
+        "artifact put",
+        "change-set update --impact-file",
+        "change-set update --base-commit",
+        "register-approved-change-set",
+        "scm_commit",
+        "scm_publish",
+        "scm_refresh",
+    }
+)
+
+
 def assert_resume_reads_before_write(
     output: str, phase: str, required: list[str]
 ) -> None:
     events = tool_events(output)
     names = [canonical_tool_event(event) for event in events]
-    write_names = {
-        "apply_patch",
-        "requirement add",
-        "artifact put",
-        "change-set update --impact-file",
-        "scm_commit",
-        "scm_publish",
-    }
-    write_positions = [index for index, name in enumerate(names) if name in write_names]
+    write_positions = [index for index, name in enumerate(names) if name in WRITE_NAMES]
     first_write = min(write_positions, default=len(names))
+    completed_reads = {
+        name
+        for name, event in zip(names[:first_write], events[:first_write])
+        if event["status"] == "completed"
+    }
     for name in required:
-        if name not in names[:first_write]:
+        if name not in completed_reads:
             raise AssertionError(
                 f"{phase} did not complete required resume read {name!r} before writes; "
                 f"tool sequence={names!r}"
@@ -754,6 +797,40 @@ def source_hashes() -> dict[str, str]:
 
 def wms_calls(wms_log: Path) -> list[dict[str, Any]]:
     return [event for event in read_jsonl(wms_log) if event.get("event") == "call"]
+
+
+def wms_readback_after(
+    events: list[dict[str, Any]], command: str, phase: str
+) -> list[dict[str, Any]]:
+    """Items from the first completed WMS work-item query after `command`."""
+    index = next(
+        (
+            i
+            for i, event in enumerate(events)
+            if event["tool"] == "bash"
+            and event["input"].get("command") == command
+            and event["status"] == "completed"
+        ),
+        None,
+    )
+    if index is None:
+        raise AssertionError(f"{phase}: {command!r} did not complete: {events!r}")
+    query = next(
+        (
+            event
+            for event in events[index + 1 :]
+            if event["tool"] == "wms_work_item_query" and event["status"] == "completed"
+        ),
+        None,
+    )
+    if query is None:
+        raise AssertionError(f"{phase}: no WMS readback after {command!r}: {events!r}")
+    try:
+        return json.loads(query["output"])["items"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise AssertionError(
+            f"{phase}: unreadable WMS readback {query['output']!r}"
+        ) from error
 
 
 def assert_git_status(project: Path, env: dict[str, str], expected: list[str]) -> None:
@@ -795,6 +872,7 @@ class ScenarioRun:
         self.env["DT_GH_LOG"] = str(self.temp / "gh-events.jsonl")
         self.provider = ReplayServer()
         self.wms_log = self.temp / "wms-events.jsonl"
+        self.wms_state = wms_state_path(self.wms_log)
         self._disposed = False
         # Per-turn tool evidence for the recorded demonstration; never
         # part of the deterministic scenario summary.
@@ -2074,9 +2152,11 @@ def run_stale(
     scenario: dict[str, Any],
     bindir: Path,
 ) -> dict[str, Any]:
-    """A default-branch move between session pause and resume is detected
-    on resume, publish fails DEFAULT_MOVED, and the refresh sequence ends
-    in one pull request, one host merge, and one idempotent registration."""
+    """The default branch moves after an approved commit and before publish:
+    publish fails DEFAULT_MOVED, resume detects the move, the refresh is
+    re-presented for renewed approval bound to the new base, and the
+    sequence ends in one pull request, one host merge, and one idempotent
+    registration that persists a materialized WMS work item."""
     turns = scenario["turns"]
     expectation = scenario["expectation"]
     change_set = expectation["change_set"]
@@ -2091,6 +2171,8 @@ def run_stale(
         env["DT_GH_ORIGIN"] = harness.project_context["bare"]
         env["DT_REG_LOG"] = str(harness.temp / "register-events.jsonl")
         env["DT_REG_PROJECT"] = fixture["project_id"]
+        env["DT_WMS_STATE"] = str(harness.wms_state)
+        env["DT_WMS_LOG"] = str(wms_log)
 
         base_commit = harness.base_commit(change_set)
         provider.replacements["<BASE_COMMIT>"] = base_commit
@@ -2115,44 +2197,43 @@ def run_stale(
                 f"{review_result}"
             )
 
-        # The default branch moves from outside the session.
-        new_head = push_default_move(harness)
-        provider.replacements["<NEW_BASE>"] = new_head
+        # Explicit approval bound to the reviewed base, given while that base
+        # is current. The default branch moves from outside the session after
+        # the approved commit lands and before publish, so publish refuses
+        # with DEFAULT_MOVED and the approval becomes stale.
+        moved: dict[str, str] = {}
 
-        # The resumed session re-presents CS-00003, its branch, and the
-        # recorded base from governed reads, not from conversation.
-        resume = turns["stale-resume-after-move"]
-        resume_result = harness.resume_session(resume, sid_review)
-        repo_event = next(
-            (
-                event
-                for event in tool_events(resume_result)
-                if event["tool"] == "scm_repo_state"
-            ),
-            None,
-        )
-        if (
-            base_commit not in resume_result
-            or repo_event is None
-            or '"default_moved":true' not in repo_event["output"]
-        ):
-            raise AssertionError(
-                f"resume did not detect the default-branch move: {resume_result}"
-            )
+        def move_default() -> None:
+            moved["head"] = push_default_move(harness)
 
-        # Explicit approval bound to the reviewed base: the commit lands,
-        # and publish refuses because the default branch moved.
+        provider.before_tool["scm_publish"] = move_default
         approval = turns["stale-approval-default-moved"]
         approval_prompt = approval["prompt"].replace("<BASE_COMMIT>", base_commit)
         approval = {**approval, "prompt": approval_prompt}
         sid_approval, approval_result = harness.new_role_session(
             approval, expectation["start_before_first_write"]
         )
+        provider.before_tool.clear()
+        if "head" not in moved:
+            raise AssertionError("the default branch did not move before publish")
+        new_head = moved["head"]
+        provider.replacements["<NEW_BASE>"] = new_head
         if base_commit not in approval_result:
             raise AssertionError(
                 f"approval session lost the exact base: {approval_result}"
             )
         approval_events = tool_events(approval_result)
+        approval_repo = next(
+            (event for event in approval_events if event["tool"] == "scm_repo_state"),
+            None,
+        )
+        if approval_repo is None or '"default_moved":false' not in str(
+            approval_repo["output"]
+        ):
+            raise AssertionError(
+                "the approval was acted on after its base was already stale: "
+                f"{approval_repo!r}"
+            )
         if not any(
             event["tool"] == "scm_commit" and event["status"] == "completed"
             for event in approval_events
@@ -2176,9 +2257,36 @@ def run_stale(
             )
         if any(event.get("event") == "create" for event in read_jsonl(gh_log)):
             raise AssertionError("a failed publish still created a pull request")
+        approved_commit = run(
+            ["git", "rev-parse", "HEAD"], cwd=project, env=env
+        ).stdout.strip()
+
+        # The resumed session re-presents CS-00003, its branch, and the
+        # recorded base from governed reads, not from conversation, and
+        # detects that the default branch moved past that base.
+        resume = turns["stale-resume-after-move"]
+        resume_result = harness.resume_session(resume, sid_approval)
+        repo_event = next(
+            (
+                event
+                for event in tool_events(resume_result)
+                if event["tool"] == "scm_repo_state"
+            ),
+            None,
+        )
+        if (
+            base_commit not in resume_result
+            or repo_event is None
+            or '"default_moved":true' not in repo_event["output"]
+        ):
+            raise AssertionError(
+                f"resume did not detect the default-branch move: {resume_result}"
+            )
 
         # The refresh sequence: merge the moved default, rebind the base
-        # commit, rerun impact and validation, and commit again.
+        # commit, rerun impact and validation, and present the refreshed
+        # revision and its new base. The stale approval authorizes no commit
+        # or publish here.
         refresh = turns["stale-refresh-and-update"]
         sid_refresh, refresh_result = harness.new_role_session(
             refresh, expectation["start_before_first_write"]
@@ -2192,25 +2300,89 @@ def run_stale(
                 raise AssertionError(
                     f"refresh sequence did not complete {tool_name}: {refresh_events!r}"
                 )
+        unapproved = [
+            event["tool"]
+            for event in refresh_events
+            if event["tool"] in ("scm_commit", "scm_publish")
+        ]
+        if unapproved:
+            raise AssertionError(
+                f"refresh ran {unapproved!r} without renewed approval: {refresh_events!r}"
+            )
+        if (
+            new_head not in refresh_result
+            or expectation["requirement_id"] not in refresh_result
+        ):
+            raise AssertionError(
+                "refresh did not present the refreshed revision and new base: "
+                f"{refresh_result}"
+            )
         parents = run(
             ["git", "rev-list", "--parents", "-n", "1", "HEAD"],
             cwd=project,
             env=env,
         ).stdout.split()
-        if len(parents) < 3:
+        if len(parents) < 3 or set(parents[1:]) != {approved_commit, new_head}:
             raise AssertionError(
                 f"refresh did not merge the moved default branch: {parents!r}"
             )
+        refreshed_commit = parents[0]
         if harness.base_commit(change_set) != new_head:
             raise AssertionError(
                 "change-set update did not rebind the base commit to the new head"
             )
+        manifest = f".protobot/change-sets/{change_set.lower()}.yaml"
+        dirty = run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=project,
+            env=env,
+        ).stdout.splitlines()
+        if manifest not in {line[3:] for line in dirty if line}:
+            raise AssertionError(
+                f"the refreshed rebind is not an uncommitted proposal: {dirty!r}"
+            )
 
-        republish = turns["stale-recommit-and-publish"]
+        # Renewed explicit approval bound to the refreshed revision and the
+        # new base; only now does the role commit and publish.
+        renewed = turns["stale-renewed-approval-and-publish"]
+        renewed_prompt = renewed["prompt"].replace("<NEW_BASE>", new_head)
+        if new_head not in renewed_prompt:
+            raise AssertionError("renewed approval does not name the new base")
+        renewed = {**renewed, "prompt": renewed_prompt}
         sid_republish, republish_result = harness.new_role_session(
-            republish, expectation["start_before_first_write"]
+            renewed, expectation["start_before_first_write"]
         )
         republish_events = tool_events(republish_result)
+        commit_index = next(
+            (
+                index
+                for index, event in enumerate(republish_events)
+                if event["tool"] == "scm_commit"
+            ),
+            len(republish_events),
+        )
+        reads_before_commit = republish_events[:commit_index]
+        renewed_repo = next(
+            (e for e in reads_before_commit if e["tool"] == "scm_repo_state"), None
+        )
+        renewed_show = next(
+            (
+                e
+                for e in reads_before_commit
+                if canonical_tool_event(e) == "change-set show"
+            ),
+            None,
+        )
+        if (
+            renewed_repo is None
+            or '"default_moved":false' not in str(renewed_repo["output"])
+            or renewed_show is None
+            or new_head not in str(renewed_show["output"])
+        ):
+            raise AssertionError(
+                "renewed approval was not bound to a current proposal on the new "
+                f"base: {reads_before_commit!r}"
+            )
         for tool_name in ("scm_commit", "scm_publish"):
             if not any(
                 event["tool"] == tool_name and event["status"] == "completed"
@@ -2219,9 +2391,22 @@ def run_stale(
                 raise AssertionError(
                     f"re-publish did not complete {tool_name}: {republish_events!r}"
                 )
-        if "pull request" not in republish_result.lower():
+        if (
+            "pull request" not in republish_result.lower()
+            or new_head not in republish_result
+        ):
             raise AssertionError(
-                f"re-publish did not hand off a pull request: {republish_result}"
+                f"re-publish did not hand off the renewed approval: {republish_result}"
+            )
+        published_parent = run(
+            ["git", "rev-parse", "HEAD^1"], cwd=project, env=env
+        ).stdout.strip()
+        published_manifest = run(
+            ["git", "show", f"HEAD:{manifest}"], cwd=project, env=env
+        ).stdout
+        if published_parent != refreshed_commit or new_head not in published_manifest:
+            raise AssertionError(
+                "the published commit is not the refreshed revision on the new base"
             )
 
         # The user merges the pull request on the host.
@@ -2236,36 +2421,55 @@ def run_stale(
                 f"host merge failed: {merged.returncode}\n{merged.stdout}\n{merged.stderr}"
             )
 
+        # Registration hands the merge commit to the Materializer, which
+        # persists one build work item; the role reads it back through the
+        # backend-neutral WMS surface, and the unrelated blocked item stays
+        # unchanged.
+        register_command = f"register-approved-change-set --change-set {change_set}"
+        expected_item = expectation["materialized_work_item"]
+        blocked_item = fixture["blocked_work_item"]
+
+        def check_readback(items: list[dict[str, Any]], phase: str) -> None:
+            materialized = [i for i in items if i.get("change_set_id") == change_set]
+            unrelated = [i for i in items if i.get("id") == blocked_item["id"]]
+            if (
+                len(materialized) != 1
+                or materialized[0]["id"] != expected_item["id"]
+                or materialized[0]["state"] != expected_item["state"]
+            ):
+                raise AssertionError(
+                    f"{phase} did not read back one materialized work item: {items!r}"
+                )
+            if len(unrelated) != 1 or any(
+                unrelated[0].get(key) != blocked_item[key]
+                for key in ("state", "contract_version")
+            ):
+                raise AssertionError(
+                    f"{phase} changed the unrelated blocked item: {items!r}"
+                )
+
         register = turns["stale-register"]
         sid_register, register_result = harness.new_role_session(
             register, expectation["start_before_first_write"]
         )
-        register_events = tool_events(register_result)
-        if not any(
-            event["tool"] == "bash"
-            and event["input"].get("command")
-            == f"register-approved-change-set --change-set {change_set}"
-            and event["status"] == "completed"
-            for event in register_events
-        ):
-            raise AssertionError(
-                f"registration command did not complete: {register_events!r}"
-            )
+        check_readback(
+            wms_readback_after(
+                tool_events(register_result), register_command, register["name"]
+            ),
+            register["name"],
+        )
 
         # A retry after registration is the same idempotent call.
         register_again = turns["stale-register-again"]
         register_again_result = harness.resume_session(register_again, sid_register)
-        again_events = tool_events(register_again_result)
-        if not any(
-            event["tool"] == "bash"
-            and event["input"].get("command")
-            == f"register-approved-change-set --change-set {change_set}"
-            and event["status"] == "completed"
-            for event in again_events
-        ):
-            raise AssertionError(
-                f"idempotent registration retry did not complete: {again_events!r}"
-            )
+        check_readback(
+            wms_readback_after(
+                tool_events(register_again_result),
+                register_command,
+                register_again["name"],
+            ),
+            register_again["name"],
+        )
         registrations = read_jsonl(Path(env["DT_REG_LOG"]))
         if len(registrations) != expectation["registration"]["calls"]:
             raise AssertionError(
@@ -2276,6 +2480,29 @@ def run_stale(
             raise AssertionError(
                 f"registration named the wrong change set: {registrations!r}"
             )
+        materializations = [
+            event
+            for event in read_jsonl(wms_log)
+            if event.get("event") == "materialize"
+        ]
+        if [
+            (event["idempotency"], event["mutation"], event["before"], event["after"])
+            for event in materializations
+        ] != [
+            ("new", "applied", "initial", expected_item["state"]),
+            ("replayed", "none", expected_item["state"], expected_item["state"]),
+        ] or any(
+            event["work_item_id"] != expected_item["id"]
+            or event["materialization_key"] != registrations[0]["materialization_key"]
+            for event in materializations
+        ):
+            raise AssertionError(
+                f"registration did not persist one idempotent materialization: "
+                f"{materializations!r}"
+            )
+        persisted = json.loads(harness.wms_state.read_text())["materializations"]
+        if [entry["work_item"]["id"] for entry in persisted] != [expected_item["id"]]:
+            raise AssertionError(f"WMS state holds unexpected records: {persisted!r}")
 
         gh_events = read_jsonl(gh_log)
         pr_creates = [event for event in gh_events if event.get("event") == "create"]
@@ -2303,7 +2530,7 @@ def run_stale(
             event.get("before") != event.get("after") or event.get("mutation") != "none"
             for event in wms_calls(wms_log)
         ):
-            raise AssertionError("stale-state scenario changed WMS records")
+            raise AssertionError("a Drafting Table WMS call changed WMS records")
 
         exports = []
         for sid in (
@@ -2332,6 +2559,8 @@ def run_stale(
                 "refresh_merge_parents": len(parents) - 1,
                 "base_commit_updated": harness.base_commit(change_set) == new_head,
                 "explicit_approval_and_handoff": True,
+                "refresh_withheld_commit_and_publish": True,
+                "renewed_approval_bound_to_new_base": True,
                 "registered": len(registrations) == 1,
                 "registration_idempotent": True,
                 "session_exported": True,
@@ -2349,7 +2578,11 @@ def run_stale(
                 "blocked_item": fixture["blocked_work_item"]["id"],
                 "state_before": fixture["blocked_work_item"]["state"],
                 "state_after": expectation["wms_state_after"],
-                "mutations": 0,
+                "role_mutations": 0,
+                "materialized_work_item": expected_item,
+                "materialize_applied": 1,
+                "materialize_replayed": 1,
+                "persisted_readback": True,
             },
             "source_input_sha256": source_hashes(),
         }
@@ -2374,6 +2607,33 @@ def run_stale(
         }
 
 
+def opencode_export(
+    binary: str, args: list[str], *, project: Path, env: dict[str, str]
+) -> str:
+    # OpenCode exits before draining stdout past one 64 KiB pipe buffer and
+    # still returns 0; a regular file receives the complete export.
+    command_env = dict(env)
+    command_env["PWD"] = str(project)
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
+        completed = subprocess.run(
+            [binary, *args],
+            cwd=project,
+            env=command_env,
+            stdout=output,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+        if completed.returncode:
+            raise AssertionError(
+                f"command failed ({completed.returncode}): {args!r}\n"
+                f"stderr:\n{completed.stderr}"
+            )
+        output.seek(0)
+        return output.read()
+
+
 def export_session(
     binary: str,
     session: str,
@@ -2382,10 +2642,10 @@ def export_session(
     expected_skill_markers: tuple[str, ...] = ("# Drafting Specifications",),
     expected_agent: str = "drafting-table",
 ) -> tuple[str, str]:
-    raw = opencode_command(binary, ["export", session], project=project, env=env).stdout
-    sanitized = opencode_command(
+    raw = opencode_export(binary, ["export", session], project=project, env=env)
+    sanitized = opencode_export(
         binary, ["export", session, "--sanitize"], project=project, env=env
-    ).stdout
+    )
     if SENTINEL in raw or SENTINEL in sanitized:
         raise AssertionError(
             "a planted token-shaped secret appeared in a session export"
