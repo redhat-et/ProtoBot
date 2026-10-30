@@ -135,6 +135,18 @@
         "stbenjam/skillsaw",
       ],
     },
+    {
+      // Runner images in scaffolded Fullsend workflows (for example the
+      // `runs-on:` key and `runner_image:` inputs) must be bumped together
+      // by Fullsend scaffold updates. Renovate only sees individual
+      // `runs-on:` labels, so enabling runner updates here causes version
+      // skew across the shim. ProtoBot's native workflows use
+      // `ubuntu-latest`, so this leaves action and reusable-workflow
+      // updates untouched.
+      "description": "Disable GitHub runner image updates",
+      "matchDatasources": ["github-runners"],
+      "enabled": false,
+    },
   ],
   // Security fixes should be proposed immediately.
   "vulnerabilityAlerts": {
