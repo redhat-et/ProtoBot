@@ -408,18 +408,6 @@ _REGISTRY: dict[str, dict[str, Any]] = {
             },
         },
     },
-    # ── System: uv ─────────────────────────────────────────────
-    "github.com/astral-sh/uv-pre-commit": {
-        "installer": "system",
-        "hooks": {
-            "uv-lock": {
-                "cmd": "uv",
-                "fixed_args": ["lock", "--check"],
-                "pass_filenames": False,
-                "default_files": r"(^|/)pyproject\.toml$",
-            },
-        },
-    },
     # ── Python: skillsaw ───────────────────────────────────────
     "github.com/stbenjam/skillsaw": {
         "installer": "pip",
