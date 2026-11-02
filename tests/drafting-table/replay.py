@@ -1042,6 +1042,10 @@ class ScenarioRun:
             cwd,
         )
         assert_resume_reads_before_write(output, turn["name"], required_reads)
+        self.assert_toolkit_allowlist(turn, before)
+        return session_id(output), output
+
+    def assert_toolkit_allowlist(self, turn: dict[str, Any], before: int) -> None:
         skill_list = next(
             (
                 item
@@ -1054,10 +1058,20 @@ class ScenarioRun:
             raise AssertionError(
                 f"session {turn['name']!r} did not receive the Toolkit allowlist: {skill_list!r}"
             )
-        return session_id(output), output
 
-    def resume_session(self, turn: dict[str, Any], sid: str) -> str:
-        return self.turn_output(
+    def resume_session(
+        self,
+        turn: dict[str, Any],
+        sid: str,
+        required_reads: list[str] | None = None,
+    ) -> str:
+        """Continue a session. With required reads, continue it through the
+        Drafting Table command entry point and assert the resume reads."""
+        before = len(self.provider.requests)
+        entry_point = (
+            ["--command", "drafting-table"] if required_reads is not None else []
+        )
+        output = self.turn_output(
             turn,
             [
                 "run",
@@ -1065,6 +1079,7 @@ class ScenarioRun:
                 sid,
                 "--agent",
                 "drafting-table",
+                *entry_point,
                 "--format",
                 "json",
                 "--model",
@@ -1072,6 +1087,10 @@ class ScenarioRun:
                 turn["prompt"],
             ],
         )
+        if required_reads is not None:
+            assert_resume_reads_before_write(output, turn["name"], required_reads)
+            self.assert_toolkit_allowlist(turn, before)
+        return output
 
     def export(
         self,
@@ -2290,11 +2309,14 @@ def run_stale(
             ["git", "rev-parse", "HEAD"], cwd=project, env=env
         ).stdout.strip()
 
-        # The resumed session re-presents CS-00003, its branch, and the
-        # recorded base from governed reads, not from conversation, and
-        # detects that the default branch moved past that base.
+        # The session continued through the entry point re-presents CS-00003,
+        # its branch, and the recorded base from governed reads, not from
+        # conversation, and detects that the default branch moved past that
+        # base.
         resume = turns["stale-resume-after-move"]
-        resume_result = harness.resume_session(resume, sid_approval)
+        resume_result = harness.resume_session(
+            resume, sid_approval, expectation["start_before_first_write"]
+        )
         repo_event = next(
             (
                 event
