@@ -1315,9 +1315,10 @@ def run_approved(
                 f"Job Site lifecycle guard vector failed: "
                 f"exit={jobsite_guard.returncode}, stderr={jobsite_guard.stderr!r}"
             )
-        if any(
-            event.get("tool") == jobsite_refusal["tool"] for event in wms_calls(wms_log)
-        ):
+        # OpenCode prefixes MCP tools with the server name; the stub records
+        # the bare operation name.
+        jobsite_operation = jobsite_refusal["tool"].removeprefix("wms_")
+        if any(event.get("tool") == jobsite_operation for event in wms_calls(wms_log)):
             raise AssertionError(
                 "Job Site lifecycle operation reached the recording WMS stub"
             )
@@ -2074,6 +2075,32 @@ def run_wms_unavailable(
                     f"governed read {name!r} did not complete while the WMS was down; "
                     f"tool sequence={names!r}"
                 )
+        # Drafting continues: the candidate is persisted through ears-manager
+        # and a later governed read returns it.
+        candidate = fixture["requirement_id"]
+        add_index = next(
+            (
+                index
+                for index, (name, event) in enumerate(zip(names, events))
+                if name == "requirement add" and event["status"] == "completed"
+            ),
+            None,
+        )
+        if add_index is None:
+            raise AssertionError(
+                f"drafting did not persist a candidate while the WMS was down: {events!r}"
+            )
+        if not any(
+            name == "requirement list"
+            and event["status"] == "completed"
+            and candidate in str(event["output"])
+            for name, event in zip(names[add_index + 1 :], events[add_index + 1 :])
+        ):
+            raise AssertionError(
+                f"candidate {candidate!r} did not read back after its write: {events!r}"
+            )
+        if not (project / ".protobot/requirements" / f"{candidate}.yaml").is_file():
+            raise AssertionError(f"candidate record {candidate!r} was not persisted")
         wms_events = read_jsonl(harness.wms_log)
         if any(event.get("event") == "call" for event in wms_events):
             raise AssertionError(f"WMS calls were recorded: {wms_events!r}")
@@ -2103,6 +2130,8 @@ def run_wms_unavailable(
             "chat": {
                 "blocked_work_marked_unavailable": True,
                 "drafting_continued": True,
+                "candidate_persisted": candidate,
+                "candidate_readback": True,
                 "wms_tools_offered": 0,
                 "session_exported": True,
                 "session_export_count": 1,

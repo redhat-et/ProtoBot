@@ -587,7 +587,8 @@ one host-side merge through the `gh` stub, and one idempotent
 back through the WMS stub, with the unrelated blocked item unchanged. The
 wms-unavailable scenario starts a session with the WMS stub stopped;
 blocked work is marked unavailable and drafting continues with no WMS tool
-offered.
+offered: the candidate is persisted through `ears-manager requirement add`
+and read back through `requirement list`.
 
 The `drafting-table` job in `.github/workflows/ci-workflow.yaml` runs the
 same replay in CI, together with the guard module's Go tests and a

@@ -40,9 +40,10 @@ semantic summary for byte stability:
   item the role reads back through `wms_work_item_query`, with the unrelated
   blocked item unchanged.
 - `wms-unavailable` — a session started with the WMS stub stopped
-  (`--fail-start`) marks blocked work unavailable and continues drafting;
-  OpenCode offers no WMS tool while the server is down, so the turn
-  records no WMS call at all.
+  (`--fail-start`) marks blocked work unavailable and continues drafting:
+  the candidate is persisted through `ears-manager requirement add` and
+  read back through `requirement list`. OpenCode offers no WMS tool while
+  the server is down, so the turn records no WMS call at all.
 
 The actual `ears-manager artifact list` implementation is used by the guard
 and verified directly; there is no CLI compatibility wrapper in this fixture.
