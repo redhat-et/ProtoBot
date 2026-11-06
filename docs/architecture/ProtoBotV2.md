@@ -630,12 +630,16 @@ The validator reads the plain `spec/` layout and reduced records in
 [Artifacts](#artifacts) and checks:
 
 - record schema and required fields;
-- EARS shape (one `shall`, recognized pattern);
+- EARS shape: `text` matches the EARS pattern of its declared `type`
+  (`ubiquitous`, `event-driven`, `state-driven`, `unwanted-behavior`,
+  `optional-feature`, `complex`) and contains exactly one `shall`; a
+  statement that does not match its declared pattern fails validation;
 - identifier format, uniqueness, no deletion, and no reuse;
 - referential integrity: `applies_to.interfaces`, relationship targets, and
   test `@req:<ID>` tags all resolve;
 - relationship types restricted to `depends-on`, `supersedes`, and
   `related-to`; `conflicts-with` is structurally rejected;
+- `depends-on` and `supersedes` graphs are acyclic;
 - requirement `text` immutability against the default base for existing IDs;
 - replacement and retirement rules: every replacement has a new ID,
   `supersedes`, and a retired predecessor in the same specification change;
@@ -647,6 +651,12 @@ the checkout, and never reads the tracker. The CI evidence script separately
 collects tests and results. Neither it nor the structural validator judges
 semantic consistency or test adequacy; those are agent and human review
 responsibilities.
+
+The EARS shape check is deliberately narrow. The validator does not judge
+vagueness or requirement quality. V2 rejects banned-word lists as false
+security. Requirement quality relies on the `eliciting-requirements` skill
+and Drafting Table review. Vagueness is an explicit target for evaluations
+of that skill.
 
 Structural relationship validation does not detect semantic conflicts. Human
 and agent review must resolve conflicting active requirements before a
@@ -660,7 +670,9 @@ requirements, project registry or digests, change sets, or impact, projection,
 or lifecycle machinery. It also removes `conflicts-with`. Add parsed-text
 comparison against the base, no deletion or reuse, new-ID, `supersedes`, and
 retirement enforcement, and test-tag references. Enforce exactly one `shall`
-explicitly; the existing V1 EARS regex checks are not sufficient for that rule.
+explicitly; the existing V1 EARS regex checks are not sufficient for that
+rule. Keep rejecting `depends-on` and `supersedes` cycles; V1's
+`validateAcyclicGraph` in `relationships.go` already implements that check.
 
 ### Specification PR check
 
@@ -697,6 +709,15 @@ deterministic checks can reject unsupported relationship types but cannot
 guarantee that semantic conflicts are caught. When the base changes relevant
 context before merge, the author updates the change and the reviewer
 re-reviews it.
+
+Replacement and retirement carry an ownership duty. When a specification PR
+replaces or retires a requirement, the Drafting Table session that authored
+the change must review every active requirement connected to the retired
+record. The review covers the requirements in the retired record's
+`relationships` list and the other active requirements that apply to its
+interfaces. The session must adjust each connected requirement or explicitly
+leave it unchanged; the human reviewer decides each case. A replacement that
+leaves a contradicting neighbor unexamined does not satisfy semantic review.
 
 ### Repository-owned coordinator and Fullsend integration
 
@@ -812,6 +833,9 @@ until tests demonstrate it.
 1. The sole serialized coordinator checks dependencies, requirement scope,
    active assignment labels, live runs, and open PRs. At most one active
    assignment may hold a requirement ID; overlapping work cannot dispatch.
+   If the dependency graph of scoped work contains a cycle, admission does
+   not dispatch. The coordinator marks involved managed issues `blocked` or
+   `needs-replan`, and reports the cycle for human replanning.
 2. Before dispatch, it marks the managed issue `assignment-active`, holding
    that issue's requirement scope, then applies `ready-to-code` with an App
    token. No separate reservation record or lease protocol is needed.
@@ -998,7 +1022,7 @@ approval and relevant process checks in either profile.
 
 | Profile | Selected when | Runs | Does not run |
 | --- | --- | --- | --- |
-| Specification | any Specification-class paths, optionally with Process-class paths; no Implementation-class paths | schema; identifiers; immutable `text`; allowed relationships and references; replacement and retirement rules; test-tag reference check allowing retired IDs; relevant process checks; optionally the ordinary suite for an informational report | mandatory product suite, unless a relevant process check needs it |
+| Specification | any Specification-class paths, optionally with Process-class paths; no Implementation-class paths | schema; identifiers; EARS shape by declared `type`; immutable `text`; allowed relationships and references; `depends-on` and `supersedes` acyclicity; replacement and retirement rules; test-tag reference check allowing retired IDs; relevant process checks; optionally the ordinary suite for an informational report | mandatory product suite, unless a relevant process check needs it |
 | Implementation | no Specification-class paths (including process-only changes) | split gate already passed; full ordinary suite; evidence report; relevant process checks | specification text mutation |
 
 The specification profile may skip the suite for speed unless a relevant
@@ -1027,6 +1051,7 @@ CI mechanics:
 | Specification-class and Implementation-class paths never mix; Process-class paths may accompany either; specification changes are human-reviewed | Always-running split gate plus protected paths | Mixed changes hide implementation in specification review |
 | Any diff with no Specification-class path uses the implementation profile; process changes need human approval and relevant process checks in either profile | Profile selection plus protected paths | Process changes auto-approved or unchecked |
 | Only `depends-on`, `supersedes`, and `related-to` relationships are allowed; conflicting active obligations must be resolved before merge | Structural validator rejects unsupported types; human and agent semantic review resolves conflicts | Conflicting obligations retained as an approved target |
+| The `depends-on` and `supersedes` graphs are acyclic | Validator graph check | Cycles strand work with no dispatch path or recovery |
 | Active requirements have no false completion: missing tests are gaps; complete passing tagged results are mechanical coverage, not adequate reviewed evidence | Evidence report plus independent review | Untested, partial, or inadequate evidence mistaken for demonstrated |
 | Tests are derived; adequacy is reviewer judgment from EARS text | Review | Tag association mistaken for fidelity |
 | At most one active assignment holds a requirement ID; scope is frozen while work is live or dispatch ambiguous | Sole native caller in fixed non-cancelling workflow-level concurrency group covering upstream pre/agent/post; `assignment-active` plus issue scope; runner preflight | Duplicate ownership and conflicting coder work |
@@ -1240,9 +1265,10 @@ The specification PR check is a validator mode, not a grep. In outline:
    Specification-class path runs the implementation profile, including
    process-only changes. Process paths require human approval and relevant
    process checks whichever profile is selected.
-3. For the specification profile, validate schema, identifiers, immutable
-   `text`, allowed relationships, references, replacement and retirement rules,
-   and test tags allowing retired IDs. Run relevant process checks. The
+3. For the specification profile, validate schema, identifiers, EARS shape
+   by declared `type`, immutable `text`, allowed relationships, references,
+   `depends-on` and `supersedes` acyclicity, replacement and retirement
+   rules, and test tags allowing retired IDs. Run relevant process checks. The
    ordinary suite is optional for an informational report unless a process
    check needs it. Semantic consistency remains a human and agent review
    responsibility.
