@@ -1,5 +1,5 @@
 ---
-base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.45.0/harness/triage.yaml#sha256=5ada8f85cee204e2fcb8ba6935b301345b3dc56ee3f306d6eafd35f7bc4312a7"
+base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.51.0/harness/triage.yaml#sha256=7ae860e69a33d89d3efefcf823411fc175177402bb19bebd9a6ec0374a2bef08"
 
 env:
     runner:
