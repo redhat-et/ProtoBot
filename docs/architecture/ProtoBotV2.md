@@ -55,10 +55,10 @@ specifications, and specifications into code. It has three pieces:
    specification structure, immutable requirement text, references, and
    ordinary test evidence.
 3. **Coordination and agents** — a repository-owned GitHub Actions caller and
-   local Fullsend coordinator harness that reconcile current evidence into
-   managed implementation issues and admit scoped parallel Fullsend coders; a
-   drafting-table agent; and Fullsend's coder and reviewer. GitHub Issues
-   carry coordination and ownership only.
+   repository-local Fullsend coordinator harness that reconcile current
+   evidence into managed implementation issues and admit scoped parallel
+   Fullsend coders; a drafting-table agent; and Fullsend's coder and reviewer.
+   GitHub Issues carry coordination and ownership only.
 
 Everything else is Git, GitHub Issues, Actions, branch protection, and
 Fullsend. There is no separate work-item service, no lifecycle state machine,
@@ -92,10 +92,10 @@ immutable history, branches, merge approval, access control, and an audit
 trail. V2 keeps specification validation, traceability, and agent handoff.
 
 V2 replaces the external WMS with ordinary GitHub Issues for coordination. It
-uses a single thin, repository-owned Actions caller and local coordinator
-scripts within existing Fullsend execution for serialized reconciliation and
-admission. GitHub Issues carry assignment and ownership, not specification
-authority.
+uses a single thin, repository-owned Actions caller and repository-local
+coordinator scripts within existing Fullsend execution for serialized
+reconciliation and admission. GitHub Issues carry assignment and ownership,
+not specification authority.
 
 The notion of a persistent change set is gone. In V2, a specification pull
 request encompasses a proposed change to the specifications, visible as a diff.
@@ -126,7 +126,7 @@ demonstrate progress toward full convergence.
   coordinating but not proving it.
 - Coordinate implementation work through ordinary GitHub Issues and Fullsend,
   without a custom coordination service.
-- Run locally for one person, and scale to a team through Git and GitHub
+- Run on one person's machine, and scale to a team through Git and GitHub
   coordination.
 - Be small enough that one person can understand the whole system in a day.
 
@@ -203,7 +203,9 @@ things are distinct:
   and their results at an exact commit;
 - the **demonstrated implementation** — the active requirements whose
   implementation and passing test evidence an independent reviewer judges
-  adequate against the requirement text.
+  adequate against the requirement text. The independent reviewer is the
+  Fullsend review agent, acting independently of the implementing coder
+  ([Reviewer](#reviewer)); it is not a human-review requirement.
 
 Every active requirement is continuously in force. Ordinary CI runs the
 existing suite. Failing tests block implementation. A new active requirement
@@ -245,11 +247,11 @@ hold assignments, requirement scope, dependencies, runner and pull-request
 links, and progress. Issues are authoritative for coordination only; they
 never add or override a requirement.
 
-CI behavioral and structural checks remain tracker-free. The coordinator
-intentionally reads GitHub. There is no separate lifecycle service: ordinary
-issue labels and open/closed state, one natively serialized Actions caller, and
-a local coordinator harness in Fullsend are the coordination substrate.
-Serialization covers coordination, not the parallel coder runs.
+The validator and the CI checks are deterministic and network-free; they never
+read the tracker. The coordinator is the only component that reads GitHub.
+Coordination needs no separate service. It uses ordinary issue labels, issue
+open/closed state, one serialized Actions caller, and the repository-local
+coordinator harness. Only coordination is serialized; coder runs stay parallel.
 
 ## Repository layout
 
@@ -304,7 +306,7 @@ status: active
 | --- | --- |
 | `id` | Stable, unique, immutable. Format `REQ-<SCOPE>-<NNNNN>`. |
 | `type` | EARS pattern: `ubiquitous`, `event-driven`, `state-driven`, `unwanted-behavior`, `optional-feature`, `complex`. |
-| `text` | The complete EARS obligation. Exactly one `shall`. |
+| `text` | The complete EARS obligation. Exactly one `shall`, and the sentence must match the EARS pattern of the record's `type` ([Validator](#validator)). |
 | `applies_to` | At least one interface or scope. Applicability metadata, not a second obligation. |
 | `relationships` | `depends-on`, `supersedes`, `related-to` only. |
 | `status` | `active` or `retired`. Record lifecycle only, not delivery state. |
@@ -315,10 +317,10 @@ is not stored on the record.
 
 A specification PR must not merge conflicting active requirements. Resolve
 the conflict before merge, using new text under a new ID and retirement of
-conflicting predecessors where appropriate. The validator structurally
-rejects `conflicts-with` and other unsupported relationship types. Human and
-agent semantic review separately detect and resolve conflicting obligations.
-Omitting a conflict relationship does not make conflicting text acceptable.
+conflicting predecessors where appropriate. The validator accepts only the
+three listed relationship types and rejects all others. Human and agent
+semantic review separately detect and resolve conflicting obligations.
+Omitting a relationship does not make conflicting text acceptable.
 
 ### Interface record
 
@@ -372,26 +374,27 @@ remain valid historical references, and the code or test PR adds current
 coverage. A code or test PR adds the new association or replaces the obsolete
 test when the implementation changes. An implementation PR may also modify or
 remove tests tagged to a retired ID. Their associated specification no longer
-applies. Illustrative runner notation, not a selected framework:
+applies. Tag notation under the Gherkin MVP:
 
 ```text
 # old: @req:REQ-API-00002
 # new: @req:REQ-API-00003
 ```
 
-A shared test may carry several requirement IDs when justified. When a
-requirement retires, the implementation PR must not leave a retired tag as
-the only apparent association while an active requirement loses coverage
-unnoticed.
+A test may refer to several requirement IDs. A test may be removed only once
+it no longer refers to any active requirement; until then, it is rewritten or
+retagged instead. When a requirement retires, the implementation PR must not
+leave a retired tag as the only apparent association while an active
+requirement loses coverage unnoticed.
 
 ### Tests and requirement evidence report
 
 Tests live under implementation paths such as `tests/` and follow project
 conventions. They are ordinary derived tests, not a separate normative
 artifact. Tests that demonstrate a requirement carry a direct
-`@req:<ID>` association. Other unit or internal tests may be untagged.
-Drivers, helpers, fixtures, and other test support code are derived
-implementation too.
+`@req:<ID>` association. The V2 MVP uses Gherkin, with one requirement per
+`.feature` file. Other unit or internal tests may be untagged. Drivers,
+helpers, fixtures, and other test support code are derived implementation too.
 
 The **evidence report** is minimal script-generated CI output. For each active
 requirement ID, it lists associated collected tests and their results at the
@@ -425,11 +428,16 @@ and a source-ask checklist. Each ask maps to a new or existing active
 requirement or an explicit human-approved exclusion; unrecorded existing
 behavior is not authority. The editable checklist is a planning hint, never
 proof of approval or completion. Exclusions link to an explicit GitHub human
-review or comment identifying the exact ask and exclusion. Trusted preflight
-verifies its content, actual human author, and write, maintain, or admin
-permission via the GitHub API, not an author's claim or quoted approval. Git
-diff and history show the delta. There is no per-change artifact; a managed
-issue or source link is coordination context, not behavior authority.
+review or comment that identifies the exact ask and the exclusion. The link
+alone is not proof. The coordinator's trusted preflight — a script that runs
+on the trusted host before the agent ([Repository-owned coordinator and
+Fullsend integration](#repository-owned-coordinator-and-fullsend-integration))
+— verifies the linked review through the GitHub API. It checks the review's
+content, confirms the author is human, and confirms the author holds write,
+maintain, or admin permission. An author's claim or quoted approval is not
+sufficient. Git diff and history show the delta. There is no per-change
+artifact; a managed issue or source link is coordination context, not
+behavior authority.
 
 A new project begins from IdeaBot, the idea-capture and research tool that
 precedes ProtoBot in the Hermes pipeline. The initial specification PR of a
@@ -449,18 +457,21 @@ mapping note and the links enter the repository.
 ### Managed implementation issue
 
 A managed implementation issue is the coordination record for a bounded
-assignment. Its scope is requirement IDs, not test IDs. It may cover gaps
-from several specification PRs, and it may require several implementation
-PRs. One specification PR may produce several managed issues.
+assignment. Its scope is a set of requirement IDs. It may cover gaps from
+several specification PRs, and it may require several implementation PRs.
+One specification PR may produce several managed issues.
 
 | Field | Meaning |
 | --- | --- |
 | Intent | One human-readable outcome. |
 | Requirements | Machine-readable requirement IDs in scope. |
-| Dependencies | Blockers and other issues that must finish first. |
+| Dependencies | GitHub's native issue dependencies: the issues that must finish first. |
 | Active assignment | An `assignment-active` label holds the issue's requirement scope while work is live or dispatch is ambiguous. |
 | Evidence links | Relevant spec PR or revision, main report SHA, runs, PRs. |
-| Coordination label | `queued`, `ready-to-code`, `blocked`, `needs-replan`, or `superseded`. |
+| Coordination label | `queued`, `ready-to-code`, `needs-replan`, or `superseded`. |
+
+Blocking is expressed with GitHub's native issue dependencies, not with text
+statements or manual labels.
 
 Requirement IDs are coordination and ownership metadata, not behavior
 authority. Tests are not allocated separately: a test may demonstrate several
@@ -484,18 +495,18 @@ default branch (approved current specification)
     │  main full suite produces the evidence report for the exact SHA
     ▼
 trusted main evidence workflow completes (including failing tests)
-    │  workflow_run plus coder-run, unmerged-close, and live-assignment events
+    │  main evidence completion and other live-work events
     │  workflow_dispatch on main remains the fallback
     ▼
 repository-owned caller (fixed non-cancelling concurrency group)
     │  calls existing pinned upstream Fullsend reusable dispatch
     ▼
-local coordinator harness (existing retro identity, mint and Vertex inference)
+repository-local coordinator harness (existing retro identity, mint and Vertex inference)
     │  trusted pre: latest main + exact report, issues, runs and PRs
     │  snapshot-only agent; trusted post validates and applies
     ▼
 managed implementation issues
-    │  queued/blocked assignments with requirement-ID scopes
+    │  queued/dependency-blocked assignments with requirement-ID scopes
     ▼
 admission checks dependencies/overlap; marks assignment-active
     │
@@ -537,13 +548,13 @@ Implementation completion is not demonstration readiness; see
    triggers the repository-owned caller, even if tests failed. Coder-run
    completion or failure, unmerged close of a linked pull request, and state
    changes on issues or pull requests relevant to live assignments also
-   trigger it. Its local coordinator harness runs inside existing trusted
-   Fullsend execution, validates the latest-main report, groups or splits
-   requirement-ID work, records dependencies and evidence links, preserves
-   active assignments, and reports unassigned gaps. Missing or incomplete
-   evidence cannot support closure or evidence-driven admission. Manual
-   `workflow_dispatch` on main remains the fallback for ambiguous dispatch
-   and anything the event set does not cover.
+   trigger it. Its repository-local coordinator harness runs inside existing
+   trusted Fullsend execution, validates the latest-main report, groups or
+   splits requirement-ID work, records dependencies and evidence links,
+   preserves active assignments, and reports unassigned gaps. Missing or
+   incomplete evidence cannot support closure or evidence-driven admission.
+   Manual `workflow_dispatch` on main remains the fallback for ambiguous
+   dispatch and anything the event set does not cover.
 5. **Admission and dispatch.** Serialized admission checks dependencies and
    live work, marks the issue's scope `assignment-active`, then dispatches
    through an App-token `ready-to-code` label. Fullsend coders run in parallel
@@ -561,11 +572,14 @@ Implementation completion is not demonstration readiness; see
    close with no new main evidence triggers the caller to reassess existing
    evidence and live work.
 
-**Defects.** A defect is either a gap in what the tests demonstrate or a code
-bug in behavior the specification already covers. A gap enters the
-specification flow: a human-reviewed PR adds, replaces, or retires
-requirements. A bug already covered by adequate requirements and tests may take
-the code-only maintenance path ([Coder](#coder)) without a specification change.
+**Defects.** A defect report says the system behaves wrongly. V2 divides it
+into two cases. **Undefined behavior**: no active requirement covers the
+behavior. The fix enters the specification flow, so the behavior becomes
+properly covered: a human-reviewed PR adds, replaces, or retires requirements.
+**Incorrect behavior**: an active requirement covers the behavior, but the
+system does not obey it. This indicates a code defect and insufficient test
+coverage. It goes directly to the implementation flow, through the code-only
+maintenance path ([Coder](#coder)), without a specification change.
 
 ## Demonstration and handoff
 
@@ -641,9 +655,10 @@ approval.
 Rework `ears-manager` into the V2 validator by retaining useful validation code
 and replacing its V1 contract. Its record parsing, EARS shape checks, ID and
 reference checks, relationship validation, and deterministic diagnostics are
-useful foundations for a small local-and-CI tool. The existing `ears-manager`
-does not implement V2 as-is; preserving its name, CLI, or schema compatibility
-is not a constraint, and no competing validator is required.
+useful foundations for a small tool that runs in CI and on a developer machine.
+The existing `ears-manager` does not implement V2 as-is; preserving its name,
+CLI, or schema compatibility is not a constraint, and no competing validator
+is required.
 
 The validator reads the plain `spec/` layout and reduced records in
 [Artifacts](#artifacts) and checks:
@@ -656,8 +671,7 @@ The validator reads the plain `spec/` layout and reduced records in
 - identifier format, uniqueness, no deletion, and no reuse;
 - referential integrity: `applies_to.interfaces`, relationship targets, and
   test `@req:<ID>` tags all resolve;
-- relationship types restricted to `depends-on`, `supersedes`, and
-  `related-to`; `conflicts-with` is structurally rejected;
+- relationship types restricted to `depends-on`, `supersedes`, and `related-to`;
 - `depends-on` and `supersedes` graphs are acyclic;
 - requirement `text` immutability against the default base for existing IDs;
 - replacement and retirement rules: every replacement has a new ID,
@@ -686,11 +700,11 @@ Useful starting points are `ears-manager/internal/specvalidation/validator.go`,
 `ears-manager/internal/records/records.go`. V2 replaces V1 metadata and
 storage assumptions: no verification, provenance, or creation metadata
 requirements, project registry or digests, change sets, or impact, projection,
-or lifecycle machinery. It also removes `conflicts-with`. Add parsed-text
-comparison against the base, no deletion or reuse, new-ID, `supersedes`, and
-retirement enforcement, and test-tag references. Enforce exactly one `shall`
-explicitly; the existing V1 EARS regex checks are not sufficient for that
-rule. Keep rejecting `depends-on` and `supersedes` cycles; V1's
+or lifecycle machinery. Add parsed-text comparison against the base, no
+deletion or reuse, new-ID, `supersedes`, and retirement enforcement, and
+test-tag references. Enforce exactly one `shall` explicitly; the existing V1
+EARS regex checks are not sufficient for that rule. Keep rejecting
+`depends-on` and `supersedes` cycles; V1's
 `validateAcyclicGraph` in `relationships.go` already implements that check.
 
 ### Specification PR check
@@ -709,9 +723,9 @@ The split rule is an always-running gate over one shared taxonomy
    profile, including process-only changes. Process paths require human
    approval and relevant process checks whichever profile is selected.
 
-Tests are implementation. They are not human-frozen. The protected boundary is
-requirement text; the reviewer independently evaluates whether generated code
-and tests are adequate for that text.
+Tests are implementation. The protected boundary is requirement text; the
+reviewer independently evaluates whether generated code and tests are adequate
+for that text.
 
 The specification PR description records intent, source issue links, and the
 source-ask checklist from [Source provenance](#source-provenance). Git diff
@@ -722,11 +736,10 @@ conflicts, not a semantic conflict between different requirement records or
 between a new requirement and existing behavior. The author and reviewer account
 for every source ask and review consistency against the latest target
 specification. Conflicting active requirements must be resolved before merge,
-with new text, new IDs, and retirement where appropriate; they cannot be
-retained as `conflicts-with` relationships. This is human and agent judgment:
-deterministic checks can reject unsupported relationship types but cannot
-guarantee that semantic conflicts are caught. When the base changes relevant
-context before merge, the author updates the change and the reviewer
+with new text, new IDs, and retirement where appropriate. This is human and
+agent judgment: deterministic checks can reject unsupported relationship types
+but cannot guarantee that semantic conflicts are caught. When the base changes
+relevant context before merge, the author updates the change and the reviewer
 re-reviews it.
 
 Replacement and retirement carry an ownership duty. When a specification PR
@@ -744,9 +757,10 @@ semantic review.
 Authenticated coordinator work runs inside the **existing trusted Fullsend
 reusable workflow**, using its existing `retro` identity, hosted mint, and
 Vertex inference. A thin repository-owned Actions caller handles triggers and
-serialization. **New ProtoBot-local code** supplies the standalone coordinator
-harness and pre/post scripts; Fullsend does not already implement this
-reconciliation. No changes to mint configuration, hosting, roles, App
+serialization. **New repository-local code** supplies the standalone
+coordinator harness and pre/post scripts; upstream Fullsend does not already
+implement this reconciliation. No changes to mint configuration, hosting,
+roles, App
 permissions, or Fullsend version are needed. The inference credential
 boundary is selected and verified at adoption
 ([Appendix C: Coordinator execution
@@ -777,8 +791,8 @@ contract](#appendix-c-coordinator-execution-contract)).
    current state. The trigger events therefore cannot pile up runs.
    Evidence and coder workflows remain outside this group.
 3. The caller sends one fixed custom-poller matrix entry to the existing pinned
-   upstream workflow, selecting the local harness and existing `retro` role.
-   One human-created stable coordinator status issue supplies the
+   upstream workflow, selecting the repository-local harness and existing
+   `retro` role. One human-created stable coordinator status issue supplies the
    runner-required issue URL; it is not a managed assignment or source issue.
    Exact inputs and credential boundaries are in [Appendix C: Coordinator
    execution contract](#appendix-c-coordinator-execution-contract).
@@ -824,10 +838,10 @@ managed issue closure.
 **Readiness.** An [existing successful retro run][existing-retro-run] proves
 mint and Vertex inference through this exact upstream pin; its generic custom
 harness job was skipped, so it does not prove the coordinator. Build and smoke
-test the local composition, including trigger bootstrap, SHA and evidence
-checks, sandbox isolation, structured output, serialization through post
-completion, App-token dispatch, assignment recovery, non-closing output, and
-closure. No end-to-end coordinator deployment success is claimed.
+test the repository-local composition, including trigger bootstrap, SHA and
+evidence checks, sandbox isolation, structured output, serialization through
+post completion, App-token dispatch, assignment recovery, non-closing output,
+and closure. No end-to-end coordinator deployment success is claimed.
 
 References: [Actions concurrency][actions-concurrency],
 [`workflow_run` trust boundary][workflow-run],
@@ -856,11 +870,12 @@ When reconciling, the coordinator consumes the reviewer's routing tokens
 replans for each `review-bad-plan` finding.
 
 Only managed implementation issues may be rewritten. Every gap is accounted for
-by a queued, blocked, or active issue or reported unassigned. Preserve active
-assignments; edit only unstarted issues. A superseded issue is marked
-`superseded`, not completed, and only after replacements exist. Evidence and
-independent adequacy review support closure; coordinator agent assertions
-alone cannot establish completion.
+by a queued, active, or dependency-blocked issue or reported unassigned.
+Preserve active assignments; edit only unstarted issues. A superseded issue is
+marked `superseded`, not completed, and only after its replacements exist. The
+coordinator then closes it; that closure records supersession, not delivery.
+Evidence and independent adequacy review support closure; coordinator agent
+assertions alone cannot establish completion.
 
 Planning may be partial or fail; report unassigned work and recover on the next
 run or manually. A managed issue may span specification PRs and need several
@@ -878,11 +893,16 @@ until tests demonstrate it.
    active assignment labels, live runs, and open PRs. At most one active
    assignment may hold a requirement ID; overlapping work cannot dispatch.
    If the dependency graph of scoped work contains a cycle, admission does
-   not dispatch. The coordinator marks involved managed issues `blocked` or
-   `needs-replan`, and reports the cycle for human replanning.
+   not dispatch. The coordinator marks involved managed issues `needs-replan`
+   and reports the cycle for human replanning.
 2. Before dispatch, it marks the managed issue `assignment-active`, holding
    that issue's requirement scope, then applies `ready-to-code` with an App
    token. No separate reservation record or lease protocol is needed.
+   `ready-to-code` alone does not suffice: it is the dispatch signal, and
+   retaining it after a failed or cancelled run would retrigger dispatch —
+   same-issue retrigger cancels the existing run. `assignment-active` is the
+   persistent scope reservation. It survives failed runs, unmerged closes,
+   and ambiguous dispatch until the coordinator settles the state.
 3. The Fullsend runner preflights the current assignment and scope, preserving
    upstream input, existing-PR, and subissue guards. Manual `/fs-code` uses the
    same preflight and cannot bypass admission. Scope stays frozen while a live
@@ -938,9 +958,11 @@ Issues API; no atomic merge lock or reopening lifecycle is required. A closed
 issue records that determination, not a promise about every later commit;
 subsequent commits and gaps follow normal reconciliation.
 
-The template disables the repository's [**Auto-close issues with merged linked
-pull requests** setting][auto-close-setting] under **Settings > General >
-Issues**. Linked-PR merges must not close source or managed issues; the
+The repository template ([Template and
+instantiation](#template-and-instantiation)) disables the repository's
+[**Auto-close issues with merged linked pull requests**
+setting][auto-close-setting] under **Settings > General > Issues**.
+Linked-PR merges must not close source or managed issues; the
 coordinator owns verified closure. This setting is not assumed to cover
 commit-message closing keywords. Keep `closes_issue:false` and non-closing
 references. A deterministic template checker rejects source and managed issue
@@ -1028,10 +1050,13 @@ token:
   marked `needs-replan` and replanned.
 
 Test bodies are not frozen. The reviewer may accept rewritten, replaced, or
-removed tests when the remaining suite demonstrates the active text. This
-creates a deliberate assurance tradeoff: automated tags show association, not
-semantic fidelity. The reviewer must judge test adequacy, and no automated tag
-gate proves that a finite suite captures the full requirement.
+retagged tests when the remaining suite demonstrates the active text. A test
+is removed only once it no longer refers to any active requirement
+([Replacement, retirement, and test
+tags](#replacement-retirement-and-test-tags)). This creates a deliberate
+assurance tradeoff: automated tags show association, not semantic fidelity.
+The reviewer must judge test adequacy, and no automated tag gate proves that a
+finite suite captures the full requirement.
 
 The reviewer works against the latest merge candidate and current
 specification. If the specification changed after the coder began, the
@@ -1192,7 +1217,6 @@ required.
 | V1 change-set records and manifests | Dropped | V2 has no per-change delivery artifact; current specification and evidence are authority. |
 | Evaluation corpus | Deferred | Useful later; not load-bearing for the thesis. |
 | Test catalog | Replaced | Direct requirement tags plus the evidence report. |
-| `conflicts-with` relationship | Dropped | Resolve conflicting active obligations before merge; structural rejection and semantic review are distinct. |
 
 V2 retains V1's vocabulary where it still applies: requirement, interface,
 EARS pattern, and the `depends-on`, `supersedes`, and `related-to`
@@ -1205,8 +1229,8 @@ contains:
 
 - the methodology: `AGENTS.md`, agent definitions, skills;
 - the process: validator, specification PR check, thin repository-owned
-  coordinator caller and local pre/post scripts ([Repository-owned
-  coordinator and Fullsend
+  coordinator caller and repository-local pre/post scripts
+  ([Repository-owned coordinator and Fullsend
   integration](#repository-owned-coordinator-and-fullsend-integration)),
   Fullsend dispatch configuration, and isolated evidence CI
   ([Evidence report and CI](#evidence-report-and-ci));
@@ -1218,7 +1242,7 @@ contains:
   contract](#appendix-c-coordinator-execution-contract));
   a human creates its stable status issue and installs the native caller
   through a human-authenticated PR;
-- the initial test runner and `@req:<ID>` tag extraction;
+- the Gherkin test runner and `@req:<ID>` tag extraction;
 - managed-issue configuration: only the serialized coordinator marks
   `assignment-active` and sets `ready-to-code` using an App token; runner
   preflight checks the assignment and preserves upstream guards;
@@ -1238,9 +1262,9 @@ describe someone else's system.
 
 ## Operating model
 
-**Single player.** One person, local clone, agent, and pull request. No custom
-services; validator runs locally and in CI, reconciliation and dispatch use the
-repository-owned coordinator and Fullsend.
+**Single player.** One person, a clone on their own machine, an agent, and a
+pull request. No custom services; validator runs on that machine and in CI,
+reconciliation and dispatch use the repository-owned coordinator and Fullsend.
 
 **Multi player.** Parallel people and agents. Admission gives disjoint
 requirement-ID assignments; disjoint scopes do not imply disjoint code or
@@ -1248,8 +1272,8 @@ tests, so Git, review, and the current-candidate suite integrate. Only the
 coordinator is serialized; coders have no global execution lock.
 
 **Coordination.** Managed issues, active assignment labels and requirement
-scopes, and one natively serialized Actions caller running local coordinator
-pre/agent/post inside existing trusted Fullsend execution. Evidence
+scopes, and one natively serialized Actions caller running repository-local
+coordinator pre/agent/post inside existing trusted Fullsend execution. Evidence
 completion, coder-run completion or failure, unmerged closes, and
 live-assignment state changes trigger it. Manual `workflow_dispatch` on main
 remains the fallback for ambiguous dispatch and anything the event set does
@@ -1287,12 +1311,12 @@ reviewed. Issue #346 tracks the discussion and adoption scope.
 2. **Validator.** Rework `ears-manager` into the V2 validator, retaining
    useful validation code and replacing its V1 contract
    ([Validator](#validator)). It is deterministic and network-free, so it is
-   testable locally without any service.
+   testable on a developer machine without any service.
 3. **Template.** Build the repository template: layout, path taxonomy, check
    profiles, non-closing controls, and Fullsend dispatch configuration
    ([Template and instantiation](#template-and-instantiation)).
-4. **Coordinator composition.** Build and smoke test the local coordinator
-   composition per the readiness list ([Repository-owned
+4. **Coordinator composition.** Build and smoke test the repository-local
+   coordinator composition per the readiness list ([Repository-owned
    coordinator and Fullsend
    integration](#repository-owned-coordinator-and-fullsend-integration)),
    using the existing mint configuration and the selected inference
@@ -1337,10 +1361,12 @@ from the V2 MVP. Issue #346 records them for post-MVP consideration.
 
 ## Open questions
 
-1. **Test runner, tag extraction, and evidence reporting.** Which ordinary test
-   runner and `@req:<ID>` extraction should the template adopt, and how should
-   the evidence report represent untested, failing, skipped, and incomplete
-   evidence? Gherkin and `@req:` tags are illustrative, not selected.
+1. **Test runner, tag extraction, and evidence reporting.** The V2 MVP adopts
+   Gherkin: one requirement per `.feature` file, tagged with `@req:<ID>`.
+   Gherkin is supported across many languages, so it is a reasonable place to
+   start. Open: how the evidence report should represent untested, failing,
+   skipped, and incomplete evidence, and how tag extraction reads results from
+   each runner.
 2. **Semantic review and test adequacy.** Human review against the current
    specification cannot eliminate overlapping requirements or weak tests. How
    much consistency aid is worth building, and how should reviewers judge
@@ -1349,8 +1375,8 @@ from the V2 MVP. Issue #346 records them for post-MVP consideration.
    prove disjoint code or tests. How good must grouping be, and how much
    coupling should be serialized through dependencies rather than left to
    review and the full suite?
-4. **Coordinator smoke tests.** The local caller, harness, and pre/post
-   scripts remain proposed. Prove default-branch trigger bootstrap,
+4. **Coordinator smoke tests.** The repository-local caller, harness, and
+   pre/post scripts remain proposed. Prove default-branch trigger bootstrap,
    snapshot-only inference and output retrieval, trusted exact-main evidence
    handling, native serialization through upstream post completion, App-token
    dispatch, assignment preflight and recovery, non-closing output, and
@@ -1387,6 +1413,16 @@ from the V2 MVP. Issue #346 records them for post-MVP consideration.
    deterministic logic decides when to invoke the agent? A plain job cannot
    perform semantic grouping; the agent requires inference for it. Whether a
    time-based poll earns its inference cost is unresolved.
+8. **Home of the V2 Fullsend agents.** Should the coordinator harness, agent
+   definition, and pre/post scripts live in the template — and therefore in
+   every instantiated prototype repository — or in the ProtoBot repository as
+   a shared, versioned resource, like `ears-manager`'s source, that each
+   prototype references at a pinned digest? Per-repository copies keep
+   trusted-script verification tied to the repository's own default branch,
+   but fixes must propagate by template refresh. A shared resource propagates
+   fixes once, but moves trusted-script verification from the target
+   repository's default branch to the pinned digest, and each repository's
+   `.fullsend/` registration must still pin the shared version.
 
 ## Relationship to V1
 
@@ -1441,8 +1477,8 @@ The specification PR check is a validator mode, not a grep. In outline:
 4. For an implementation diff, run the full ordinary suite and evidence report
    for the current specification; failing tests and unknown-ID tags fail.
 
-The traceability tag is runner-specific; the contract is that a test
-demonstrating a requirement carries its ID. One syntax:
+The V2 MVP uses Gherkin with one requirement per `.feature` file; the contract
+is that a test demonstrating a requirement carries its ID. One syntax:
 
 ```python
 # @req:REQ-API-00002
@@ -1468,9 +1504,10 @@ entries or roles.
 | `status_repo` | Current repository, matching the coordinator status issue |
 | `status_number` | Configured coordinator status issue number, rendered as a string for the execution reference |
 
-Store the status issue number in local process configuration or a repository
-variable, not mint settings. Validate that the issue belongs to the current
-repository. Normal Fullsend status and run links use this same issue, subject to
+Store the status issue number in repository process configuration or a
+repository variable, not mint settings. Validate that the issue belongs to
+the current repository. Normal Fullsend status and run links use this
+same issue, subject to
 existing repository `status_notifications` settings. It is ordinary
 coordination context, not delivery work, behavior or evidence authority, or a
 ledger; its exclusions are defined in [Repository-owned coordinator and
@@ -1482,7 +1519,7 @@ envelope, including `id-token: write`; these GitHub workflow permissions do not
 add mint App permissions. No native job mints or receives App tokens, and no
 token returns to the caller through outputs or artifacts.
 
-### Local agent and standalone harness
+### Repository-local agent and standalone harness
 
 Register an enabled agent in `.fullsend/config.yaml` with these values:
 
@@ -1579,8 +1616,8 @@ established by restricting execution to the reviewed caller workflow on the
 default branch (protected branch and PR merge rules) and validating caller ref
 before minting, rather than assuming no caller allowlist is required. Generated
 repository inference WIF binds `assertion.repository`, not a workflow ref.
-Validate the new local composition through smoke tests ([Repository-owned
-coordinator and Fullsend
+Validate the new repository-local composition through smoke tests
+([Repository-owned coordinator and Fullsend
 integration](#repository-owned-coordinator-and-fullsend-integration))
 without changing hosted mint configuration, roles, permissions, or hosts;
 the selected inference credential mechanism governs inference configuration.
