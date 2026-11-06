@@ -34,6 +34,8 @@
 - [What V2 drops from V1](#what-v2-drops-from-v1)
 - [Template and instantiation](#template-and-instantiation)
 - [Operating model](#operating-model)
+- [Adoption path](#adoption-path)
+- [Deferred items](#deferred-items)
 - [Open questions](#open-questions)
 - [Relationship to V1](#relationship-to-v1)
 - [Appendix A: Path taxonomy](#appendix-a-path-taxonomy)
@@ -1257,6 +1259,66 @@ Specification and implementation merges follow the non-closing controls in
 [Completion and closure](#completion-and-closure); the coordinator owns
 verified closure. No human closure gate is required.
 
+## Adoption path
+
+This document is a proposal; nothing here authorizes implementation. If V2
+is adopted, rollout proceeds in independently gated stages, each separately
+reviewed. Issue #346 tracks the discussion and adoption scope.
+
+1. **Adoption decision.** Record the decision and scope. V1 specifications and
+   accepted ADRs remain the current contracts until then.
+2. **Validator.** Rework `ears-manager` into the V2 validator, retaining
+   useful validation code and replacing its V1 contract
+   ([Validator](#validator)). It is deterministic and network-free, so it is
+   testable locally without any service.
+3. **Template.** Build the repository template: layout, path taxonomy, check
+   profiles, non-closing controls, and Fullsend dispatch configuration
+   ([Template and instantiation](#template-and-instantiation)).
+4. **Coordinator composition.** Build and smoke test the local coordinator
+   composition per the readiness list ([Repository-owned
+   coordinator and Fullsend
+   integration](#repository-owned-coordinator-and-fullsend-integration)),
+   using the existing mint configuration and the selected inference
+   credential boundary.
+5. **Pilot.** Instantiate the template for one real prototype, single player
+   first, then multi player. The pilot exercises the full loop — prose issue
+   to specification to converging implementation to demonstration readiness —
+   and exercises the TransferBot handoff boundary
+   ([TransferBot handoff](#transferbot-handoff)).
+6. **Evaluate.** Regeneration and delta experiments test specification
+   sufficiency ([Regeneration and delta
+   experiment](#regeneration-and-delta-experiment)). The pilot outcome decides
+   whether V2 replaces V1 or informs a revised design.
+
+## Deferred items
+
+The improvements below are acknowledged as valuable and deliberately excluded
+from the first V2 milestone. Issue #346 records them for post-MVP
+consideration.
+
+- **Parallel coder slot cap.** Limit the number of concurrently active coder
+  assignments. GitHub Actions concurrency groups support only one active run
+  per group, so a slot cap needs a different mechanism. Deferred pending
+  analysis.
+- **Priority labels.** A `p1`–`p4` label scheme with defined criteria to
+  order admission. Blocking dependencies already handle hard sequencing.
+  Deferred until a need is observed.
+- **Run fault classification.** Fault classes, attempt counts, and named
+  exits for runs that end badly. Deferred pending analysis of what Fullsend
+  and GitHub Actions can support.
+- **Source-issue state.** Labels that follow a source ask as it progresses,
+  plus one link comment listing its requirement IDs and managed issues.
+- **Read-only triage agent.** Closing duplicates and promoting bug reports
+  directly to the implementation phase. Human intake and drafting continue
+  to own issues that need specification modification.
+- **Web Drafting Table.** A hosted Web Drafting Table (see open question 5)
+  could pull IdeaBot and Jira artifacts directly into a Drafting Table
+  session instead of manual copying. The manual MVP mechanism is described
+  in [Source provenance](#source-provenance).
+- **Reference provenance in drafting.** For documents added to a Drafting
+  Table session, record which source motivated each requirement and why it
+  was created. A human can then quickly confirm or correct the intent.
+
 ## Open questions
 
 1. **Test runner, tag extraction, and evidence reporting.** Which ordinary test
@@ -1276,10 +1338,11 @@ verified closure. No human closure gate is required.
    snapshot-only inference and output retrieval, trusted exact-main evidence
    handling, native serialization through upstream post completion, App-token
    dispatch, assignment preflight and recovery, non-closing output, and
-   evidence-based closure end to end using unchanged existing mint and
-   inference configuration. No Fullsend upgrade is a prerequisite; initial
-   built-in automatic triage and its automatic promotion to coding
-   (`TRIAGE_AUTO_CODE`) are disabled, not coordinator-triggered Fullsend coding.
+   evidence-based closure end to end using the existing mint configuration
+   and the selected inference credential boundary. No Fullsend upgrade is a
+   prerequisite; initial built-in automatic triage and its automatic promotion
+   to coding (`TRIAGE_AUTO_CODE`) are disabled, not coordinator-triggered
+   Fullsend coding.
 5. **Remaining V1 scope dispositions.** How should V2 address Specification
    Toolkit packaging in the [Template and
    instantiation](#template-and-instantiation) methodology, Kits and Kit
@@ -1290,6 +1353,20 @@ verified closure. No human closure gate is required.
    environmental requirements? These are unresolved future V2 scope questions,
    not decisions to retain, drop, or adopt those V1 capabilities or
    constraints.
+6. **Planning model.** Should planning run once per source issue, immediately
+   after its specification PR merges, with the plan posted as a comment that
+   a later replan can redo? Or should the coordinator keep reconciling the
+   whole open queue on each pass? Per-source-issue planning bounds
+   managed-issue size and makes each plan visible, but risks splitting work
+   that belongs in one assignment. Whole-queue reconciliation is stable, but
+   churns issues that are merely waiting. Also unresolved: when a replan may
+   re-cut existing queued issues, and how coder pickup is gated against a
+   list that is about to be re-cut.
+7. **Scheduler shape.** Should the coordinator remain one Fullsend agent
+   invoked by the trigger events, or become a plain scheduled job whose
+   deterministic logic decides when to invoke the agent? A plain job cannot
+   perform semantic grouping; the agent requires inference for it. Whether a
+   time-based poll earns its inference cost is unresolved.
 
 ## Relationship to V1
 
@@ -1467,7 +1544,7 @@ output never authorizes an unchecked mutation.
 
 The documented open-source [mint trust boundary][mint-trust] checks repository
 or owner and `job_workflow_ref` host or basename, not caller `workflow_ref`,
-`workflow_sha`, `event_name`, or `job_workflow_sha`. However, the live hosted
+`workflow_sha`, `event_name`, or `job_workflow_sha`. However, the live-hosted
 mint policy was not queried directly. Before adoption, confirm whether the live
 deployment binds or restricts caller workflow identity. If the hosted mint
 policy does not bind the caller workflow, caller authorization must be
