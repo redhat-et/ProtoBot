@@ -55,10 +55,10 @@ specifications, and specifications into code. It has three pieces:
    specification structure, immutable requirement text, references, and
    ordinary test evidence.
 3. **Coordination and agents** — a repository-owned GitHub Actions caller and
-   repository-local Fullsend coordinator harness that reconcile current
-   evidence into managed implementation issues and admit scoped parallel
-   Fullsend coders; a drafting-table agent; and Fullsend's coder and reviewer.
-   GitHub Issues carry coordination and ownership only.
+   shared Fullsend coordinator harness that reconcile current evidence into
+   managed implementation issues and admit scoped parallel Fullsend coders;
+   a drafting-table agent; and Fullsend's coder and reviewer. GitHub Issues
+   carry coordination and ownership only.
 
 Everything else is Git, GitHub Issues, Actions, branch protection, and
 Fullsend. There is no separate work-item service, no lifecycle state machine,
@@ -92,10 +92,10 @@ immutable history, branches, merge approval, access control, and an audit
 trail. V2 keeps specification validation, traceability, and agent handoff.
 
 V2 replaces the external WMS with ordinary GitHub Issues for coordination. It
-uses a single thin, repository-owned Actions caller and repository-local
-coordinator scripts within existing Fullsend execution for serialized
-reconciliation and admission. GitHub Issues carry assignment and ownership,
-not specification authority.
+uses a single thin, repository-owned Actions caller and the shared coordinator
+harness within existing Fullsend execution for serialized reconciliation and
+admission. GitHub Issues carry assignment and ownership, not specification
+authority.
 
 The notion of a persistent change set is gone. In V2, a specification pull
 request encompasses a proposed change to the specifications, visible as a diff.
@@ -249,8 +249,8 @@ never add or override a requirement.
 The validator and the CI checks never read the tracker. The coordinator is the
 only component that reads the tracker to make coordination decisions.
 Coordination needs no separate service. It uses ordinary issue labels, issue
-open/closed state, one serialized Actions caller, and the repository-local
-coordinator harness. Only coordination is serialized; coder runs stay parallel.
+open/closed state, one serialized Actions caller, and the shared coordinator
+harness. Only coordination is serialized; coder runs stay parallel.
 
 ## Repository layout
 
@@ -266,7 +266,7 @@ src/                            # derived: implementation
 tests/                          # derived: ordinary tests, helpers, drivers
 ci/                             # process: task definitions for validation and checks
 .github/workflows/              # process: thin GitHub-event workflows that delegate to ci/ task definitions
-.fullsend/                      # process: coordinator harness, agent, pre/post scripts
+.fullsend/                      # process: Fullsend agent registration; pins the shared coordinator harness
 AGENTS.md                       # process: repository and agent instructions
 .agents/                        # process: agent definitions and skills
 ```
@@ -497,7 +497,7 @@ trusted main evidence workflow completes (including failing tests)
 repository-owned caller (fixed non-cancelling concurrency group)
     │  calls existing pinned upstream Fullsend reusable dispatch
     ▼
-repository-local coordinator harness (existing retro identity, mint and Vertex inference)
+shared coordinator harness (existing retro identity, mint and Vertex inference)
     │  trusted pre: latest main + exact report, issues, runs and PRs
     │  snapshot-only agent; trusted post validates and applies
     ▼
@@ -544,13 +544,13 @@ Implementation completion is not demonstration readiness; see
    triggers the repository-owned caller, even if tests failed. Coder-run
    completion or failure, unmerged close of a linked pull request, and state
    changes on issues or pull requests relevant to live assignments also
-   trigger it. Its repository-local coordinator harness runs inside existing
-   trusted Fullsend execution, validates the latest-main report, groups or
-   splits requirement-ID work, records dependencies and evidence links,
-   preserves active assignments, and reports unassigned gaps. Missing or
-   incomplete evidence cannot support closure or evidence-driven admission.
-   Manual `workflow_dispatch` on main remains the fallback for ambiguous
-   dispatch and anything the event set does not cover.
+   trigger it. The shared coordinator harness runs inside existing trusted
+   Fullsend execution, validates the latest-main report, groups or splits
+   requirement-ID work, records dependencies and evidence links, preserves
+   active assignments, and reports unassigned gaps. Missing or incomplete
+   evidence cannot support closure or evidence-driven admission. Manual
+   `workflow_dispatch` on main remains the fallback for ambiguous dispatch
+   and anything the event set does not cover.
 5. **Admission and dispatch.** Serialized admission checks dependencies and
    live work, marks the issue's scope `assignment-active`, then dispatches
    through an App-token `ready-to-code` label. Fullsend coders run in parallel
@@ -751,12 +751,14 @@ semantic review.
 Authenticated coordinator work runs inside the **existing trusted Fullsend
 reusable workflow**, using its existing `retro` identity, hosted mint, and
 Vertex inference. A thin repository-owned Actions caller handles triggers and
-serialization. **New repository-local code** supplies the standalone
-coordinator harness and pre/post scripts; upstream Fullsend does not already
-implement this reconciliation. No changes to mint configuration, hosting,
-roles, App permissions, or Fullsend version are needed. The inference credential
-boundary is selected and verified at adoption ([Appendix C: Coordinator
-execution contract](#appendix-c-coordinator-execution-contract)).
+serialization. **New code** supplies the standalone coordinator harness and
+pre/post scripts; upstream Fullsend does not already implement this
+reconciliation. The harness is a shared resource: it lives in the ProtoBot
+repository, and each prototype repository pins the digest it runs. No changes
+to mint configuration, hosting, roles, App permissions, or Fullsend version
+are needed. The inference credential boundary is selected and verified at
+adoption ([Appendix C: Coordinator execution
+contract](#appendix-c-coordinator-execution-contract)).
 
 | Piece | Responsibility |
 | --- | --- |
@@ -783,7 +785,7 @@ execution contract](#appendix-c-coordinator-execution-contract)).
    current state. The trigger events therefore cannot pile up runs.
    Evidence and coder workflows remain outside this group.
 3. The caller sends one fixed custom-poller matrix entry to the existing pinned
-   upstream workflow, selecting the repository-local harness and existing
+   upstream workflow, selecting the shared coordinator harness and existing
    `retro` role. One human-created stable coordinator status issue supplies the
    runner-required issue URL; it is not a managed assignment or source issue.
    Exact inputs and credential boundaries are in [Appendix C: Coordinator
@@ -830,10 +832,11 @@ managed issue closure.
 **Readiness.** An [existing successful retro run][existing-retro-run] proves
 mint and Vertex inference through this exact upstream pin; its generic custom
 harness job was skipped, so it does not prove the coordinator. Build and smoke
-test the repository-local composition, including trigger bootstrap, SHA and
-evidence checks, sandbox isolation, structured output, serialization through
-post completion, App-token dispatch, assignment recovery, non-closing output,
-and closure. No end-to-end coordinator deployment success is claimed.
+test the composed coordinator — the prototype's caller plus the shared
+harness — including trigger bootstrap, SHA and evidence checks, sandbox
+isolation, structured output, serialization through post completion, App-token
+dispatch, assignment recovery, non-closing output, and closure. No end-to-end
+coordinator deployment success is claimed.
 
 References: [Actions concurrency][actions-concurrency],
 [`workflow_run` trust boundary][workflow-run],
@@ -1215,19 +1218,19 @@ contains:
 
 - the methodology: `AGENTS.md`, agent definitions, skills;
 - the process: validator, specification PR check, thin repository-owned
-  coordinator caller and repository-local pre/post scripts
+  coordinator caller
   ([Repository-owned coordinator and Fullsend
   integration](#repository-owned-coordinator-and-fullsend-integration)),
   Fullsend dispatch configuration, and isolated evidence CI
   ([Evidence report and CI](#evidence-report-and-ci));
 - pinned tool versions, recorded by digest;
-- the existing pinned upstream Fullsend reusable workflow and standalone
-  `.fullsend/` coordinator harness, using existing `retro` mint credentials
-  and pi/Vertex model configuration without service or secret changes
-  ([Appendix C: Coordinator execution
-  contract](#appendix-c-coordinator-execution-contract));
-  a human creates its stable status issue and installs the native caller
-  through a human-authenticated PR;
+- the existing pinned upstream Fullsend reusable workflow and the prototype's
+  `.fullsend/` registration of the shared coordinator harness, pinned by
+  digest to the ProtoBot repository ([Appendix C: Coordinator execution
+  contract](#appendix-c-coordinator-execution-contract)), using existing `retro`
+  mint credentials and pi/Vertex model configuration without service or secret
+  changes; a human creates its stable status issue and installs the native
+  caller through a human-authenticated PR;
 - the Gherkin test runner and `@req:<ID>` tag extraction;
 - managed-issue configuration: only the serialized coordinator marks
   `assignment-active` and sets `ready-to-code` using an App token; runner
@@ -1258,9 +1261,9 @@ tests, so Git, review, and the current-candidate suite integrate. Only the
 coordinator is serialized; coders have no global execution lock.
 
 **Coordination.** Managed issues, active assignment labels and requirement
-scopes, and one natively serialized Actions caller running repository-local
-coordinator pre/agent/post inside existing trusted Fullsend execution. Evidence
-completion, coder-run completion or failure, unmerged closes, and
+scopes, and one natively serialized Actions caller running the shared
+coordinator's pre/agent/post inside existing trusted Fullsend execution.
+Evidence completion, coder-run completion or failure, unmerged closes, and
 live-assignment state changes trigger it. Manual `workflow_dispatch` on main
 remains the fallback for ambiguous dispatch and anything the event set does
 not cover. Issue comments and links are ordinary GitHub notifications, not a
@@ -1301,9 +1304,9 @@ reviewed. Issue #346 tracks the discussion and adoption scope.
 3. **Template.** Build the repository template: layout, path taxonomy, check
    profiles, non-closing controls, and Fullsend dispatch configuration
    ([Template and instantiation](#template-and-instantiation)).
-4. **Coordinator composition.** Build and smoke test the repository-local
-   coordinator composition per the readiness list ([Repository-owned
-   coordinator and Fullsend
+4. **Coordinator composition.** Build and smoke test the composed coordinator,
+   the prototype's caller plus the shared harness, per the readiness list
+   ([Repository-owned coordinator and Fullsend
    integration](#repository-owned-coordinator-and-fullsend-integration)),
    using the existing mint configuration and the selected inference
    credential boundary.
@@ -1363,16 +1366,17 @@ from the V2 MVP. Issue #346 records them for post-MVP consideration.
    prove disjoint code or tests. How good must grouping be, and how much
    coupling should be serialized through dependencies rather than left to
    review and the full suite?
-4. **Coordinator smoke tests.** The repository-local caller, harness, and
-   pre/post scripts remain proposed. Prove default-branch trigger bootstrap,
-   snapshot-only inference and output retrieval, trusted exact-main evidence
-   handling, native serialization through upstream post completion, App-token
-   dispatch, assignment preflight and recovery, non-closing output, and
-   evidence-based closure end to end using the existing mint configuration
-   and the selected inference credential boundary. No Fullsend upgrade is a
-   prerequisite; initial built-in automatic triage and its automatic promotion
-   to coding (`TRIAGE_AUTO_CODE`) are disabled, not coordinator-triggered
-   Fullsend coding.
+4. **Coordinator smoke tests.** The repository-local caller and the shared
+   harness remain proposed. Prove default-branch trigger bootstrap,
+   shared-harness digest verification, snapshot-only inference and output
+   retrieval, trusted exact-main evidence handling, native serialization
+   through upstream post completion, App-token dispatch, assignment preflight
+   and recovery, non-closing output, and evidence-based closure end to end
+   using the existing mint configuration and the selected inference
+   credential boundary. No Fullsend upgrade is a prerequisite; initial
+   built-in automatic triage and its automatic promotion to coding
+   (`TRIAGE_AUTO_CODE`) are disabled, not coordinator-triggered Fullsend
+   coding.
 5. **Remaining V1 scope dispositions.** How should V2 address Specification
    Toolkit packaging in the [Template and
    instantiation](#template-and-instantiation) methodology, Kits (V1's
@@ -1401,17 +1405,6 @@ from the V2 MVP. Issue #346 records them for post-MVP consideration.
    deterministic logic decides when to invoke the agent? A plain job cannot
    perform semantic grouping; the agent requires inference for it. Whether a
    time-based poll earns its inference cost is unresolved.
-8. **Home of the V2 Fullsend agents.** Should the coordinator harness, agent
-   definition, and pre/post scripts live in the template, and therefore in every
-   instantiated prototype repository? Or should they live in the ProtoBot
-   repository as a shared, versioned resource, like `ears-manager`'s source,
-   that each prototype references at a pinned digest? Per-repository copies keep
-   trusted-script verification tied to the prototype repository's default
-   branch, but fixes must propagate by template refresh. A shared resource
-   propagates fixes to every repository at once, but moves trusted-script
-   verification from the prototype repository's default branch to the pinned
-   digest, and each repository's `.fullsend/` registration must still pin the
-   shared version.
 
 ## Relationship to V1
 
@@ -1509,7 +1502,7 @@ envelope, including `id-token: write`; these GitHub workflow permissions do not
 add mint App permissions. No native job mints or receives App tokens, and no
 token returns to the caller through outputs or artifacts.
 
-### Repository-local agent and standalone harness
+### Shared agent and standalone harness
 
 Register an enabled agent in `.fullsend/config.yaml` with these values:
 
@@ -1537,6 +1530,16 @@ enabled registered agent. Template policy permits no other coordinator
 entrypoint; human-reviewed process changes could deliberately bypass it, so
 this is not a new enforcement framework. Preserve upstream same-issue
 cancellation, but give parent and child different concurrency groups.
+
+The coordinator harness — the agent definition and the pre/post scripts —
+lives in the ProtoBot repository as a shared, versioned resource, like
+`ears-manager`'s source. A prototype repository never authors harness content.
+Its `.fullsend/` registration names the agent and records the digest of the
+harness version it runs. The pinned upstream workflow loads configuration and
+scripts from the calling repository's SHA, so the prototype materializes the
+pinned harness version. The trusted preflight verifies that the materialized
+files match the recorded digest before anything trusted executes. Advancing
+the pin, and only advancing the pin, changes the harness a prototype runs.
 
 ### Trusted state and credential boundary
 
@@ -1606,8 +1609,8 @@ established by restricting execution to the reviewed caller workflow on the
 default branch (protected branch and PR merge rules) and validating caller ref
 before minting, rather than assuming no caller allowlist is required. Generated
 repository inference WIF binds `assertion.repository`, not a workflow ref.
-Validate the new repository-local composition through smoke tests
-([Repository-owned coordinator and Fullsend
+Validate the composed coordinator — the prototype's caller plus the shared
+harness — through smoke tests ([Repository-owned coordinator and Fullsend
 integration](#repository-owned-coordinator-and-fullsend-integration))
 without changing hosted mint configuration, roles, permissions, or hosts;
 the selected inference credential mechanism governs inference configuration.
