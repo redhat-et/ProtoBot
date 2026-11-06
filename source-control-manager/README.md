@@ -30,18 +30,70 @@ directory of its own, `core.fsmonitor` off, and literal pathspecs. A commit
 is built in a private index and moved onto the branch with a
 compare-and-swap `git update-ref`.
 
-## Job Site projection and sandbox fixture
+## Job Site Worker and Triage fixture
 
-`internal/jobsite` is the standalone Job Site projection and sandbox
-seam. It exports Worker A, Worker B, and a private Integration
-repository from a source commit and a version-1 projection policy,
-validates PatchBundle v1 imports, and runs the `jobsite-sandbox/v1`
-conformance suite against a local test adapter. It is not a Drafting
-Table SCM face. The integration loop and Fullsend mapping remain #69
-and #172.
+`internal/jobsite` implements the backend-neutral Worker/Triage fixture
+loop (#69), projection isolation, and the `jobsite-sandbox/v1` local test
+adapter. `RunFixtureLoop` accepts a `LoopRequest` that pins the source
+commit, projection policy, approved requirement IDs, sandbox resource
+limits, deterministic Worker/test/Triage callbacks, and a `LoopWMS`
+implementation. The in-memory WMS supplies the local lifecycle fixture;
+authorization, state versions, fencing tokens, and idempotency remain
+enforced at the WMS boundary.
 
-`go test ./internal/jobsite` is the mandatory local isolation and
-sandbox-contract fixture.
+Each cycle exports fresh Worker A (tests), Worker B (implementation), and
+private Integration repositories. Workers edit only their role projection
+through a sandbox `Session`. The loop validates path-restricted PatchBundle
+v1 imports, preserves contributions on private integration-side branches,
+merges them with merge commits, and runs the supplied Integration test.
+Accepted patch audit records are pinned in the same atomic Git ref
+transaction as the integration commits. Audit JSON sidecars are derived
+views; `RecoverCycleAudits` rebuilds them from those private Git records
+before another import. Rollback restores refs before removing sidecars
+and reports cleanup failures. Imports and recovery for the same Integration
+repository run serially under its single Job Site owner.
+Fixture Triage represents test faults, implementation faults, both faults,
+and specification gaps. Later cycles dispatch only the Workers selected
+by the preceding sanitized feedback.
+
+`SanitizeFeedback` permits only outcome, fault classification, approved
+requirement IDs, retry budget, and generic requirement-level reasons and
+revision requests. Test faults route to Worker A; implementation faults
+route to Worker B; both faults route to both. Free-text reasons, raw logs,
+and raw Inspector findings are retained privately and always discarded
+from Worker feedback. Unsupported classifications, unapproved requirement
+IDs, stale or invalid patches, sandbox errors, test-runner errors, and WMS
+rejections fail closed. An ordinary failing test is a nonzero test status
+with no runner error.
+
+`MaxRetries` excludes the initial attempt: zero allows one cycle, and N
+allows at most N + 1 cycles. Retryable failures leave the work item in
+`building`. A passing suite invokes `tests-pass` and moves it to
+`inspecting`; it does not complete the work item. A specification gap
+invokes `raise-spec-question` and moves it to `blocked`. Exhausting retries
+ends the fixture with `retry-exhausted` and a recorded escalation while
+leaving the work item in `building`; it grants no abandonment authority.
+Each `RunID` is single-use. The loop rejects a replayed claim before
+dispatch; resuming a prior run requires reconciliation outside this fixture.
+
+The new `OutputDir` is private (mode `0700`). Its `cycle-NNNN.json` records
+and `report.json` (mode `0600`) retain patch provenance, sandbox cleanup
+audits, test output, raw Triage input, sanitizer decisions, feedback, and
+authoritative WMS transitions. Incomplete cycles also produce evidence.
+`VerifyCycleEvidence` verifies the cycle records' canonical JSON hash
+chain. These records and Integration repositories are control-plane data;
+only `WorkerFeedback` crosses the Worker boundary.
+
+Run the local projection, sandbox, and Worker/Triage fixture tests with:
+
+```sh
+go test ./internal/jobsite
+```
+
+This package is separate from the Drafting Table SCM face. In-process
+callbacks and the local adapter prove the fixture contract; they do not
+enable autonomous model execution. Real model execution and the Fullsend
+adapter's integration-level isolation checks remain later work (#172).
 
 ## Not in this build
 

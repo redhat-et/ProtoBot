@@ -78,7 +78,7 @@ source-control-manager/
   internal/{cli,mcpserver,scm,gitx,host,ears,render,...}/
   internal/golden/          # the golden repository fixture, replayed
   internal/testing/         # the gh and ears-manager stubs of the fixture
-  internal/jobsite/         # Worker projection isolation and sandbox contract (#78, #79)
+  internal/jobsite/         # Worker/Triage fixture loop, projection isolation, and sandbox contract (#69, #78, #79)
 wms/
   go.mod
   adapter/                  # backend-neutral wire types and operation surfaces
