@@ -261,16 +261,17 @@ spec/
     <interface-name>.yaml       # authoritative: named external interfaces
 src/                            # derived: implementation
 tests/                          # derived: ordinary tests, helpers, drivers
-ci/                             # process: validation and checks
+ci/                             # process: task definitions for validation and checks
+.github/workflows/              # process: thin GitHub-event workflows that delegate to ci/ task definitions
 AGENTS.md                       # process: repository and agent instructions
 .agents/                        # process: agent definitions and skills
 ```
 
 The layout is intentional: `Vision.md`, `Architecture.md`, and `spec/` are the
 specification side; `src/` and `tests/` are the implementation side; `ci/`,
-`AGENTS.md`, and `.agents/` are process. Tests are ordinary derived
-implementation code, tagged with requirement IDs where they demonstrate a
-requirement.
+`.github/workflows/`, `AGENTS.md`, and `.agents/` are process. Tests are
+ordinary derived implementation code, tagged with requirement IDs where they
+demonstrate a requirement.
 
 Managed implementation issues live in the tracker. They are authoritative for
 coordination only, never for specification content.
@@ -478,7 +479,8 @@ default branch (approved current specification)
     │  main full suite produces the evidence report for the exact SHA
     ▼
 trusted main evidence workflow completes (including failing tests)
-    │  workflow_run; workflow_dispatch for recovery
+    │  workflow_run plus coder-run, unmerged-close, and live-assignment events
+    │  workflow_dispatch on main remains the fallback
     ▼
 repository-owned caller (fixed non-cancelling concurrency group)
     │  calls existing pinned upstream Fullsend reusable dispatch
@@ -523,12 +525,16 @@ done
    implementation paths or premature source-issue closing directives. Merge is
    approval. Main runs the full ordinary suite for the exact SHA.
 4. **Reconciliation.** Completion of the trusted main evidence workflow
-   triggers the repository-owned caller, even if tests failed. Its local
-   coordinator harness runs inside existing trusted Fullsend execution,
-   validates the latest-main report, groups or splits requirement-ID work,
-   records dependencies and evidence links, preserves active assignments, and
-   reports unassigned gaps. Missing or incomplete evidence cannot support
-   closure or evidence-driven admission. `workflow_dispatch` is recovery.
+   triggers the repository-owned caller, even if tests failed. Coder-run
+   completion or failure, unmerged close of a linked pull request, and state
+   changes on issues or pull requests relevant to live assignments also
+   trigger it. Its local coordinator harness runs inside existing trusted
+   Fullsend execution, validates the latest-main report, groups or splits
+   requirement-ID work, records dependencies and evidence links, preserves
+   active assignments, and reports unassigned gaps. Missing or incomplete
+   evidence cannot support closure or evidence-driven admission. Manual
+   `workflow_dispatch` on main remains the fallback for ambiguous dispatch
+   and anything the event set does not cover.
 5. **Admission and dispatch.** Serialized admission checks dependencies and
    live work, marks the issue's scope `assignment-active`, then dispatches
    through an App-token `ready-to-code` label. Fullsend coders run in parallel
@@ -543,8 +549,8 @@ done
    every approved ask is adequately implemented on current main or explicitly
    excluded with human approval. Ambiguous or missing mappings keep it open for
    reassessment; retirement alone is not delivery. A failed run or unmerged PR
-   close with no new main evidence uses manual `workflow_dispatch` to
-   reassess existing evidence and live work.
+   close with no new main evidence triggers the caller to reassess existing
+   evidence and live work.
 
 **Defects.** A defect is either a gap in what the tests demonstrate or a code
 bug in behavior the specification already covers. A gap enters the
@@ -727,7 +733,10 @@ Vertex inference. A thin repository-owned Actions caller handles triggers and
 serialization. **New ProtoBot-local code** supplies the standalone coordinator
 harness and pre/post scripts; Fullsend does not already implement this
 reconciliation. No changes to mint configuration, hosting, roles, App
-permissions, model secrets, or Fullsend version are needed.
+permissions, or Fullsend version are needed. The inference credential
+boundary is selected and verified at adoption
+([Appendix C: Coordinator execution
+contract](#appendix-c-coordinator-execution-contract)).
 
 | Piece | Responsibility |
 | --- | --- |
@@ -739,14 +748,20 @@ permissions, model secrets, or Fullsend version are needed.
 
 **Run flow.** All coordinator entry and recovery paths use the native caller:
 
-1. The configured main evidence workflow completes, including failing tests,
-   triggering `workflow_run: completed`; `workflow_dispatch` on main is manual
-   recovery. Install the caller on main through a human-authenticated PR:
-   existing minted credentials cannot write workflows.
+1. The caller triggers when the configured main evidence workflow completes,
+   including failing tests (`workflow_run: completed`). It also triggers
+   when a dispatched coder run completes or fails. It also triggers when a
+   pull request linked to a live assignment closes unmerged, and when an
+   issue or pull request relevant to live assignments changes state. Manual
+   `workflow_dispatch` on main remains the fallback for ambiguous dispatch
+   and anything the event set does not cover. Install the caller on main
+   through a human-authenticated PR: existing minted credentials cannot
+   write workflows.
 2. Workflow-level fixed repository concurrency with `cancel-in-progress: false`
    covers the whole called reusable workflow, through preflight, agent, and
    post. Newer pending runs replace older pending runs; every run rereads
-   current state. Evidence and coder workflows remain outside this group.
+   current state. The trigger events therefore cannot pile up runs.
+   Evidence and coder workflows remain outside this group.
 3. The caller sends one fixed custom-poller matrix entry to the existing pinned
    upstream workflow, selecting the local harness and existing `retro` role.
    One human-created stable coordinator status issue supplies the
@@ -754,10 +769,15 @@ permissions, model secrets, or Fullsend version are needed.
    Exact inputs and credential boundaries are in [Appendix C: Coordinator
    execution contract](#appendix-c-coordinator-execution-contract).
 4. Trusted preflight verifies the caller and scripts SHA, checkout, and latest
-   main agree, then verifies the evidence workflow, repository, branch,
-   originating event, and run SHA. It downloads the report by artifact ID from
-   that verified run, checking report SHA and completeness. Artifacts and
-   model output are data, never executable instructions.
+   main agree, then verifies the triggering event is an allowed one. Whatever
+   the trigger, it identifies the latest completed main evidence run and
+   verifies that run's workflow, repository, branch, and run SHA. It downloads
+   the report by artifact ID from that verified run, checking report SHA and
+   completeness. Preflight defers
+   without inference when nothing material changed since the last processed
+   run. It detects this by comparing a digest of the staged state against the
+   digest recorded by the last run that mutated coordination state. Artifacts
+   and model output are data, never executable instructions.
 5. After successful inference and sandbox teardown, trusted post validates
    result schema and proposed actions before any coordination mutation.
    Invalid schema permits no assignment, dispatch, or closure mutations. It
@@ -768,11 +788,16 @@ permissions, model secrets, or Fullsend version are needed.
 
 Failing tests in a complete report are valid gaps. Missing, incomplete, or
 infrastructure or collection-error evidence is unknown and cannot support
-closure or evidence-driven admission. Manual recovery reads existing
-latest-main evidence and live activity; ambiguous dispatch remains active
-([Scoped parallel admission and assignment
-lifetime](#scoped-parallel-admission-and-assignment-lifetime)).
-No report polling, PR-close harness, or exactly-once protocol is required.
+closure or evidence-driven admission. The main evidence job therefore always
+uploads its report when collection completes, including when tests failed
+([Evidence report and CI](#evidence-report-and-ci)); GitHub Actions otherwise
+skips later steps after a failed step. A completed failing main run yields a
+complete failing report, not missing evidence. Failed coder runs, unmerged
+closes, and live-assignment state changes trigger the caller directly. Each
+run reads existing latest-main evidence and live activity; ambiguous dispatch
+remains active ([Scoped parallel admission and assignment
+lifetime](#scoped-parallel-admission-and-assignment-lifetime)). No report
+polling or exactly-once protocol is required.
 
 Coder dispatch uses an App-token `ready-to-code` label, not `GITHUB_TOKEN`.
 Preserve upstream coder preflight guards when adding assignment checks. Disable
@@ -810,6 +835,11 @@ combine or split changes from active requirement text, the evidence report,
 existing managed issues, live runs, and open PRs. A deterministic wrapper
 validates requirement references, scope overlap, current evidence, queued-only
 rewrites, and dispatch preconditions; it does not claim semantic grouping.
+
+When reconciling, the coordinator consumes the reviewer's routing labels
+([Reviewer](#reviewer)). It opens or links a source issue for each
+`review-intent-gap` finding. It marks the managed issue `needs-replan` and
+replans for each `review-bad-plan` finding.
 
 Only managed implementation issues may be rewritten. Every gap is accounted for
 by a queued, blocked, or active issue or reported unassigned. Preserve active
@@ -853,15 +883,24 @@ until tests demonstrate it.
    until existing activity is settled; then replan or supersede it. Never
    transfer old evidence to the replacement ID. Current specification governs
    merge, not the old assignment text.
+6. When the latest main evidence report contains failures, the coordinator
+   admits the failing requirement IDs as a single serialized assignment. The
+   assignment is one managed issue covering all currently failing IDs. The
+   coordinator does not dispatch other parallel work that depends on a green
+   main; parallel disjoint dispatch resumes only once main is green again. A
+   repair PR must fix every failing ID in one PR. A PR that fixes one failing
+   ID while another remains red cannot merge under the full-suite gate.
 
 Disjoint requirement scopes may still share code or tests. Git, review, and the
 current-candidate suite handle that coupling, with dependencies for known
 coupled work. Same-issue retrigger cancels the existing Fullsend run, so never
 blindly reapply `ready-to-code`. On failed or cancelled runs, unmerged closes,
-partial writes, or ambiguous dispatch, retain the active label until manual
-`workflow_dispatch` recovery establishes run and PR state and safely retries,
-blocks, or releases work. Manual recovery is sufficient initially: no TTL,
-unbounded retry loop, or exactly-once claim is needed.
+partial writes, or ambiguous dispatch, retain the active label until a
+coordinator run establishes run and PR state and safely retries, blocks, or
+releases work. Failed runs and unmerged closes trigger that run automatically.
+Manual `workflow_dispatch` on main remains the fallback for ambiguous dispatch
+and anything the event set does not cover. No TTL, unbounded retry loop, or
+exactly-once claim is needed.
 
 ### Completion and closure
 
@@ -952,8 +991,23 @@ workflow state machine.
 Fullsend's review agent. It starts from the requirement text, derives expected
 behavior and evidence independently, and then evaluates both the
 implementation and the tests. It checks that test inputs and assertions are
-faithful interpretations of the EARS statement and that the implementation
-satisfies all active requirements.
+faithful interpretations of the EARS statement. It judges the adequacy of the
+changed behavior and its associated tests against the relevant active
+requirement text. It also checks that the change does not regress
+already-demonstrated requirements. It must not require the pull request to
+demonstrate every currently untested active requirement.
+
+The reviewer labels each substantive finding on the implementation PR with
+exactly one routing label:
+
+- `review-patch` — The defect is in the changed code or tests; the coder
+  fixes it in the same PR.
+- `review-intent-gap` — The requirement text itself is wrong, missing, or
+  ambiguous; the fix belongs in the specification flow. The reviewer does
+  not open issues; the coordinator opens or links a source issue for the
+  finding on its next pass.
+- `review-bad-plan` — The assignment itself is wrong; the managed issue is
+  marked `needs-replan` and replanned.
 
 Test bodies are not frozen. The reviewer may accept rewritten, replaced, or
 removed tests when the remaining suite demonstrates the active text. This
@@ -987,13 +1041,20 @@ human contributor gate.
 
 Ordinary CI runs the full suite, failing on test failures and unknown-ID tags.
 Retired-ID tags are allowed and remain runnable historical evidence. A new
-active requirement with no tests may merge as a specification gap.
-Already-failing default repair is allowed; bare green CI does not certify
-requirements. Main runs the full suite for the exact-SHA report consumed by the
-coordinator after evidence workflow completion; the template names the
-evidence workflow and job, and the current workflow is not assumed to produce
-it. Backlog reporting lists untested and failing active requirements; priority,
-ownership, and aging policy are open.
+active requirement with no tests may merge as a specification gap. Repair of
+an already-failing default branch is a single serialized assignment ([Scoped
+parallel admission and assignment
+lifetime](#scoped-parallel-admission-and-assignment-lifetime)); bare green CI
+does not certify requirements. Main runs the full suite for the exact-SHA
+report consumed by the coordinator after evidence workflow completion; the
+template names the evidence workflow and job, and the current workflow is not
+assumed to produce it. The named main evidence job always writes the per-ID
+report. It uploads the report whenever collection completes, including when
+tests failed. For example, use an `if: always()` upload step after the test
+step, or split the test and upload jobs. A missing artifact or a collection
+error is incomplete, unknown evidence. A present report with failing results
+is a complete failing report. Backlog reporting lists untested and failing
+active requirements; priority, ownership, and aging policy are open.
 
 ### Protected paths
 
@@ -1041,7 +1102,12 @@ CI mechanics:
 - one always-running aggregate gate job is the only required status check. A
   skipped job behind `if:` can report success; a path-filtered workflow can
   leave a check pending. The aggregate gate ensures selected checks actually
-  succeeded.
+  succeeded;
+- workflow files under `.github/workflows/` are thin, human-reviewed event
+  bindings; Fullsend agents cannot modify them. The check logic lives in
+  `ci/` task definitions executed by an ordinary task runner, for example
+  `make` or `just`. Agents can therefore update checks in a limited manner
+  through reviewed `ci/` changes without touching workflow files.
 
 ## Invariants and enforcement
 
@@ -1055,6 +1121,7 @@ CI mechanics:
 | Active requirements have no false completion: missing tests are gaps; complete passing tagged results are mechanical coverage, not adequate reviewed evidence | Evidence report plus independent review | Untested, partial, or inadequate evidence mistaken for demonstrated |
 | Tests are derived; adequacy is reviewer judgment from EARS text | Review | Tag association mistaken for fidelity |
 | At most one active assignment holds a requirement ID; scope is frozen while work is live or dispatch ambiguous | Sole native caller in fixed non-cancelling workflow-level concurrency group covering upstream pre/agent/post; `assignment-active` plus issue scope; runner preflight | Duplicate ownership and conflicting coder work |
+| When the latest main evidence report contains failures, repair of the failing requirement IDs is a single serialized assignment, and parallel dispatch resumes only from a green main | Coordinator admission rule plus the absolute-green merge gate | Parallel repair PRs deadlock under the full-suite gate |
 | A managed issue closes only on adequate reviewed latest-main evidence, and issue text never overrides current specification | Coordinator, evidence report, independent review, current-candidate CI | Closure from stale scope or stale runs |
 | Source issues auto-close only after every approved ask is verified on current main as adequately implemented or explicitly human-excluded | Independent reviewer, verified exclusions, source-ask mapping, and mechanical results ([Completion and closure](#completion-and-closure)) | Retirement, stale mappings, or partial implementation mistaken for delivery |
 | PR merge does not automatically close source or managed issues; the coordinator owns verified closure | Linked-PR auto-close disabled; checked squash-message inputs and procedural non-closing rule for human edits ([Completion and closure](#completion-and-closure)) | Merge bypasses evidence-based closure |
@@ -1164,10 +1231,12 @@ coordinator is serialized; coders have no global execution lock.
 
 **Coordination.** Managed issues, active assignment labels and requirement
 scopes, and one natively serialized Actions caller running local coordinator
-pre/agent/post inside existing trusted Fullsend execution. Evidence completion
-triggers it; main-only `workflow_dispatch` recovers failed or unmerged
-attempts or ambiguous dispatch. Issue comments and links are ordinary GitHub
-notifications, not a lifecycle service. Built-in automatic triage and its
+pre/agent/post inside existing trusted Fullsend execution. Evidence
+completion, coder-run completion or failure, unmerged closes, and
+live-assignment state changes trigger it. Manual `workflow_dispatch` on main
+remains the fallback for ambiguous dispatch and anything the event set does
+not cover. Issue comments and links are ordinary GitHub notifications, not a
+lifecycle service. Built-in automatic triage and its
 automatic promotion to coding (`TRIAGE_AUTO_CODE`) are off; human intake and
 drafting precede coordinator admission. Coordinator-triggered Fullsend coding
 remains enabled.
@@ -1368,14 +1437,26 @@ issue mutations and status, not PR writes. Keep GitHub tokens out of the agent
 sandbox, artifacts, logs, and untrusted content. The independently dispatched
 Fullsend reviewer never receives coordinator credentials.
 
-Explicitly configure the standalone sandbox with only the Vertex provider and
-necessary ADC/WIF files and environment for existing inference. These model
-credential files **do enter the sandbox**. Include no GitHub provider,
-GitHub-token-containing host-file or environment mappings, or authenticated
-GitHub proxy. All coordinator agent judgments, including ask and closure
-verification, use only staged data and model access. Product suites remain
-separate and secret-free
+Explicitly configure the standalone sandbox with only the Vertex provider for
+existing inference. Include no GitHub provider, GitHub-token-containing
+host-file or environment mappings, or authenticated GitHub proxy.
+
+Staged issue, pull request, run, and evidence text is untrusted data.
+Implementation PRs eligible for auto-merge can carry attacker-controlled test
+names and output into that staged text. The coordinator agent treats it as
+data, never as instructions.
+
+Inference credentials must carry no authority beyond calling the model.
+Before adoption, select and verify one of two mechanisms, mirroring the
+existing live-mint-policy verification prerequisite. The preferred mechanism,
+if supported without an upstream Fullsend upgrade, keeps inference
+credentials on the trusted host. The sandbox then reaches the model only
+through a proxied call. Otherwise, the inference WIF principal is scoped to
+the inference API alone, with no other GCP or GitHub authority. All
+coordinator agent judgments, including ask and closure verification, use only
+staged data and model access. Product suites remain separate and secret-free
 ([Evidence report and CI](#evidence-report-and-ci)).
+
 After successful inference and sandbox teardown, the trusted post-script
 validates result schema and proposed actions before any coordination mutation,
 then enforces the rules in
