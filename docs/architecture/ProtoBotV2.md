@@ -265,15 +265,16 @@ src/                            # derived: implementation
 tests/                          # derived: ordinary tests, helpers, drivers
 ci/                             # process: task definitions for validation and checks
 .github/workflows/              # process: thin GitHub-event workflows that delegate to ci/ task definitions
+.fullsend/                      # process: coordinator harness, agent, pre/post scripts
 AGENTS.md                       # process: repository and agent instructions
 .agents/                        # process: agent definitions and skills
 ```
 
 The layout is intentional: `Vision.md`, `Architecture.md`, and `spec/` are the
 specification side; `src/` and `tests/` are the implementation side; `ci/`,
-`.github/workflows/`, `AGENTS.md`, and `.agents/` are process. Tests are
-ordinary derived implementation code, tagged with requirement IDs where they
-demonstrate a requirement.
+`.github/workflows/`, `.fullsend/`, `AGENTS.md`, and `.agents/` are process.
+Tests are ordinary derived implementation code, tagged with requirement IDs
+where they demonstrate a requirement.
 
 Managed implementation issues live in the tracker. They are authoritative for
 coordination only, never for specification content.
@@ -432,16 +433,18 @@ issue or source link is coordination context, not behavior authority.
 
 A new project begins from IdeaBot, the idea-capture and research tool that
 precedes ProtoBot in the Hermes pipeline. The initial specification PR of a
-new project extends this provenance. It links the IdeaBot artifact snapshot:
-the markdown research files and the Jira-based discussion, copied manually.
-No Jira integration or new service is introduced. The PR records a short
-note mapping key constraints and assumptions from that research to where
-they ended up. The note states which became requirements, which assumptions
-still need validation, and which items were explicitly excluded. The purpose
-is to preserve incoming intent for review of the large first PR. EARS
-requirement text is the only behavior authority. Intent left only in the
-research would otherwise disappear from implementation. The research itself
-need not be copied into the repository.
+new project extends this provenance. The IdeaBot artifacts — the markdown
+research files and the Jira-based discussion — are copied manually into the
+Drafting Table session, not committed to the repository. No Jira
+integration or new service is introduced. The initial specification PR
+links the IdeaBot artifacts where they are hosted and records a short note
+mapping key constraints and assumptions from that research to where they
+ended up. The note states which became requirements, which assumptions
+still need validation, and which items were explicitly excluded. The
+purpose is to preserve incoming intent for review of the large first PR.
+EARS requirement text is the only behavior authority. Intent left only in
+the research would otherwise disappear from implementation. Only the
+mapping note and the links enter the repository.
 
 ### Managed implementation issue
 
@@ -508,8 +511,11 @@ merge ──▶ main evidence workflow ──▶ same coordinator
     │  source issue auto-closes only after all approved asks are verified
     │  on current main: adequate implementation or human-approved exclusion
     ▼
-done
+implementation complete
 ```
+
+Implementation completion is not demonstration readiness; see
+[Demonstration and handoff](#demonstration-and-handoff) for what follows.
 
 ### Step by step
 
@@ -518,10 +524,11 @@ done
 2. **Drafting.** The agent elicits complete EARS statements, constraints, and
    interfaces, and records a source-ask checklist mapping each ask to a new
    or existing active requirement or an explicit human-approved exclusion. It
-   writes no implementation. For a new project, the first drafting-table run
-   takes the IdeaBot artifacts as its input basis for `Vision.md`,
-   `Architecture.md`, and the initial requirements. The Jira-based
-   discussion is copied in manually.
+   writes no implementation. For a new project, the initial Drafting Table
+   session (V1's Sketching session) takes the IdeaBot artifacts as its input
+   basis for `Vision.md`, `Architecture.md`, and the initial requirements.
+   They are copied manually into the session, not committed to the
+   repository.
 3. **Specification PR and main evidence.** Specification-profile CI and human
    review; optional process changes also run relevant process checks. No
    implementation paths or premature source-issue closing directives. Merge is
@@ -569,11 +576,15 @@ A closed managed issue or a green CI run is not proof of full convergence
 requirements likewise does not establish that a person can run the intended
 end-to-end demonstration.
 
+V2 replaces V1's demonstration-artifact manifest under
+`.protobot/attestations/demos/` with the demonstration-readiness record and
+the tag-and-release handoff boundary.
+
 ### Demonstration readiness
 
 V2 defines a lightweight demonstration-readiness checkpoint. The checkpoint
-is an end-to-end acceptance test, sufficient for the MVP. It records three
-things:
+is an end-to-end acceptance test, sufficient for the V2 MVP. It records
+three things:
 
 - a reproducible procedure: setup, commands with sample data, and expected
   results;
@@ -661,10 +672,10 @@ semantic consistency or test adequacy; those are agent and human review
 responsibilities.
 
 The EARS shape check is deliberately narrow. The validator does not judge
-vagueness or requirement quality. V2 rejects banned-word lists as false
-security. Requirement quality relies on the `eliciting-requirements` skill
-and Drafting Table review. Vagueness is an explicit target for evaluations
-of that skill.
+vagueness or requirement quality. V2 rejects banned-word lists as a false
+sense of security. Requirement quality relies on the
+`eliciting-requirements` skill and Drafting Table review. Evaluations of
+that skill should treat vagueness as an explicit target.
 
 Structural relationship validation does not detect semantic conflicts. Human
 and agent review must resolve conflicting active requirements before a
@@ -719,13 +730,14 @@ context before merge, the author updates the change and the reviewer
 re-reviews it.
 
 Replacement and retirement carry an ownership duty. When a specification PR
-replaces or retires a requirement, the Drafting Table session that authored
-the change must review every active requirement connected to the retired
-record. The review covers the requirements in the retired record's
-`relationships` list and the other active requirements that apply to its
-interfaces. The session must adjust each connected requirement or explicitly
-leave it unchanged; the human reviewer decides each case. A replacement that
-leaves a contradicting neighbor unexamined does not satisfy semantic review.
+replaces or retires a requirement, the change's author — the Drafting Table
+session or the human author — must review every active requirement connected
+to the retired record. The review covers the requirements in the retired
+record's `relationships` list and the other active requirements that apply to
+its interfaces. The author must adjust each connected requirement or
+explicitly leave it unchanged; the human reviewer decides each case. A
+replacement that leaves a contradicting neighbor unexamined does not satisfy
+semantic review.
 
 ### Repository-owned coordinator and Fullsend integration
 
@@ -838,7 +850,7 @@ existing managed issues, live runs, and open PRs. A deterministic wrapper
 validates requirement references, scope overlap, current evidence, queued-only
 rewrites, and dispatch preconditions; it does not claim semantic grouping.
 
-When reconciling, the coordinator consumes the reviewer's routing labels
+When reconciling, the coordinator consumes the reviewer's routing tokens
 ([Reviewer](#reviewer)). It opens or links a source issue for each
 `review-intent-gap` finding. It marks the managed issue `needs-replan` and
 replans for each `review-bad-plan` finding.
@@ -886,12 +898,15 @@ until tests demonstrate it.
    transfer old evidence to the replacement ID. Current specification governs
    merge, not the old assignment text.
 6. When the latest main evidence report contains failures, the coordinator
-   admits the failing requirement IDs as a single serialized assignment. The
-   assignment is one managed issue covering all currently failing IDs. The
-   coordinator does not dispatch other parallel work that depends on a green
-   main; parallel disjoint dispatch resumes only once main is green again. A
-   repair PR must fix every failing ID in one PR. A PR that fixes one failing
-   ID while another remains red cannot merge under the full-suite gate.
+   admits the failing requirement IDs as a single serialized repair
+   assignment: one managed issue covering the currently failing IDs. A
+   failing ID already held by a live assignment is not folded into the
+   repair issue: that assignment is paused as `needs-replan`, and the ID
+   joins the repair issue only after its live run and any open pull request
+   are settled. While main is red, no implementation pull request can pass
+   the full-suite gate, so admission dispatches no other work until main is
+   green again. A repair pull request must fix every failing ID it covers
+   in one pull request.
 
 Disjoint requirement scopes may still share code or tests. Git, review, and the
 current-candidate suite handle that coupling, with dependencies for known
@@ -999,11 +1014,12 @@ requirement text. It also checks that the change does not regress
 already-demonstrated requirements. It must not require the pull request to
 demonstrate every currently untested active requirement.
 
-The reviewer labels each substantive finding on the implementation PR with
-exactly one routing label:
+The reviewer posts each substantive finding as a review comment on the
+implementation PR, and the comment's first line carries exactly one routing
+token:
 
 - `review-patch` — The defect is in the changed code or tests; the coder
-  fixes it in the same PR.
+  fixes it in the same PR. It needs no coordinator action.
 - `review-intent-gap` — The requirement text itself is wrong, missing, or
   ambiguous; the fix belongs in the specification flow. The reviewer does
   not open issues; the coordinator opens or links a source issue for the
@@ -1123,7 +1139,7 @@ CI mechanics:
 | Active requirements have no false completion: missing tests are gaps; complete passing tagged results are mechanical coverage, not adequate reviewed evidence | Evidence report plus independent review | Untested, partial, or inadequate evidence mistaken for demonstrated |
 | Tests are derived; adequacy is reviewer judgment from EARS text | Review | Tag association mistaken for fidelity |
 | At most one active assignment holds a requirement ID; scope is frozen while work is live or dispatch ambiguous | Sole native caller in fixed non-cancelling workflow-level concurrency group covering upstream pre/agent/post; `assignment-active` plus issue scope; runner preflight | Duplicate ownership and conflicting coder work |
-| When the latest main evidence report contains failures, repair of the failing requirement IDs is a single serialized assignment, and parallel dispatch resumes only from a green main | Coordinator admission rule plus the absolute-green merge gate | Parallel repair PRs deadlock under the full-suite gate |
+| When the latest main evidence report contains failures, repair of the failing requirement IDs is a single serialized assignment, and parallel dispatch resumes only from a green main | Coordinator admission rule plus the full-suite merge gate | Parallel repair PRs deadlock under the full-suite gate |
 | A managed issue closes only on adequate reviewed latest-main evidence, and issue text never overrides current specification | Coordinator, evidence report, independent review, current-candidate CI | Closure from stale scope or stale runs |
 | Source issues auto-close only after every approved ask is verified on current main as adequately implemented or explicitly human-excluded | Independent reviewer, verified exclusions, source-ask mapping, and mechanical results ([Completion and closure](#completion-and-closure)) | Retirement, stale mappings, or partial implementation mistaken for delivery |
 | PR merge does not automatically close source or managed issues; the coordinator owns verified closure | Linked-PR auto-close disabled; checked squash-message inputs and procedural non-closing rule for human edits ([Completion and closure](#completion-and-closure)) | Merge bypasses evidence-based closure |
@@ -1265,8 +1281,9 @@ This document is a proposal; nothing here authorizes implementation. If V2
 is adopted, rollout proceeds in independently gated stages, each separately
 reviewed. Issue #346 tracks the discussion and adoption scope.
 
-1. **Adoption decision.** Record the decision and scope. V1 specifications and
-   accepted ADRs remain the current contracts until then.
+1. **Proceed decision.** Record the decision to build and evaluate V2 within
+   a stated scope. V1 specifications and accepted ADRs remain the current
+   contracts until V2 is adopted and supersedes them.
 2. **Validator.** Rework `ears-manager` into the V2 validator, retaining
    useful validation code and replacing its V1 contract
    ([Validator](#validator)). It is deterministic and network-free, so it is
@@ -1293,28 +1310,27 @@ reviewed. Issue #346 tracks the discussion and adoption scope.
 ## Deferred items
 
 The improvements below are acknowledged as valuable and deliberately excluded
-from the first V2 milestone. Issue #346 records them for post-MVP
-consideration.
+from the V2 MVP. Issue #346 records them for post-MVP consideration.
 
 - **Parallel coder slot cap.** Limit the number of concurrently active coder
   assignments. GitHub Actions concurrency groups support only one active run
-  per group, so a slot cap needs a different mechanism. Deferred pending
-  analysis.
+  per group, so a slot cap needs a different mechanism. This is deferred
+  pending that analysis.
 - **Priority labels.** A `p1`–`p4` label scheme with defined criteria to
   order admission. Blocking dependencies already handle hard sequencing.
-  Deferred until a need is observed.
+  This is deferred until a need is observed.
 - **Run fault classification.** Fault classes, attempt counts, and named
-  exits for runs that end badly. Deferred pending analysis of what Fullsend
-  and GitHub Actions can support.
-- **Source-issue state.** Labels that follow a source ask as it progresses,
-  plus one link comment listing its requirement IDs and managed issues.
+  exits for runs that end badly. This is deferred pending analysis of what
+  Fullsend and GitHub Actions can support.
+- **Source-issue state.** Labels could follow a source ask as it progresses,
+  and one link comment could list its requirement IDs and managed issues.
 - **Read-only triage agent.** Closing duplicates and promoting bug reports
   directly to the implementation phase. Human intake and drafting continue
   to own issues that need specification modification.
 - **Web Drafting Table.** A hosted Web Drafting Table (see open question 5)
   could pull IdeaBot and Jira artifacts directly into a Drafting Table
-  session instead of manual copying. The manual MVP mechanism is described
-  in [Source provenance](#source-provenance).
+  session instead of manual copying. The manual mechanism is described in
+  [Source provenance](#source-provenance).
 - **Reference provenance in drafting.** For documents added to a Drafting
   Table session, record which source motivated each requirement and why it
   was created. A human can then quickly confirm or correct the intent.
@@ -1345,14 +1361,18 @@ consideration.
    Fullsend coding.
 5. **Remaining V1 scope dispositions.** How should V2 address Specification
    Toolkit packaging in the [Template and
-   instantiation](#template-and-instantiation) methodology, Kits and Kit
-   source imports, the hosted Web deployment mode (including the Web Drafting
-   Table and its session state), Gate approval records, the deployment-level
-   registry, and their related OAuth 2.1 and Bridge/Gate constraints? Should
-   it retain V1's reserved `project` applicability scope for project-wide and
-   environmental requirements? These are unresolved future V2 scope questions,
-   not decisions to retain, drop, or adopt those V1 capabilities or
-   constraints.
+   instantiation](#template-and-instantiation) methodology, Kits (V1's
+   versioned imports of proposed EARS/interface content and Inspector
+   definitions) and Kit source imports, the hosted Web deployment mode
+   (including the Web Drafting Table and its session state), Gate approval
+   records (V1's authorization checkpoints at mutation boundaries in hosted
+   modes), the deployment-level registry (V1's per-deployment project
+   registry), and their related OAuth 2.1 and Bridge/Gate constraints (V1's
+   credential-isolation pattern required only in hosted modes)? Should it
+   retain V1's reserved `project` applicability scope for project-wide and
+   environmental requirements? These are unresolved future V2 scope
+   questions, not decisions to retain, drop, or adopt those V1 capabilities
+   or constraints.
 6. **Planning model.** Should planning run once per source issue, immediately
    after its specification PR merges, with the plan posted as a comment that
    a later replan can redo? Or should the coordinator keep reconciling the
@@ -1478,6 +1498,9 @@ The standalone harness uses `role: retro`,
 `pre_script: scripts/pre-protobot-coordinator.sh`, and
 `post_script: scripts/post-protobot-coordinator.sh`, with
 `privilege_levels: {pre_script: read, runtime: read, post_script: write}`.
+The `harness/`, `agents/`, and `scripts/` values in this appendix are
+relative to `.fullsend/`, so they resolve under `.fullsend/**` (Process
+class in the path taxonomy).
 Omit both `trigger` and `base`: no inherited retro prompts, scripts, or
 triggers. Also omit CEL `overlays`: this minimal payload has no
 `_normalized_event`, so event-dependent overlays are outside this contract.
@@ -1514,9 +1537,13 @@ issue mutations and status, not PR writes. Keep GitHub tokens out of the agent
 sandbox, artifacts, logs, and untrusted content. The independently dispatched
 Fullsend reviewer never receives coordinator credentials.
 
-Explicitly configure the standalone sandbox with only the Vertex provider for
-existing inference. Include no GitHub provider, GitHub-token-containing
-host-file or environment mappings, or authenticated GitHub proxy.
+The sandbox inference configuration follows the selected mechanism. Under
+the proxied mechanism, the sandbox holds no inference credential and reaches
+the model only through the trusted-host proxy. Under the scoped-WIF
+mechanism, the sandbox receives the inference WIF credential, which **does
+enter the sandbox**, scoped to the inference API alone. In both cases,
+include no GitHub provider, GitHub-token-containing host-file or
+environment mappings, or authenticated GitHub proxy.
 
 Staged issue, pull request, run, and evidence text is untrusted data.
 Implementation PRs eligible for auto-merge can carry attacker-controlled test
@@ -1555,8 +1582,8 @@ repository inference WIF binds `assertion.repository`, not a workflow ref.
 Validate the new local composition through smoke tests ([Repository-owned
 coordinator and Fullsend
 integration](#repository-owned-coordinator-and-fullsend-integration))
-without changing hosted mint configuration, roles, permissions, hosts,
-inference services, or model secrets under a fallback.
+without changing hosted mint configuration, roles, permissions, or hosts;
+the selected inference credential mechanism governs inference configuration.
 
 [harness-enumeration]: https://github.com/fullsend-ai/fullsend/blob/3454a2e4ee2b667e2ed71fa9d384edc6de3d4f74/internal/harnessdispatch/enumerate.go#L76-L94
 [phase-privileges]: https://github.com/fullsend-ai/fullsend/blob/3454a2e4ee2b667e2ed71fa9d384edc6de3d4f74/internal/harness/privilege.go#L9-L51
@@ -1568,6 +1595,8 @@ inference services, or model secrets under a fallback.
 ## Related Documents
 
 - [Vision](../vision.md) — Purpose, intended users, and desired outcomes.
+- [Architecture](../architecture.md) — External interfaces, persistent
+  state, and environmental constraints.
 - [Overview](overview.md) — Guiding principles, workflow, and platform.
 - [System Components](components.md) — Component architecture, interfaces,
   and cross-cutting concerns.
