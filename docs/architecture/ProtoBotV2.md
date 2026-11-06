@@ -205,20 +205,19 @@ things are distinct:
   implementation and passing test evidence an independent reviewer judges
   adequate against the requirement text. The independent reviewer is the
   Fullsend review agent, acting independently of the implementing coder
-  ([Reviewer](#reviewer)); it is not a human-review requirement.
+  ([Reviewer](#reviewer)). This judgment requires no human review.
 
 Every active requirement is continuously in force. Ordinary CI runs the
 existing suite. Failing tests block implementation. A new active requirement
 with no tests is an allowed specification-to-code gap and creates work; the
 whole program need not be complete before an incremental code PR merges.
 
-Mechanical coverage records associated collected tests and their results.
-Positive coverage requires at least one associated test to execute and pass.
-Complete passing results require every associated test to execute and pass with
-no ignored failure or skip. Neither alone establishes adequate evidence of the
-full obligation: the independent reviewer judges adequacy against the
-requirement text. Missing tests are an untested gap. Skipped, unexecuted,
-collection-error, missing, or incomplete evidence cannot count as satisfaction.
+For each requirement, mechanical coverage records the associated tests and
+their results; the operational definitions are in [Tests and requirement
+evidence report](#tests-and-requirement-evidence-report). Coverage and complete
+passing results are evidence for the independent reviewer, not proof that the
+obligation is met. Missing or unusable evidence leaves the requirement an
+untested gap.
 
 ### Convergence, not delivery units
 
@@ -247,8 +246,8 @@ hold assignments, requirement scope, dependencies, runner and pull-request
 links, and progress. Issues are authoritative for coordination only; they
 never add or override a requirement.
 
-The validator and the CI checks are deterministic and network-free; they never
-read the tracker. The coordinator is the only component that reads GitHub.
+The validator and the CI checks never read the tracker. The coordinator is the
+only component that reads the tracker to make coordination decisions.
 Coordination needs no separate service. It uses ordinary issue labels, issue
 open/closed state, one serialized Actions caller, and the repository-local
 coordinator harness. Only coordination is serialized; coder runs stay parallel.
@@ -376,16 +375,16 @@ test when the implementation changes. An implementation PR may also modify or
 remove tests tagged to a retired ID. Their associated specification no longer
 applies. Tag notation under the Gherkin MVP:
 
-```text
-# old: @req:REQ-API-00002
-# new: @req:REQ-API-00003
+```gherkin
+# before replacement: @req:REQ-API-00002
+# after replacement:  @req:REQ-API-00003
 ```
 
-A test may refer to several requirement IDs. A test may be removed only once
-it no longer refers to any active requirement; until then, it is rewritten or
-retagged instead. When a requirement retires, the implementation PR must not
-leave a retired tag as the only apparent association while an active
-requirement loses coverage unnoticed.
+A test may refer to several requirement IDs. It may be removed only once it no
+longer refers to any active requirement; until then, it is rewritten or
+retagged. When a requirement retires, the implementation PR must not leave a
+retired tag as the only apparent association while an active requirement loses
+coverage unnoticed.
 
 ### Tests and requirement evidence report
 
@@ -393,21 +392,21 @@ Tests live under implementation paths such as `tests/` and follow project
 conventions. They are ordinary derived tests, not a separate normative
 artifact. Tests that demonstrate a requirement carry a direct
 `@req:<ID>` association. The V2 MVP uses Gherkin, with one requirement per
-`.feature` file. Other unit or internal tests may be untagged. Drivers,
-helpers, fixtures, and other test support code are derived implementation too.
+`.feature` file. The `@req:<ID>` tag sits at the Feature level; a scenario that
+demonstrates a different requirement belongs in that requirement's `.feature`
+file. Other unit or internal tests may be untagged. Drivers, helpers, fixtures,
+and other test support code are derived implementation too.
 
 The **evidence report** is minimal script-generated CI output. For each active
 requirement ID, it lists associated collected tests and their results at the
 exact commit SHA. Coder, reviewer, and coordinator agent use it to detect gaps
 deterministically. It is regenerated from the checkout and test run. It is not
-committed, not an additional authority or ledger, and not a semantic
-completeness proof.
+committed and is not an additional authority or ledger.
 
 - Positive coverage requires at least one associated test that executes
   and passes.
 - Complete passing results require every associated test to execute and pass,
-  with no ignored failure or skip. This is mechanical coverage, not a judgment
-  that the full obligation is adequately demonstrated.
+  with no ignored failure or skip.
 - Missing tests are an untested implementation gap.
 - A failing test is a failure.
 - Skipped, unexecuted, collection-error, missing, or incomplete evidence cannot
@@ -416,10 +415,8 @@ completeness proof.
   do not satisfy an active ID.
 - Unknown requirement IDs in test tags fail reference validation.
 
-Passing a finite suite does not mechanically prove that the EARS statement is
-fully covered. The independent reviewer judges test adequacy from the
-requirement text first. The tag records association; it does not certify
-fidelity.
+The tag records association; it does not certify fidelity. The independent
+reviewer judges adequacy from the requirement text first.
 
 ### Source provenance
 
@@ -470,8 +467,7 @@ One specification PR may produce several managed issues.
 | Evidence links | Relevant spec PR or revision, main report SHA, runs, PRs. |
 | Coordination label | `queued`, `ready-to-code`, `needs-replan`, or `superseded`. |
 
-Blocking is expressed with GitHub's native issue dependencies, not with text
-statements or manual labels.
+Blocking uses these native dependencies, not text statements or manual labels.
 
 Requirement IDs are coordination and ownership metadata, not behavior
 authority. Tests are not allocated separately: a test may demonstrate several
@@ -572,23 +568,21 @@ Implementation completion is not demonstration readiness; see
    close with no new main evidence triggers the caller to reassess existing
    evidence and live work.
 
-**Defects.** A defect report says the system behaves wrongly. V2 divides it
-into two cases. **Undefined behavior**: no active requirement covers the
-behavior. The fix enters the specification flow, so the behavior becomes
-properly covered: a human-reviewed PR adds, replaces, or retires requirements.
-**Incorrect behavior**: an active requirement covers the behavior, but the
-system does not obey it. This indicates a code defect and insufficient test
-coverage. It goes directly to the implementation flow, through the code-only
-maintenance path ([Coder](#coder)), without a specification change.
+**Defects.** A defect report says the system behaves incorrectly. V2 divides
+the defect into two cases. **Undefined behavior**: no active requirement covers
+the behavior. The fix enters the specification flow: a human-reviewed PR adds,
+replaces, or retires requirements so the behavior is covered. **Incorrect
+behavior**: an active requirement covers the behavior, but the system does not
+obey it. This indicates a code defect and insufficient test coverage. It goes
+directly to the implementation flow, through the code-only maintenance path
+([Coder](#coder)), without a specification change.
 
 ## Demonstration and handoff
 
 Implementation completion and demonstration readiness are distinct. Managed
 issues close on adequate merged-main evidence for their scoped requirements.
-A closed managed issue or a green CI run is not proof of full convergence
-([Goals and non-goals](#goals-and-non-goals)). Meeting all active
-requirements likewise does not establish that a person can run the intended
-end-to-end demonstration.
+Meeting all active requirements does not establish that a person can run the
+intended end-to-end demonstration.
 
 V2 replaces V1's demonstration-artifact manifest under
 `.protobot/attestations/demos/` with the demonstration-readiness record and
@@ -760,11 +754,9 @@ Vertex inference. A thin repository-owned Actions caller handles triggers and
 serialization. **New repository-local code** supplies the standalone
 coordinator harness and pre/post scripts; upstream Fullsend does not already
 implement this reconciliation. No changes to mint configuration, hosting,
-roles, App
-permissions, or Fullsend version are needed. The inference credential
-boundary is selected and verified at adoption
-([Appendix C: Coordinator execution
-contract](#appendix-c-coordinator-execution-contract)).
+roles, App permissions, or Fullsend version are needed. The inference credential
+boundary is selected and verified at adoption ([Appendix C: Coordinator
+execution contract](#appendix-c-coordinator-execution-contract)).
 
 | Piece | Responsibility |
 | --- | --- |
@@ -898,8 +890,8 @@ until tests demonstrate it.
 2. Before dispatch, it marks the managed issue `assignment-active`, holding
    that issue's requirement scope, then applies `ready-to-code` with an App
    token. No separate reservation record or lease protocol is needed.
-   `ready-to-code` alone does not suffice: it is the dispatch signal, and
-   retaining it after a failed or cancelled run would retrigger dispatch —
+   `ready-to-code` alone does not suffice. It is only the dispatch signal.
+   Retaining it after a failed or cancelled run would retrigger dispatch, and a
    same-issue retrigger cancels the existing run. `assignment-active` is the
    persistent scope reservation. It survives failed runs, unmerged closes,
    and ambiguous dispatch until the coordinator settles the state.
@@ -958,10 +950,9 @@ Issues API; no atomic merge lock or reopening lifecycle is required. A closed
 issue records that determination, not a promise about every later commit;
 subsequent commits and gaps follow normal reconciliation.
 
-The repository template ([Template and
-instantiation](#template-and-instantiation)) disables the repository's
-[**Auto-close issues with merged linked pull requests**
-setting][auto-close-setting] under **Settings > General > Issues**.
+The template ([Template and instantiation](#template-and-instantiation))
+disables the repository's [**Auto-close issues with merged linked pull
+requests** setting][auto-close-setting] under **Settings > General > Issues**.
 Linked-PR merges must not close source or managed issues; the
 coordinator owns verified closure. This setting is not assumed to cover
 commit-message closing keywords. Keep `closes_issue:false` and non-closing
@@ -995,8 +986,7 @@ specification merge nor one implementation PR establishes completion.
 These non-closing controls apply to specification and implementation PRs.
 Manual closure of a managed issue does not permit a duplicate assignment while
 a live run or open PR remains: coordination considers live work, not just open
-issues. Adequate tests remain an agent reviewer judgment, not an automated
-completeness proof.
+issues.
 
 ### Coder
 
@@ -1013,17 +1003,18 @@ a requirement. It does not work another active issue.
 
 It derives design, file layout, tests, drivers, and helpers; tests and revises,
 and opens a PR against the latest merge candidate. It may add, rewrite,
-refactor, split, combine, remove, or retag ordinary tests and leave retired ID
-tags on historical tests, including changes needed when another requirement is
+refactor, split, combine, remove, or retag ordinary tests, subject to the
+removal rule in [Replacement, retirement, and test
+tags](#replacement-retirement-and-test-tags), and leave retired ID tags on
+historical tests, including changes needed when another requirement is
 introduced. It must not edit requirement text.
 
 All active requirements constrain the change; untested requirements remain
 gaps. The coder commits locally; a runner-side post-script opens the PR; the
 agent cannot push or merge. A maintenance or preparatory PR may demonstrate no
-new requirement, must pass the current suite, and cannot claim full completion
-from green CI. Coordination bookkeeping belongs to the repository-owned
-coordinator; the coder needs no separate service, lease, retry loop, or
-workflow state machine.
+new requirement and must pass the current suite. Coordination bookkeeping
+belongs to the repository-owned coordinator; the coder needs no separate
+service, lease, retry loop, or workflow state machine.
 
 ### Reviewer
 
@@ -1051,12 +1042,11 @@ token:
 
 Test bodies are not frozen. The reviewer may accept rewritten, replaced, or
 retagged tests when the remaining suite demonstrates the active text. A test
-is removed only once it no longer refers to any active requirement
+may be removed only once it no longer refers to any active requirement
 ([Replacement, retirement, and test
 tags](#replacement-retirement-and-test-tags)). This creates a deliberate
-assurance tradeoff: automated tags show association, not semantic fidelity.
-The reviewer must judge test adequacy, and no automated tag gate proves that a
-finite suite captures the full requirement.
+assurance tradeoff: automated tags show association, not semantic fidelity,
+and the reviewer must judge test adequacy.
 
 The reviewer works against the latest merge candidate and current
 specification. If the specification changed after the coder began, the
@@ -1069,35 +1059,33 @@ The minimal script-generated evidence report implements the contract in
 [Tests and requirement evidence report](#tests-and-requirement-evidence-report):
 per active requirement ID, associated collected tests and exact-SHA results,
 emitted as CI output for coder, reviewer, and coordinator agent. It is not
-committed authority or a semantic completeness proof. Mechanical gap detection
-is useful even though the agent reviewer must separately judge adequacy.
-Missing tests are gaps; failing tests fail; skipped, unexecuted,
-collection-error, missing, or incomplete evidence does not satisfy.
+committed authority. Mechanical gap detection is useful even though the agent
+reviewer must separately judge adequacy; the evidence classifications are
+defined in that section.
 
 Per-PR and main suites run isolated from the privileged coordinator, with
 minimum read-only GitHub permissions and a fresh checkout and runtime without
 persisted credentials. Implementation code receives no repository secrets or
 App, deployment, or model credentials. Evidence output remains derived and
-agent-reviewed, not trusted semantic proof. This isolation preserves existing
-Fullsend authorization and eligible code/test PR auto-merge, without a new
-human contributor gate.
+agent-reviewed. This isolation preserves existing Fullsend authorization and
+eligible code/test PR auto-merge, without a new human contributor gate.
 
 Ordinary CI runs the full suite, failing on test failures and unknown-ID tags.
 Retired-ID tags are allowed and remain runnable historical evidence. A new
 active requirement with no tests may merge as a specification gap. Repair of
 an already-failing default branch is a single serialized assignment ([Scoped
 parallel admission and assignment
-lifetime](#scoped-parallel-admission-and-assignment-lifetime)); bare green CI
-does not certify requirements. Main runs the full suite for the exact-SHA
-report consumed by the coordinator after evidence workflow completion; the
-template names the evidence workflow and job, and the current workflow is not
-assumed to produce it. The named main evidence job always writes the per-ID
-report. It uploads the report whenever collection completes, including when
-tests failed. For example, use an `if: always()` upload step after the test
-step, or split the test and upload jobs. A missing artifact or a collection
-error is incomplete, unknown evidence. A present report with failing results
-is a complete failing report. Backlog reporting lists untested and failing
-active requirements; priority, ownership, and aging policy are open.
+lifetime](#scoped-parallel-admission-and-assignment-lifetime)). Main runs the
+full suite for the exact-SHA report consumed by the coordinator after evidence
+workflow completion; the template names the evidence workflow and job, and the
+current workflow is not assumed to produce it. The named main evidence job
+always writes the per-ID report. It uploads the report whenever collection
+completes, including when tests failed. For example, use an `if: always()`
+upload step after the test step, or split the test and upload jobs. A missing
+artifact or a collection error is incomplete, unknown evidence. A present
+report with failing results is a complete failing report. Backlog reporting
+lists untested and failing active requirements; priority, ownership, and
+aging policy are open.
 
 ### Protected paths
 
@@ -1193,9 +1181,7 @@ mode. It proceeds from an approved target snapshot:
    not success.
 
 Regeneration is a test of specification sufficiency and coder/reviewer
-behavior, not proof that a finite suite captures full requirement meaning. The
-model can fool itself with weak tests. No claim of mechanical completeness is
-made.
+behavior. The model can fool itself with weak tests.
 
 **Delta experiment.** Choose any two approved snapshots and a baseline
 implementation; implement the changed or current target obligations and run
@@ -1263,8 +1249,8 @@ describe someone else's system.
 ## Operating model
 
 **Single player.** One person, a clone on their own machine, an agent, and a
-pull request. No custom services; validator runs on that machine and in CI,
-reconciliation and dispatch use the repository-owned coordinator and Fullsend.
+pull request. No custom services. The validator runs on that machine and in CI.
+Reconciliation and dispatch use the repository-owned coordinator and Fullsend.
 
 **Multi player.** Parallel people and agents. Admission gives disjoint
 requirement-ID assignments; disjoint scopes do not imply disjoint code or
@@ -1361,12 +1347,14 @@ from the V2 MVP. Issue #346 records them for post-MVP consideration.
 
 ## Open questions
 
-1. **Test runner, tag extraction, and evidence reporting.** The V2 MVP adopts
-   Gherkin: one requirement per `.feature` file, tagged with `@req:<ID>`.
-   Gherkin is supported across many languages, so it is a reasonable place to
-   start. Open: how the evidence report should represent untested, failing,
+1. **Test runner and evidence reporting.** The V2 MVP adopts Gherkin: one
+   requirement per `.feature` file, tagged with `@req:<ID>`. Gherkin is
+   supported across many languages, so it is a reasonable place to start.
+   Remaining open: how the evidence report should represent untested, failing,
    skipped, and incomplete evidence, and how tag extraction reads results from
-   each runner.
+   each Gherkin runner. The `@req:` tag notation is valid Gherkin and works
+   with Cucumber-family tag expressions, but it constrains runner choice or
+   requires hook-based extraction.
 2. **Semantic review and test adequacy.** Human review against the current
    specification cannot eliminate overlapping requirements or weak tests. How
    much consistency aid is worth building, and how should reviewers judge
@@ -1414,15 +1402,16 @@ from the V2 MVP. Issue #346 records them for post-MVP consideration.
    perform semantic grouping; the agent requires inference for it. Whether a
    time-based poll earns its inference cost is unresolved.
 8. **Home of the V2 Fullsend agents.** Should the coordinator harness, agent
-   definition, and pre/post scripts live in the template — and therefore in
-   every instantiated prototype repository — or in the ProtoBot repository as
-   a shared, versioned resource, like `ears-manager`'s source, that each
-   prototype references at a pinned digest? Per-repository copies keep
-   trusted-script verification tied to the repository's own default branch,
-   but fixes must propagate by template refresh. A shared resource propagates
-   fixes once, but moves trusted-script verification from the target
-   repository's default branch to the pinned digest, and each repository's
-   `.fullsend/` registration must still pin the shared version.
+   definition, and pre/post scripts live in the template, and therefore in every
+   instantiated prototype repository? Or should they live in the ProtoBot
+   repository as a shared, versioned resource, like `ears-manager`'s source,
+   that each prototype references at a pinned digest? Per-repository copies keep
+   trusted-script verification tied to the prototype repository's default
+   branch, but fixes must propagate by template refresh. A shared resource
+   propagates fixes to every repository at once, but moves trusted-script
+   verification from the prototype repository's default branch to the pinned
+   digest, and each repository's `.fullsend/` registration must still pin the
+   shared version.
 
 ## Relationship to V1
 
@@ -1480,8 +1469,9 @@ The specification PR check is a validator mode, not a grep. In outline:
 The V2 MVP uses Gherkin with one requirement per `.feature` file; the contract
 is that a test demonstrating a requirement carries its ID. One syntax:
 
-```python
-# @req:REQ-API-00002
+```gherkin
+@req:REQ-API-00002
+Feature: Health endpoint returns ok
 ```
 
 ## Appendix C: Coordinator execution contract
@@ -1504,13 +1494,13 @@ entries or roles.
 | `status_repo` | Current repository, matching the coordinator status issue |
 | `status_number` | Configured coordinator status issue number, rendered as a string for the execution reference |
 
-Store the status issue number in repository process configuration or a
-repository variable, not mint settings. Validate that the issue belongs to
-the current repository. Normal Fullsend status and run links use this
-same issue, subject to
-existing repository `status_notifications` settings. It is ordinary
-coordination context, not delivery work, behavior or evidence authority, or a
-ledger; its exclusions are defined in [Repository-owned coordinator and
+Store the status issue number in repository process configuration
+or a repository variable, not mint settings. Validate that the
+issue belongs to the current repository. Normal Fullsend status
+and run links use this same issue, subject to existing repository
+`status_notifications` settings. It is ordinary coordination context,
+not delivery work, behavior or evidence authority, or a ledger;
+its exclusions are defined in [Repository-owned coordinator and
 Fullsend integration](#repository-owned-coordinator-and-fullsend-integration).
 
 Pass the same `mint_url`, `gcp_region`, `install_mode`, and existing GCP
