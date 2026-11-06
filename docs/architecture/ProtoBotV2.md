@@ -27,6 +27,7 @@
 - [Repository layout](#repository-layout)
 - [Artifacts](#artifacts)
 - [The flow](#the-flow)
+- [Demonstration and handoff](#demonstration-and-handoff)
 - [Components](#components)
 - [Invariants and enforcement](#invariants-and-enforcement)
 - [Regeneration and delta experiment](#regeneration-and-delta-experiment)
@@ -175,6 +176,14 @@ obligation. Add `supersedes` from the new record to the old ID, and retire the
 old record in the same specification PR. The old record remains in history. IDs
 are never deleted or reused for a different obligation. A new requirement with
 no predecessor simply gets a new ID.
+
+Amendment is disallowed for convergence detection. In-place amendment would
+leave the old tests and implementation unchanged and passing. Nothing would
+surface that the system no longer converges on the amended obligation.
+Replacement instead produces two mechanically findable states at the same
+time: tests tagged to a retired ID, and an active requirement with no tests.
+Because those states appear together, useful tests can be edited slightly
+and re-tagged.
 
 Descriptive metadata or `status` may change without a new ID, but those changes
 cannot amend the obligation. Retirement does not require deleting behavior
@@ -357,8 +366,9 @@ they provide no coverage of the new or any current ID. A specification-only
 replacement or retirement may merge without changing tests. Retired-ID tags
 remain valid historical references, and the code or test PR adds current
 coverage. A code or test PR adds the new association or replaces the obsolete
-test when the implementation changes. Illustrative runner notation, not a
-selected framework:
+test when the implementation changes. An implementation PR may also modify or
+remove tests tagged to a retired ID. Their associated specification no longer
+applies. Illustrative runner notation, not a selected framework:
 
 ```text
 # old: @req:REQ-API-00002
@@ -416,6 +426,19 @@ verifies its content, actual human author, and write, maintain, or admin
 permission via the GitHub API, not an author's claim or quoted approval. Git
 diff and history show the delta. There is no per-change artifact; a managed
 issue or source link is coordination context, not behavior authority.
+
+A new project begins from IdeaBot, the idea-capture and research tool that
+precedes ProtoBot in the Hermes pipeline. The initial specification PR of a
+new project extends this provenance. It links the IdeaBot artifact snapshot:
+the markdown research files and the Jira-based discussion, copied manually.
+No Jira integration or new service is introduced. The PR records a short
+note mapping key constraints and assumptions from that research to where
+they ended up. The note states which became requirements, which assumptions
+still need validation, and which items were explicitly excluded. The purpose
+is to preserve incoming intent for review of the large first PR. EARS
+requirement text is the only behavior authority. Intent left only in the
+research would otherwise disappear from implementation. The research itself
+need not be copied into the repository.
 
 ### Managed implementation issue
 
@@ -491,7 +514,10 @@ done
 2. **Drafting.** The agent elicits complete EARS statements, constraints, and
    interfaces, and records a source-ask checklist mapping each ask to a new
    or existing active requirement or an explicit human-approved exclusion. It
-   writes no implementation.
+   writes no implementation. For a new project, the first drafting-table run
+   takes the IdeaBot artifacts as its input basis for `Vision.md`,
+   `Architecture.md`, and the initial requirements. The Jira-based
+   discussion is copied in manually.
 3. **Specification PR and main evidence.** Specification-profile CI and human
    review; optional process changes also run relevant process checks. No
    implementation paths or premature source-issue closing directives. Merge is
@@ -525,6 +551,61 @@ bug in behavior the specification already covers. A gap enters the
 specification flow: a human-reviewed PR adds, replaces, or retires
 requirements. A bug already covered by adequate requirements and tests may take
 the code-only maintenance path ([Coder](#coder)) without a specification change.
+
+## Demonstration and handoff
+
+Implementation completion and demonstration readiness are distinct. Managed
+issues close on adequate merged-main evidence for their scoped requirements.
+A closed managed issue or a green CI run is not proof of full convergence
+([Goals and non-goals](#goals-and-non-goals)). Meeting all active
+requirements likewise does not establish that a person can run the intended
+end-to-end demonstration.
+
+### Demonstration readiness
+
+V2 defines a lightweight demonstration-readiness checkpoint. The checkpoint
+is an end-to-end acceptance test, sufficient for the MVP. It records three
+things:
+
+- a reproducible procedure: setup, commands with sample data, and expected
+  results;
+- the demonstrated revision, recorded as the exact SHA; and
+- the known limitations of the demonstration.
+
+For a CLI prototype, a person follows the setup, runs the commands with the
+sample data, and sees the expected result.
+
+Stakeholder feedback that changes the desired behavior returns through the
+[Drafting Table](#drafting-table) as a source issue. It is not a code
+defect. This checkpoint does not change automatic closure of managed
+implementation issues.
+
+### TransferBot handoff
+
+TransferBot follows ProtoBot in the Hermes pipeline. It transfers the
+prototype's specifications and test expectations, not its code, to a product
+team. When a prototype is selected for that handoff, the handoff boundary is
+a Git tag on the demonstrated revision
+([Demonstration readiness](#demonstration-readiness)), published as a GitHub
+release.
+
+The release retains:
+
+- the specification revision;
+- the interface definitions;
+- the evidence report for the exact tagged commit ([Tests and requirement
+  evidence report](#tests-and-requirement-evidence-report));
+- the independent review conclusions; and
+- links to the known gaps.
+
+The attached evidence report must match the tagged commit exactly. This
+shows TransferBot exactly what was demonstrated. A release-triggered job can
+attach the exact-SHA report automatically.
+
+CI artifacts expire. Prototype code is disposable, and current main moves
+past the demonstrated revision. A link to current main or to an expiring CI
+artifact would not suffice. The release is a durable, revision-specific
+boundary. It introduces no per-change manifest and no new service.
 
 ## Components
 
