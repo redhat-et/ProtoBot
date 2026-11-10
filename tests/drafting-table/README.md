@@ -1,7 +1,8 @@
 # Drafting Table OpenCode fixture
 
-Run the deterministic headless replay against the pinned OpenCode 1.18.30
-binary:
+The headless replay exercises the historical #77 baseline driver pinned to
+OpenCode 1.18.30 until #77 re-runs it on v2. Run the deterministic headless
+replay against the pinned binary:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 OPENCODE_BIN=/path/to/opencode-1.18.30/bin/opencode \

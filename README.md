@@ -120,8 +120,9 @@ The OpenCode binding (`opencode.json`, `.opencode/`, the shared
 session skill) targets OpenCode v2 (designed against OpenCode 2.0.28).
 The `wms` MCP entry in `opencode.json` is a disabled placeholder
 (`enabled: false`) until a production WMS Adapter MCP server exists; the
-deterministic replay substitutes a recording stub. Run the
-headless replay against the pinned binary:
+deterministic replay substitutes a recording stub. The headless replay
+command exercises the historical #77 baseline driver pinned to OpenCode
+1.18.30 until #77 re-runs it on v2:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 OPENCODE_BIN=/path/to/opencode-1.18.30/bin/opencode \

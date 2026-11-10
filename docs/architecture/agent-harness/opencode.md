@@ -47,7 +47,9 @@ recorded gap.
 ## OpenCode v2 requirement
 
 Every repository-managed OpenCode invocation installs or selects v2 and
-rejects v1.x. Generic mentions of "OpenCode" as the first Drafting
+rejects v1.x, with the exception of the historical #77 Drafting Table
+fixture driver (`tests/drafting-table/replay.py`) until issue #77 re-runs
+and ports it to v2. Generic mentions of "OpenCode" as the first Drafting
 Table harness are not version pins.
 
 | Touch point | Kind | Disposition |
@@ -58,12 +60,16 @@ Table harness are not version pins.
 | This binding and the adapter contract | Spec | Designed against OpenCode 2.0.28; 1.18.30 notes are historical |
 | `docs/architecture.md` strawman, overview, components, UX | Spec | Name OpenCode as the first harness; not install paths |
 | `eval/eliciting-requirements/baselines/v1/` and `/eval-run --run-id v2` | Eval | Baseline and run identifiers, not OpenCode versions |
-| Binding files under `.opencode/` | Install (issue #77) | Project-scope v2 layout; no repository-managed installer yet |
+| Binding files under `.opencode/` | Install (issue #77) | Project-scope v2 layout, but the checked-in `.opencode/plugins/protobot-guard.js` remains the v1 named export with `chat.params` until #77 updates the replay harness; no repository-managed installer yet |
+| `tests/drafting-table/replay.py` | Executable | Historical #77 fixture driver; still pins 1.18.30 and v1 CLI flags until #77 ports it to v2; non-operative for v2 |
+| `tests/drafting-table/README.md` | Doc | Historical #77 fixture instructions; exercises the 1.18.30 baseline driver until #77 re-runs on v2; non-operative for v2 |
+| `docs/architecture/fixtures/drafting-table-opencode-golden.jsonl` | Fixture | Recorded #77 golden run (`opencode_version: 1.18.30`); historical baseline, non-operative for v2 |
 
 There is no CI job that installs OpenCode. A setup or test that consumes
-an external binary must run the wrapper (or the same version check)
-before use. Install v2 with `npm i -g @opencode/cli` or another v2
-installer from the [OpenCode repository](https://github.com/anomalyco/opencode).
+an external binary (outside the historical #77 replay test suite) must run
+the wrapper (or the same version check) before use. Install v2 with
+`npm i -g @opencode/cli` or another v2 installer from the
+[OpenCode repository](https://github.com/anomalyco/opencode).
 
 ---
 
@@ -317,17 +323,26 @@ record ([Traces](adapter-contract.md#traces)).
 
 `.opencode/plugins/protobot-guard.js` connects OpenCode to the shared
 [guard](adapter-contract.md#the-guard) (H8). OpenCode has no
-`PreToolUse` command hook, so the shim does the translation. OpenCode
-v2 loads a local plugin as a default export with an `id` and a `setup`
-(or `effect`) function; a v1 `export const Plugin = async (ctx) =>
-({ "tool.execute.before": … })` module is not a valid v2 plugin.
+`PreToolUse` command hook, so the shim does the translation.
+
+Issue #77 targets OpenCode v2's plugin contract: OpenCode v2 loads a
+local plugin as a default export with an `id` and a `setup` (or `effect`)
+function; a v1 module such as
+`export const Plugin = async (ctx) => ({ "tool.execute.before": … })`
+is not a valid v2 plugin. Pending #77's test replay harness update,
+the checked-in shim in `.opencode/plugins/protobot-guard.js` remains the v1
+named export (`export const ProtoBotGuard = ...`) using `chat.params` and
+`tool.execute.before`.
+
+The v2 target design:
 
 1. **Reads the role from the hook event.** OpenCode v2's
    `tool.execute.before` event names `agent`, `tool`, `sessionID`,
    `messageID`, `id`, and `input`. `drafting-table` is the Drafting
-   Table role; every other agent is `other`. Historically, OpenCode
-   1.18.30 did not put the agent on this hook, and the shim used
-   `chat.params` instead; that is not the v2 contract.
+   Table role; every other agent is `other`. Historically (and in the
+   checked-in shim pending #77), OpenCode 1.18.30 did not put the agent
+   on this hook, and the shim used `chat.params` instead; that is not the
+   v2 contract.
 2. **Builds the guard input.** For each tool call it writes the
    `PreToolUse` JSON — `hook_event_name`, `session_id`, `cwd`,
    `tool_name`, and `tool_input` from the call's arguments — and runs
