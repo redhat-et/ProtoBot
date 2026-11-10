@@ -111,7 +111,9 @@ run_with_bwrap_stub() {
 
 WS="${WORKDIR}/workspace"
 BIN_V1="${WS}/bin-v1"
+BIN_V1_BANNER="${WS}/bin-v1-banner"
 BIN_V2="${WS}/bin-v2"
+BIN_V2_BANNER="${WS}/bin-v2-banner"
 BIN_V3="${WS}/bin-v3"
 BIN_NOISY="${WS}/bin-noisy"
 BIN_BAD="${WS}/bin-bad"
@@ -120,8 +122,9 @@ BIN_BWRAP="${WS}/bin-bwrap"
 LOG="${WS}/v2-args.log"
 BWRAP_LOG="${WS}/bwrap.log"
 
-mkdir -p "${BIN_V1}" "${BIN_V2}" "${BIN_V3}" "${BIN_NOISY}" "${BIN_BAD}" \
-  "${BIN_NONE}" "${BIN_BWRAP}" "${WS}" "${WORKDIR}/home"
+mkdir -p "${BIN_V1}" "${BIN_V1_BANNER}" "${BIN_V2}" "${BIN_V2_BANNER}" \
+  "${BIN_V3}" "${BIN_NOISY}" "${BIN_BAD}" "${BIN_NONE}" "${BIN_BWRAP}" \
+  "${WS}" "${WORKDIR}/home"
 make_workspace "${WS}"
 
 write_exec "${BIN_V1}/opencode" <<'MOCK'
@@ -134,10 +137,31 @@ echo "v1 binary should not be invoked beyond --version" >&2
 exit 90
 MOCK
 
+write_exec "${BIN_V1_BANNER}/opencode" <<'MOCK'
+#!/bin/sh
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "opencode 1.18.30 (protocol 2.0.0)"
+  exit 0
+fi
+echo "v1 binary should not be invoked beyond --version" >&2
+exit 90
+MOCK
+
 write_exec "${BIN_V2}/opencode" <<'MOCK'
 #!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
   echo "2.0.28"
+  exit 0
+fi
+printf "%s\n" "PWD=${PWD}" > "${OPENCODE_MOCK_LOG}"
+printf "%s\n" "$@" >> "${OPENCODE_MOCK_LOG}"
+exit 0
+MOCK
+
+write_exec "${BIN_V2_BANNER}/opencode" <<'MOCK'
+#!/bin/sh
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "opencode 2.0.28 (protocol 3.0.0)"
   exit 0
 fi
 printf "%s\n" "PWD=${PWD}" > "${OPENCODE_MOCK_LOG}"
@@ -233,6 +257,19 @@ fi
 assert_contains "v1 message names 1.18.30" "${out}" "1.18.30"
 assert_contains "v1 message requires v2" "${out}" "rejects v1.x"
 
+echo "=== v1 banner with 2.0.0 token ==="
+set +e
+out="$(run_without_bwrap "${BIN_V1_BANNER}" "${WS}" "provider/model" "eliciting-requirements" 2>&1)"
+rc=$?
+set -e
+if [[ "${rc}" -ne 0 ]]; then
+  pass "v1 banner exits non-zero"
+else
+  fail "v1 banner exited 0"
+fi
+assert_contains "v1 banner names 1.18.30" "${out}" "1.18.30"
+assert_contains "v1 banner requires v2" "${out}" "rejects v1.x"
+
 echo "=== unparseable version ==="
 set +e
 out="$(run_without_bwrap "${BIN_BAD}" "${WS}" "provider/model" "eliciting-requirements" 2>&1)"
@@ -278,6 +315,28 @@ if [[ -f "${LOG}" ]]; then
   assert_contains "noisy version stream runs v2" "${log}" "PWD=${WS}"
 else
   fail "noisy version mock did not write argv log"
+fi
+
+echo "=== v2 banner with later non-2 semver ==="
+rm -f "${LOG}"
+make_workspace "${WS}"
+export OPENCODE_MOCK_LOG="${LOG}"
+set +e
+out="$(run_without_bwrap "${BIN_V2_BANNER}" "${WS}" "provider/model" "eliciting-requirements" "the prompt" 2>&1)"
+rc=$?
+set -e
+if [[ "${rc}" -eq 0 ]]; then
+  pass "v2 banner exits 0"
+else
+  fail "v2 banner exited ${rc}"
+  echo "  output:"
+  indent "${out}"
+fi
+if [[ -f "${LOG}" ]]; then
+  log="$(cat "${LOG}")"
+  assert_contains "v2 banner runs v2" "${log}" "PWD=${WS}"
+else
+  fail "v2 banner mock did not write argv log"
 fi
 
 echo "=== v2 binary CLI flags and cwd (fallback without bwrap) ==="

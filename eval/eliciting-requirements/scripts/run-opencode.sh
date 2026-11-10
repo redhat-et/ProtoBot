@@ -17,7 +17,7 @@ require_opencode_v2() {
     exit 1
   fi
 
-  local raw_version_text version_text version_string="" major=""
+  local raw_version_text version_string="" major=""
   raw_version_text="$(opencode --version 2>&1)" || {
     printf '%s\n' \
       "error: opencode --version failed." \
@@ -26,12 +26,26 @@ require_opencode_v2() {
     exit 1
   }
 
-  version_text="${raw_version_text}"
-  while [[ "${version_text}" =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; do
-    version_string="${BASH_REMATCH[0]}"
-    major="${BASH_REMATCH[1]}"
-    version_text="${version_text#*"${version_string}"}"
-  done
+  local line
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" =~ [oO]pencode ]] && [[ "${line}" =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+      version_string="${BASH_REMATCH[0]}"
+      major="${BASH_REMATCH[1]}"
+      break
+    fi
+  done <<< "${raw_version_text}"
+
+  if [[ -z "${version_string}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      if [[ "${line}" =~ ^[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}|\[[a-zA-Z]+\]|(info|debug|warn|warning|error|trace|notice):) ]]; then
+        continue
+      fi
+      if [[ "${line}" =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+        version_string="${BASH_REMATCH[0]}"
+        major="${BASH_REMATCH[1]}"
+      fi
+    done <<< "${raw_version_text}"
+  fi
 
   if [[ -z "${version_string}" ]]; then
     printf '%s\n' \
