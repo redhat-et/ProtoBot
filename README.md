@@ -117,10 +117,10 @@ for indirect governed writes.
 
 The OpenCode binding (`opencode.json`, `.opencode/`, the shared
 `.agents/drafting-table.yaml` manifest, and the `drafting-specifications`
-session skill) targets OpenCode 1.18.30. The `wms` MCP entry in
-`opencode.json` is a disabled placeholder (`enabled: false`) until a
-production WMS Adapter MCP server exists; the deterministic replay
-substitutes a recording stub. Run the
+session skill) targets OpenCode v2 (designed against OpenCode 2.0.28).
+The `wms` MCP entry in `opencode.json` is a disabled placeholder
+(`enabled: false`) until a production WMS Adapter MCP server exists; the
+deterministic replay substitutes a recording stub. Run the
 headless replay against the pinned binary:
 
 ```sh
