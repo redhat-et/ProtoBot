@@ -7,9 +7,9 @@
 - [Context](#context)
 - [Decision](#decision)
 - [Consequences](#consequences)
-  - [Hard Ordering Constraint](#hard-ordering-constraint)
-  - [Removal Sequence](#removal-sequence)
-  - [Artifact Supersession](#artifact-supersession)
+  - [Hard ordering constraint](#hard-ordering-constraint)
+  - [Removal sequence](#removal-sequence)
+  - [Artifact supersession](#artifact-supersession)
   - [Risks](#risks)
 - [Related Documents](#related-documents)
 
@@ -32,8 +32,11 @@ ProtoBot adopts V2 as the target design and builds it across four milestones:
 - M3: Coordinator composition
 - M4: Pilot and evaluation
 
-The V2 validator is a new Go module. Developers will delete `ears-manager`,
-rather than rework it.
+These four milestones replace the existing `Drafting Table MVP` and `Fullsend
+Job Site MVP` milestones, which close when the plan is applied.
+
+The V2 validator is a new Go module. The project deletes `ears-manager` rather
+than reworking it.
 
 Removal of V1 components ships as a staged sequence of small pull requests (R1
 through R7). The Consequences section lists these pull requests.
@@ -49,7 +52,7 @@ The project reduces `docs/architecture/agent-harness/` to the OpenCode binding
 only.
 
 `ProtoBotV2.md` will become an appendix in the root `Architecture.md`.
-Developers will delete the design document from `docs/architecture/` only after
+The project deletes the design document from `docs/architecture/` only after
 that appendix lands.
 
 This decision extends the path taxonomy in Appendix A of `ProtoBotV2.md`.
@@ -62,7 +65,7 @@ removal pull request that supersedes each one merges.
 
 ## Consequences
 
-### Hard Ordering Constraint
+### Hard ordering constraint
 
 The new validator must pass on `spec/` and run in CI before developers delete
 `ears-manager` or `.protobot/`.
@@ -73,7 +76,11 @@ removal of a registered artifact through any registry edit. CI requires the new
 validator to gate pull requests before developers delete V1 verification
 tooling.
 
-### Removal Sequence
+R2 follows R1. The registered artifacts cannot move while the artifact
+registry exists. R1 also precedes R3, so no surviving instruction points
+at deleted tooling.
+
+### Removal sequence
 
 | Pull Request | Target Components | Description |
 | --- | --- | --- |
@@ -85,7 +92,7 @@ tooling.
 | R6 | `docs/architecture/` | Retire superseded V1 architecture specification files |
 | R7 | `eval/corpus/` | Delete the V1 evaluation corpus |
 
-### Artifact Supersession
+### Artifact supersession
 
 | V1 Artifact | Removal PR | Replacement |
 | --- | --- | --- |
@@ -99,7 +106,7 @@ tooling.
 | `wms/` module | R4 | GitHub Issues and repository-owned coordinator |
 | `source-control-manager/` module | R5 | Native Git and GitHub Actions |
 | V1 specification files in `docs/architecture/` | R6 | Root `Architecture.md` with V2 appendix |
-| `eval/corpus/` | R7 | Gherkin requirement feature tags and evidence report |
+| `eval/corpus/` | R7 | Deferred beyond the V2 MVP; see issue #346. |
 
 ### Risks
 
