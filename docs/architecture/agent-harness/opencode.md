@@ -415,7 +415,7 @@ binding cannot know in advance is hidden too.
 | --- | --- |
 | `/drafting-table [intent]` in a running session | The normal route. The command prompt runs on the `drafting-table` agent. |
 | Selecting `drafting-table` with Tab | The same agent without the start prompt; its first turn loads the session skill |
-| `opencode run --standalone --agent drafting-table --format json "/drafting-table"` | A headless session; the fixture uses it. The message is the `/drafting-table` command; v2 `run` has no `--command` flag. `--standalone` uses a private server instead of the v2 background service. |
+| `opencode run --standalone --agent drafting-table --format json "/drafting-table"` | A headless session; this is the v2 headless entry issue #77 should use. The message is the `/drafting-table` command; v2 `run` has no `--command` flag. `--standalone` uses a private server instead of the v2 background service; the checked-in historical driver still uses `--command` without `--standalone` until that port. |
 
 Later turns must also run on `drafting-table`. A turn on another agent
 has no governed tools, and the guard refuses them.
@@ -522,8 +522,9 @@ against OpenCode 2.0.28 source; it did not re-run the stub model.
 7. An error thrown in the `tool.execute.before` plugin hook blocks the
    call, and its text reaches the model and the session record. On
    1.18.30 the `chat.params` hook carried the agent name. OpenCode v2
-   puts `agent` on the `tool.execute.before` event, so the shim does
-   not use `chat.params`.
+   puts `agent` on the `tool.execute.before` event, so the target shim
+   should not use `chat.params`; the checked-in shim still uses
+   `chat.params` pending #77.
 8. Session export writes the session record as JSON with the agent,
    the model and provider, the OpenCode version, and every tool call.
    `--sanitize` redacts message text, tool arguments, and tool results,
