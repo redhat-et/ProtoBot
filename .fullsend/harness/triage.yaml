@@ -3,4 +3,4 @@ base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.45.0/harness/tria
 
 env:
     runner:
-        TRIAGE_AUTO_CODE: "on"
+        TRIAGE_AUTO_CODE: "off"
