@@ -116,6 +116,8 @@ BIN_V2="${WS}/bin-v2"
 BIN_V2_BANNER="${WS}/bin-v2-banner"
 BIN_V3="${WS}/bin-v3"
 BIN_NOISY="${WS}/bin-noisy"
+BIN_NOISY_PLUGIN="${WS}/bin-noisy-plugin"
+BIN_NOISY_PLUGIN_STDOUT="${WS}/bin-noisy-plugin-stdout"
 BIN_BAD="${WS}/bin-bad"
 BIN_NONE="${WS}/bin-none"
 BIN_BWRAP="${WS}/bin-bwrap"
@@ -123,7 +125,8 @@ LOG="${WS}/v2-args.log"
 BWRAP_LOG="${WS}/bwrap.log"
 
 mkdir -p "${BIN_V1}" "${BIN_V1_BANNER}" "${BIN_V2}" "${BIN_V2_BANNER}" \
-  "${BIN_V3}" "${BIN_NOISY}" "${BIN_BAD}" "${BIN_NONE}" "${BIN_BWRAP}" \
+  "${BIN_V3}" "${BIN_NOISY}" "${BIN_NOISY_PLUGIN}" "${BIN_NOISY_PLUGIN_STDOUT}" \
+  "${BIN_BAD}" "${BIN_NONE}" "${BIN_BWRAP}" \
   "${WS}" "${WORKDIR}/home"
 make_workspace "${WS}"
 
@@ -183,6 +186,30 @@ write_exec "${BIN_NOISY}/opencode" <<'MOCK'
 #!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
   echo "2026-10-13 12:00:00 [info] loaded dependency 0.9.1" >&2
+  echo "opencode 2.0.28"
+  exit 0
+fi
+printf "%s\n" "PWD=${PWD}" > "${OPENCODE_MOCK_LOG}"
+printf "%s\n" "$@" >> "${OPENCODE_MOCK_LOG}"
+exit 0
+MOCK
+
+write_exec "${BIN_NOISY_PLUGIN}/opencode" <<'MOCK'
+#!/bin/sh
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "[info] loaded opencode plugin 0.9.1" >&2
+  echo "opencode 2.0.28"
+  exit 0
+fi
+printf "%s\n" "PWD=${PWD}" > "${OPENCODE_MOCK_LOG}"
+printf "%s\n" "$@" >> "${OPENCODE_MOCK_LOG}"
+exit 0
+MOCK
+
+write_exec "${BIN_NOISY_PLUGIN_STDOUT}/opencode" <<'MOCK'
+#!/bin/sh
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "[info] loaded opencode plugin 0.9.1"
   echo "opencode 2.0.28"
   exit 0
 fi
@@ -315,6 +342,50 @@ if [[ -f "${LOG}" ]]; then
   assert_contains "noisy version stream runs v2" "${log}" "PWD=${WS}"
 else
   fail "noisy version mock did not write argv log"
+fi
+
+echo "=== noisy version stream with opencode plugin diagnostic (stderr) ==="
+rm -f "${LOG}"
+make_workspace "${WS}"
+export OPENCODE_MOCK_LOG="${LOG}"
+set +e
+out="$(run_without_bwrap "${BIN_NOISY_PLUGIN}" "${WS}" "provider/model" "eliciting-requirements" "the prompt" 2>&1)"
+rc=$?
+set -e
+if [[ "${rc}" -eq 0 ]]; then
+  pass "noisy version stream with plugin diagnostic (stderr) exits 0"
+else
+  fail "noisy version stream with plugin diagnostic (stderr) exited ${rc}"
+  echo "  output:"
+  indent "${out}"
+fi
+if [[ -f "${LOG}" ]]; then
+  log="$(cat "${LOG}")"
+  assert_contains "noisy version stream with plugin diagnostic (stderr) runs v2" "${log}" "PWD=${WS}"
+else
+  fail "noisy version plugin mock did not write argv log"
+fi
+
+echo "=== noisy version stream with opencode plugin diagnostic (stdout) ==="
+rm -f "${LOG}"
+make_workspace "${WS}"
+export OPENCODE_MOCK_LOG="${LOG}"
+set +e
+out="$(run_without_bwrap "${BIN_NOISY_PLUGIN_STDOUT}" "${WS}" "provider/model" "eliciting-requirements" "the prompt" 2>&1)"
+rc=$?
+set -e
+if [[ "${rc}" -eq 0 ]]; then
+  pass "noisy version stream with plugin diagnostic (stdout) exits 0"
+else
+  fail "noisy version stream with plugin diagnostic (stdout) exited ${rc}"
+  echo "  output:"
+  indent "${out}"
+fi
+if [[ -f "${LOG}" ]]; then
+  log="$(cat "${LOG}")"
+  assert_contains "noisy version stream with plugin diagnostic (stdout) runs v2" "${log}" "PWD=${WS}"
+else
+  fail "noisy version plugin stdout mock did not write argv log"
 fi
 
 echo "=== v2 banner with later non-2 semver ==="

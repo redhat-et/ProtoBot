@@ -28,9 +28,12 @@ require_opencode_v2() {
 
   local line
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    if [[ "${line}" =~ [oO]pencode ]] && [[ "${line}" =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
-      version_string="${BASH_REMATCH[0]}"
-      major="${BASH_REMATCH[1]}"
+    if [[ "${line}" =~ ^[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}|\[[a-zA-Z]+\]|(info|debug|warn|warning|error|trace|notice):) ]]; then
+      continue
+    fi
+    if [[ "${line}" =~ (^|[^a-zA-Z0-9_])[oO]pen[cC]ode[^0-9a-zA-Z]*v?(([0-9]+)\.[0-9]+\.[0-9]+) ]]; then
+      version_string="${BASH_REMATCH[2]}"
+      major="${BASH_REMATCH[3]}"
       break
     fi
   done <<< "${raw_version_text}"
