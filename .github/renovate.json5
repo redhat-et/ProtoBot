@@ -30,20 +30,6 @@
       "datasourceTemplate": "pypi",
       "versioningTemplate": "pep440",
     },
-    {
-      // Track fullsend-ai/agents version pins in harness base: URLs.
-      // SHA256 hashes are updated automatically by postUpgradeTasks
-      // (scripts/renovate/update-fullsend-harness-sha.sh).
-      "customType": "regex",
-      "description": "Track fullsend-ai/agents version in harness base URLs",
-      "managerFilePatterns": [".fullsend/harness/*.yaml"],
-      "matchStrings": [
-        "base:\\s*\"https://raw\\.githubusercontent\\.com/fullsend-ai/agents/v(?<currentValue>\\d+\\.\\d+\\.\\d+)/",
-      ],
-      "depNameTemplate": "fullsend-ai/agents",
-      "datasourceTemplate": "github-releases",
-      "extractVersionTemplate": "^v(?<version>.*)$",
-    },
   ],
   // Give newly released dependencies time to receive initial security review.
   "minimumReleaseAge": "10 days",
@@ -62,27 +48,20 @@
       "automerge": true,
     },
     {
-      // After fullsend-ai/agents version bump, recompute SHA256 hashes in
-      // harness base: URLs.
-      "description": "Update fullsend harness SHA256 hashes on version bump",
-      "matchPackageNames": ["fullsend-ai/agents"],
-      "postUpgradeTasks": {
-        "commands": ["bash scripts/renovate/update-fullsend-harness-sha.sh"],
-        "fileFilters": [".fullsend/harness/*.yaml"],
-        // Per-update execution runs the hash updater for each agents upgrade,
-        // including grouped branches regardless of branch-config ordering.
-        "executionMode": "update",
-      },
-    },
-    {
-      // Group related Fullsend and agent updates without automerging them.
-      "description": "Group Fullsend and agents updates",
+      // Fullsend upgrades span workflow shims, harness overlays, and
+      // SHA-256 pins and must stay in lockstep. Maintainer direction on
+      // PR #305 is that these upgrades will be handled via an agent
+      // skill rather than Renovate. Disabling the group stops dashboard
+      // listings and rebase cascades; other GitHub Actions remain
+      // managed.
+      "description": "Disable Fullsend and agents updates",
       "matchPackageNames": [
         "fullsend-ai/fullsend",
         "fullsend-ai/agents",
       ],
       "groupName": "fullsend",
       "automerge": false,
+      "enabled": false,
     },
     {
       // Group GitHub Actions updates to reduce CI churn, merge queue
