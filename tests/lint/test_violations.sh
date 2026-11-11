@@ -23,6 +23,9 @@ CREATED_FILES=()
 STAGED_FILES=()
 AGENTS_FILE="${REPO_ROOT}/AGENTS.md"
 AGENTS_BACKUP=""
+BASELINE_FILE="${REPO_ROOT}/.skillsaw-baseline.json"
+BASELINE_BACKUP=""
+RATCHET="${REPO_ROOT}/scripts/check_baseline_ratchet.py"
 
 restore_agents_md() {
     if [[ -n "${AGENTS_BACKUP}" ]] && [[ -f "${AGENTS_BACKUP}" ]]; then
@@ -32,8 +35,17 @@ restore_agents_md() {
     fi
 }
 
+restore_baseline() {
+    if [[ -n "${BASELINE_BACKUP}" ]] && [[ -f "${BASELINE_BACKUP}" ]]; then
+        cp "${BASELINE_BACKUP}" "${BASELINE_FILE}"
+        rm -f "${BASELINE_BACKUP}"
+        BASELINE_BACKUP=""
+    fi
+}
+
 cleanup() {
     restore_agents_md
+    restore_baseline
     for f in "${STAGED_FILES[@]}"; do
         git -C "${REPO_ROOT}" restore --staged -- "${f}" 2>/dev/null || true
     done
@@ -455,6 +467,134 @@ elif [[ "${lint_bloat_rc}" -ne 0 ]] \
 else
     echo "FAIL  agents-md-budget-overflow: expected skillsaw context-budget failure (exit ${lint_bloat_rc})"
     echo "${lint_bloat_output}" | tail -12 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+
+# ── Baseline ceiling ratchet vs base branch ────────────────
+
+echo ""
+echo "── Baseline ceiling ratchet ────────────────────────────"
+
+# Resolve a local base ref. Prefer origin/main, then main, matching
+# the checker's default candidate list without requiring network.
+ratchet_base_ref=""
+if git -C "${REPO_ROOT}" rev-parse --verify --quiet 'origin/main^{commit}' >/dev/null; then
+    ratchet_base_ref="origin/main"
+elif git -C "${REPO_ROOT}" rev-parse --verify --quiet 'main^{commit}' >/dev/null; then
+    ratchet_base_ref="main"
+fi
+
+baseline_adjust_ceiling() {
+    local new_value="$1"
+    python3 - "${BASELINE_FILE}" "${new_value}" <<'PY'
+import json, sys
+
+path, new_value = sys.argv[1], int(sys.argv[2])
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+for entry in data.get("violations", []):
+    if (
+        entry.get("rule_id") == "context-budget"
+        and entry.get("file_path") == "AGENTS.md"
+        and entry.get("baseline_mode") == "ceiling"
+    ):
+        print(entry["value"])
+        entry["value"] = new_value
+        break
+else:
+    sys.exit("missing AGENTS.md context-budget ceiling")
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, ensure_ascii=False)
+    handle.write("\n")
+PY
+}
+
+if [[ -z "${ratchet_base_ref}" ]]; then
+    echo "SKIP  baseline-ratchet-increase: no origin/main or main ref"
+    SKIPPED=$((SKIPPED + 1))
+    echo "SKIP  baseline-ratchet-decrease: no origin/main or main ref"
+    SKIPPED=$((SKIPPED + 1))
+    echo "SKIP  baseline-ratchet-unchanged: no origin/main or main ref"
+    SKIPPED=$((SKIPPED + 1))
+else
+    BASELINE_BACKUP="$(mktemp)"
+    cp "${BASELINE_FILE}" "${BASELINE_BACKUP}"
+    original_ceiling="$(python3 - "${BASELINE_FILE}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+for entry in data.get("violations", []):
+    if (
+        entry.get("rule_id") == "context-budget"
+        and entry.get("file_path") == "AGENTS.md"
+        and entry.get("baseline_mode") == "ceiling"
+    ):
+        print(entry["value"])
+        break
+else:
+    sys.exit("missing AGENTS.md context-budget ceiling")
+PY
+)"
+
+    bumped_ceiling=$((original_ceiling + 1))
+    baseline_adjust_ceiling "${bumped_ceiling}" >/dev/null
+    lint_bump_rc=0
+    lint_bump_output="$(python3 "${LINT}" --files .skillsaw-baseline.json 2>&1)" || lint_bump_rc=$?
+    # shellcheck disable=SC2001  # regex substitution requires sed
+    lint_bump_clean="$(echo "${lint_bump_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+    restore_baseline
+
+    if [[ "${lint_bump_rc}" -ne 0 ]] \
+        && echo "${lint_bump_clean}" | grep -qE "✗ baseline-ratchet( |$)" \
+        && echo "${lint_bump_clean}" | grep -qF "ceiling for AGENTS.md increased from ${original_ceiling} to ${bumped_ceiling}"; then
+        echo "PASS  baseline-ratchet-increase: ceiling bump fails vs ${ratchet_base_ref}"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL  baseline-ratchet-increase: expected baseline-ratchet failure (exit ${lint_bump_rc})"
+        echo "${lint_bump_output}" | tail -12 | sed 's/^/    /'
+        FAIL=$((FAIL + 1))
+    fi
+
+    BASELINE_BACKUP="$(mktemp)"
+    cp "${BASELINE_FILE}" "${BASELINE_BACKUP}"
+    lowered_ceiling=$((original_ceiling - 1))
+    baseline_adjust_ceiling "${lowered_ceiling}" >/dev/null
+    decrease_rc=0
+    decrease_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || decrease_rc=$?
+    restore_baseline
+
+    if [[ "${decrease_rc}" -eq 0 ]] && echo "${decrease_output}" | grep -qF "none increased"; then
+        echo "PASS  baseline-ratchet-decrease: lowered ceiling passes vs ${ratchet_base_ref}"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL  baseline-ratchet-decrease: expected exit 0 (exit ${decrease_rc})"
+        echo "${decrease_output}" | tail -8 | sed 's/^/    /'
+        FAIL=$((FAIL + 1))
+    fi
+
+    unchanged_rc=0
+    unchanged_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || unchanged_rc=$?
+    if [[ "${unchanged_rc}" -eq 0 ]] && echo "${unchanged_output}" | grep -qF "none increased"; then
+        echo "PASS  baseline-ratchet-unchanged: matching ceiling passes vs ${ratchet_base_ref}"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL  baseline-ratchet-unchanged: expected exit 0 (exit ${unchanged_rc})"
+        echo "${unchanged_output}" | tail -8 | sed 's/^/    /'
+        FAIL=$((FAIL + 1))
+    fi
+fi
+
+lint_ratchet_rc=0
+lint_ratchet_output="$(python3 "${LINT}" --files .skillsaw-baseline.json 2>&1)" || lint_ratchet_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_ratchet_clean="$(echo "${lint_ratchet_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+if [[ "${lint_ratchet_rc}" -eq 0 ]] \
+    && echo "${lint_ratchet_clean}" | grep -qE "✓ baseline-ratchet( |$)"; then
+    echo "PASS  baseline-ratchet-wiring: lint.py runs baseline-ratchet"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  baseline-ratchet-wiring: baseline-ratchet did not pass (exit ${lint_ratchet_rc})"
+    echo "${lint_ratchet_output}" | tail -8 | sed 's/^/    /'
     FAIL=$((FAIL + 1))
 fi
 

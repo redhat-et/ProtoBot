@@ -123,8 +123,9 @@ repos:
     hooks:
       - id: renovate-config-validator
 
-  # Offline Go checks (gofmt, go vet) so sandboxed agents catch
-  # formatting and vet errors without network hook repositories.
+  # Offline local checks so sandboxed agents catch formatting, vet,
+  # and skillsaw baseline-ceiling ratchet errors without network hook
+  # repositories.
   - repo: local
     hooks:
       - id: gofmt
@@ -149,3 +150,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^\.fullsend/harness/[^/]+\.yaml$
+      - id: baseline-ratchet
+        name: baseline-ratchet
+        entry: python3 scripts/check_baseline_ratchet.py
+        language: system
+        pass_filenames: false
+        files: ^\.skillsaw-baseline\.json$

@@ -485,7 +485,7 @@ _REGISTRY: dict[str, dict[str, Any]] = {
             },
         },
     },
-    # ── Local: gofmt, go vet ──────────────────────────────
+    # ── Local: gofmt, go vet, baseline ratchet ────────────
     "local": {
         "installer": "system",
         "hooks": {
@@ -516,6 +516,12 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "fixed_args": ["scripts/check_harness_integrity.py"],
                 "pass_filenames": False,
                 "default_files": r"^\.fullsend/harness/[^/]+\.yaml$",
+            },
+            "baseline-ratchet": {
+                "cmd": "python3",
+                "fixed_args": ["scripts/check_baseline_ratchet.py"],
+                "pass_filenames": False,
+                "default_files": r"^\.skillsaw-baseline\.json$",
             },
         },
     },
