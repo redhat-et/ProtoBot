@@ -7,6 +7,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
@@ -218,10 +219,52 @@ class GitHubSourceTests(unittest.TestCase):
         """Treat network failures as a skip rather than a hard error."""
         with patch.object(
             checker.urllib.request,
-            "urlopen",
-            side_effect=checker.urllib.error.URLError("offline"),
-        ):
+            "build_opener",
+        ) as mock_build_opener:
+            mock_opener = mock_build_opener.return_value
+            mock_opener.open.side_effect = checker.urllib.error.URLError("offline")
             self.assertIsNone(checker.fetch_baseline_http("redhat-et/ProtoBot", "main"))
+
+    def test_fetch_baseline_http_uses_no_redirect_handler(self) -> None:
+        """Use _NoRedirectHandler in fetch_baseline_http to prevent redirects."""
+        with patch.object(
+            checker.urllib.request,
+            "build_opener",
+        ) as mock_build_opener:
+            mock_opener = mock_build_opener.return_value
+            mock_opener.open.side_effect = checker.urllib.error.URLError("offline")
+            checker.fetch_baseline_http("redhat-et/ProtoBot", "main")
+            self.assertTrue(mock_build_opener.called)
+            self.assertIsInstance(
+                mock_build_opener.call_args[0][0],
+                checker._NoRedirectHandler,
+            )
+
+    def test_fetch_baseline_http_returns_none_on_redirect(self) -> None:
+        """Return None when HTTP request encounters a redirect."""
+        with patch.object(
+            checker.urllib.request,
+            "build_opener",
+        ) as mock_build_opener:
+            mock_opener = mock_build_opener.return_value
+            mock_opener.open.side_effect = checker._UnexpectedRedirectError("redirect")
+            self.assertIsNone(checker.fetch_baseline_http("redhat-et/ProtoBot", "main"))
+
+
+class NoRedirectHandlerTests(unittest.TestCase):
+    def test_redirect_request_raises_unexpected_redirect(self) -> None:
+        """Reject HTTP redirects with _UnexpectedRedirectError."""
+        handler = checker._NoRedirectHandler()
+        request = urllib.request.Request("https://raw.githubusercontent.com/test")
+        with self.assertRaises(checker._UnexpectedRedirectError):
+            handler.redirect_request(
+                request,
+                response=object(),
+                code=302,
+                message="Found",
+                headers=object(),
+                new_url="https://evil.example.com",
+            )
 
 
 class SafeRefTests(unittest.TestCase):
@@ -271,6 +314,36 @@ class CandidateRefTests(unittest.TestCase):
                 ["upstream/main", "origin/main", "main"],
                 checker._candidate_base_refs(),
             )
+
+    def test_candidate_ref_resolving_to_head_is_skipped(self) -> None:
+        """Skip candidate refs whose commit SHA matches HEAD."""
+        head_sha = "abc1234"
+
+        def fake_commit_sha(repo_root: Path, ref: str) -> str | None:
+            if ref == "HEAD":
+                return head_sha
+            if ref == "main":
+                return head_sha
+            if ref == "origin/main":
+                return "def5678"
+            return None
+
+        with patch.object(checker, "git_commit_sha", side_effect=fake_commit_sha):
+            resolved = checker.resolve_base_ref(Path("/tmp"))
+            self.assertEqual("origin/main", resolved)
+
+    def test_all_candidate_refs_matching_head_return_none(self) -> None:
+        """Return None when all existing candidate refs equal HEAD."""
+        head_sha = "abc1234"
+
+        def fake_commit_sha(repo_root: Path, ref: str) -> str | None:
+            if ref in ("HEAD", "upstream/main", "origin/main", "main"):
+                return head_sha
+            return None
+
+        with patch.object(checker, "git_commit_sha", side_effect=fake_commit_sha):
+            resolved = checker.resolve_base_ref(Path("/tmp"))
+            self.assertIsNone(resolved)
 
 
 class CheckRepoTests(unittest.TestCase):
@@ -399,6 +472,24 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("baseline ratchet skipped", messages[0])
 
+    def test_auto_detect_skips_candidate_ref_resolving_to_head(self) -> None:
+        """Reject candidate refs whose resolved SHA equals HEAD during auto-detection."""
+        # self.root has a commit on 'main', and HEAD points to 'main'.
+        # Since 'main' equals HEAD, resolve_base_ref must reject it and return None.
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            not in {
+                "BASELINE_RATCHET_BASE_REF",
+                "GITHUB_BASE_REF",
+                "GITHUB_REPOSITORY",
+            }
+        }
+        with patch.dict(os.environ, env, clear=True):
+            resolved = checker.resolve_base_ref(self.root)
+            self.assertIsNone(resolved)
+
     def test_http_fallback_rejects_an_increase(self) -> None:
         """Fetch the base baseline over HTTP when no git ref exists."""
         other = self.root / "shallow"
@@ -431,9 +522,9 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(1, exit_code)
         self.assertIn("increased from 4000 to 4100", messages[0])
 
-    def test_http_fallback_skips_when_fetch_fails(self) -> None:
-        """Skip when git refs are missing and the HTTP fallback returns None."""
-        other = self.root / "offline"
+    def test_ci_shallow_checkout_fails_when_fetch_fails(self) -> None:
+        """Fail closed in CI when git refs are missing and HTTP fetch fails."""
+        other = self.root / "ci_offline"
         other.mkdir()
         subprocess.run(
             ["git", "init", "-b", "feature"],
@@ -452,7 +543,48 @@ class CheckRepoTests(unittest.TestCase):
             for key, value in os.environ.items()
             if key not in {"BASELINE_RATCHET_BASE_REF", "GITHUB_BASE_REF"}
         }
+        env["CI"] = "true"
         env["GITHUB_REPOSITORY"] = "redhat-et/ProtoBot"
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(checker, "fetch_baseline_http", return_value=None),
+        ):
+            exit_code, messages = checker.check_repo(other)
+
+        self.assertEqual(1, exit_code)
+        self.assertIn(
+            "could not resolve a base-branch .skillsaw-baseline.json in CI",
+            messages[0],
+        )
+
+    def test_offline_local_skips_when_no_base_source(self) -> None:
+        """Skip with warning on offline local runs where no base source exists."""
+        other = self.root / "local_offline"
+        other.mkdir()
+        subprocess.run(
+            ["git", "init", "-b", "feature"],
+            cwd=str(other),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        (other / checker.BASELINE_RELATIVE_PATH).write_text(
+            json.dumps(_baseline(_ceiling(value=4100))) + "\n",
+            encoding="utf-8",
+        )
+
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            not in {
+                "BASELINE_RATCHET_BASE_REF",
+                "GITHUB_BASE_REF",
+                "CI",
+                "GITHUB_ACTIONS",
+                "GITHUB_REPOSITORY",
+            }
+        }
         with (
             patch.dict(os.environ, env, clear=True),
             patch.object(checker, "fetch_baseline_http", return_value=None),

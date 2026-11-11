@@ -12,9 +12,9 @@ in this order: ``--base-ref``, ``BASELINE_RATCHET_BASE_REF``,
 ``GITHUB_BASE_REF`` (as ``origin/<name>`` then ``<name>``), ``upstream/main``,
 ``origin/main``, ``main``. When no candidate exists, the check fetches the
 file from GitHub (``GITHUB_REPOSITORY`` or the ``origin`` remote) so shallow
-CI checkouts still enforce the ratchet. If neither source is available, the
-check skips with a warning rather than failing the rest of ``pre-commit
-run -a``.
+CI checkouts still enforce the ratchet. In CI environments, unresolved refs or
+failed HTTP fetches cause the check to fail closed (exit 1). Offline local
+runs skip with a warning so the rest of ``pre-commit run -a`` can finish.
 """
 
 from __future__ import annotations
@@ -50,6 +50,26 @@ class BaselineRatchetError(ValueError):
     """The working-tree or base baseline cannot be compared."""
 
 
+class _UnexpectedRedirectError(ValueError):
+    """A redirect was rejected while fetching the base baseline."""
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects before urllib can request their target URLs."""
+
+    def redirect_request(
+        self,
+        request: urllib.request.Request,
+        response: object,
+        code: int,
+        message: str,
+        headers: object,
+        new_url: str,
+    ) -> urllib.request.Request | None:
+        """Stop urllib from creating a request for a redirected URL."""
+        raise _UnexpectedRedirectError("redirect rejected while fetching baseline URL")
+
+
 def is_safe_ref(ref: str) -> bool:
     """Return True when *ref* is safe to pass to ``git show`` / ``rev-parse``."""
     return bool(ref) and _SAFE_REF.fullmatch(ref) is not None
@@ -66,12 +86,19 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def git_commit_sha(repo_root: Path, ref: str) -> str | None:
+    """Return the commit SHA for *ref*, or ``None`` if it cannot be resolved."""
+    if not is_safe_ref(ref):
+        return None
+    result = _git(repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
 def git_ref_exists(repo_root: Path, ref: str) -> bool:
     """Return True when *ref* names a commit in *repo_root*."""
-    if not is_safe_ref(ref):
-        return False
-    result = _git(repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
-    return result.returncode == 0
+    return git_commit_sha(repo_root, ref) is not None
 
 
 def git_show_file(repo_root: Path, ref: str, path: str) -> str | None:
@@ -105,10 +132,15 @@ def _candidate_base_refs(explicit: str | None = None) -> list[str]:
 
 
 def resolve_base_ref(repo_root: Path, explicit: str | None = None) -> str | None:
-    """Return the first existing candidate ref, or ``None`` if none exist."""
+    """Return the first existing candidate ref distinct from HEAD, or ``None``."""
+    head_sha = git_commit_sha(repo_root, "HEAD")
     for ref in _candidate_base_refs(explicit):
-        if git_ref_exists(repo_root, ref):
-            return ref
+        sha = git_commit_sha(repo_root, ref)
+        if sha is None:
+            continue
+        if head_sha is not None and sha == head_sha:
+            continue
+        return ref
     return None
 
 
@@ -148,17 +180,16 @@ def raw_baseline_url(repository: str, branch: str) -> str:
 def fetch_baseline_http(repository: str, branch: str) -> str | None:
     """Fetch the baseline file from GitHub raw content.
 
-    Returns ``None`` on network, HTTP, size, or encoding errors so the
-    caller can skip rather than fail the rest of the lint run.
+    Returns ``None`` on network, HTTP, redirect, size, or encoding errors so
+    the caller can skip or fail closed depending on the environment.
     """
     url = raw_baseline_url(repository, branch)
     request = urllib.request.Request(url, method="GET")
     try:
-        with urllib.request.urlopen(
-            request, timeout=NETWORK_TIMEOUT_SECONDS
-        ) as response:
+        opener = urllib.request.build_opener(_NoRedirectHandler())
+        with opener.open(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
             content = response.read(MAX_RESPONSE_BYTES + 1)
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except (urllib.error.URLError, TimeoutError, OSError, _UnexpectedRedirectError):
         return None
     if len(content) > MAX_RESPONSE_BYTES:
         return None
@@ -306,13 +337,22 @@ def load_base_baseline(
     return source, parse_baseline(raw, source)
 
 
+def is_ci_environment() -> bool:
+    """Return True when running in a CI or automation environment."""
+    return any(
+        os.environ.get(var, "").strip()
+        for var in ("CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF", "GITHUB_REPOSITORY")
+    )
+
+
 def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[str]]:
     """Compare the working-tree baseline against the resolved base.
 
     Returns ``(exit_code, messages)``. Exit 0 with a skip warning when no
-    base source can be resolved. Exit 0 with a validation message when
-    every existing ceiling is less than or equal to its base value. Exit 1
-    on increases or unreadable input.
+    base source can be resolved outside CI. In CI, exit 1 if no base
+    source can be resolved. Exit 0 with a validation message when every
+    existing ceiling is less than or equal to its base value. Exit 1 on
+    increases or unreadable input.
     """
     try:
         head = load_working_tree_baseline(repo_root)
@@ -324,6 +364,12 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
 
     if loaded is None:
         tried = ", ".join(_candidate_base_refs())
+        if is_ci_environment():
+            error = (
+                "ERROR: baseline ratchet failed: could not resolve a "
+                f"base-branch {BASELINE_RELATIVE_PATH} in CI (tried: {tried})"
+            )
+            return 1, [error]
         warning = (
             "WARNING: baseline ratchet skipped: could not resolve a "
             f"base-branch {BASELINE_RELATIVE_PATH} (tried: {tried})"

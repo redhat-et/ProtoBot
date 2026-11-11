@@ -475,14 +475,17 @@ fi
 echo ""
 echo "── Baseline ceiling ratchet ────────────────────────────"
 
-# Resolve a local base ref. Prefer origin/main, then main, matching
-# the checker's default candidate list without requiring network.
+# Resolve a local base ref distinct from HEAD. Prefer origin/main,
+# then main, then HEAD~1, ensuring the comparison base is not HEAD.
 ratchet_base_ref=""
-if git -C "${REPO_ROOT}" rev-parse --verify --quiet 'origin/main^{commit}' >/dev/null; then
-    ratchet_base_ref="origin/main"
-elif git -C "${REPO_ROOT}" rev-parse --verify --quiet 'main^{commit}' >/dev/null; then
-    ratchet_base_ref="main"
-fi
+head_commit="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)"
+for ref_candidate in "origin/main" "main" "HEAD~1"; do
+    cand_commit="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet "${ref_candidate}^{commit}" 2>/dev/null || true)"
+    if [[ -n "${cand_commit}" ]] && [[ "${cand_commit}" != "${head_commit}" ]]; then
+        ratchet_base_ref="${ref_candidate}"
+        break
+    fi
+done
 
 baseline_adjust_ceiling() {
     local new_value="$1"
@@ -538,20 +541,17 @@ PY
 
     bumped_ceiling=$((original_ceiling + 1))
     baseline_adjust_ceiling "${bumped_ceiling}" >/dev/null
-    lint_bump_rc=0
-    lint_bump_output="$(python3 "${LINT}" --files .skillsaw-baseline.json 2>&1)" || lint_bump_rc=$?
-    # shellcheck disable=SC2001  # regex substitution requires sed
-    lint_bump_clean="$(echo "${lint_bump_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+    bump_rc=0
+    bump_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || bump_rc=$?
     restore_baseline
 
-    if [[ "${lint_bump_rc}" -ne 0 ]] \
-        && echo "${lint_bump_clean}" | grep -qE "✗ baseline-ratchet( |$)" \
-        && echo "${lint_bump_clean}" | grep -qF "ceiling for AGENTS.md increased from ${original_ceiling} to ${bumped_ceiling}"; then
+    if [[ "${bump_rc}" -ne 0 ]] \
+        && echo "${bump_output}" | grep -qF "ceiling for AGENTS.md increased from ${original_ceiling} to ${bumped_ceiling}"; then
         echo "PASS  baseline-ratchet-increase: ceiling bump fails vs ${ratchet_base_ref}"
         PASS=$((PASS + 1))
     else
-        echo "FAIL  baseline-ratchet-increase: expected baseline-ratchet failure (exit ${lint_bump_rc})"
-        echo "${lint_bump_output}" | tail -12 | sed 's/^/    /'
+        echo "FAIL  baseline-ratchet-increase: expected baseline-ratchet failure (exit ${bump_rc})"
+        echo "${bump_output}" | tail -12 | sed 's/^/    /'
         FAIL=$((FAIL + 1))
     fi
 
@@ -585,7 +585,7 @@ PY
 fi
 
 lint_ratchet_rc=0
-lint_ratchet_output="$(python3 "${LINT}" --files .skillsaw-baseline.json 2>&1)" || lint_ratchet_rc=$?
+lint_ratchet_output="$(BASELINE_RATCHET_BASE_REF="${ratchet_base_ref}" python3 "${LINT}" --files .skillsaw-baseline.json 2>&1)" || lint_ratchet_rc=$?
 # shellcheck disable=SC2001  # regex substitution requires sed
 lint_ratchet_clean="$(echo "${lint_ratchet_output}" | sed 's/\x1b\[[0-9;]*m//g')"
 if [[ "${lint_ratchet_rc}" -eq 0 ]] \
