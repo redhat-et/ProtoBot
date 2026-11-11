@@ -41,7 +41,7 @@ NETWORK_TIMEOUT_SECONDS = 10
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 # Git refs used as ``git show <ref>:<path>``. Disallow ``:`` so a ref cannot
 # smuggle a path, and reject option-like values that would be parsed as flags.
-_SAFE_REF = re.compile(r"^(?!-)[A-Za-z0-9._/@+-]+$")
+_SAFE_REF = re.compile(r"^(?!-)[A-Za-z0-9._/@+~-]+$")
 _GITHUB_REPOSITORY = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 _ORIGIN_GITHUB = re.compile(r"(?:github\.com[:/])(?P<repo>[^/]+/[^/]+?)(?:\.git)?$")
 
@@ -132,15 +132,10 @@ def _candidate_base_refs(explicit: str | None = None) -> list[str]:
 
 
 def resolve_base_ref(repo_root: Path, explicit: str | None = None) -> str | None:
-    """Return the first existing candidate ref distinct from HEAD, or ``None``."""
-    head_sha = git_commit_sha(repo_root, "HEAD")
+    """Return the first existing candidate ref, or ``None`` if none exist."""
     for ref in _candidate_base_refs(explicit):
-        sha = git_commit_sha(repo_root, ref)
-        if sha is None:
-            continue
-        if head_sha is not None and sha == head_sha:
-            continue
-        return ref
+        if git_ref_exists(repo_root, ref):
+            return ref
     return None
 
 

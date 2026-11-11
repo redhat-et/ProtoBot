@@ -475,14 +475,17 @@ fi
 echo ""
 echo "── Baseline ceiling ratchet ────────────────────────────"
 
-# Resolve a local base ref distinct from HEAD. Prefer origin/main,
-# then main, then HEAD~1, ensuring the comparison base is not HEAD.
+# Resolve a local base ref. Prefer origin/main, then main, then HEAD~1.
+# If falling back to HEAD~1, resolve it to its 40-character commit SHA.
 ratchet_base_ref=""
-head_commit="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)"
 for ref_candidate in "origin/main" "main" "HEAD~1"; do
     cand_commit="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet "${ref_candidate}^{commit}" 2>/dev/null || true)"
-    if [[ -n "${cand_commit}" ]] && [[ "${cand_commit}" != "${head_commit}" ]]; then
-        ratchet_base_ref="${ref_candidate}"
+    if [[ -n "${cand_commit}" ]]; then
+        if [[ "${ref_candidate}" == "HEAD~1" ]]; then
+            ratchet_base_ref="${cand_commit}"
+        else
+            ratchet_base_ref="${ref_candidate}"
+        fi
         break
     fi
 done
@@ -522,10 +525,16 @@ if [[ -z "${ratchet_base_ref}" ]]; then
 else
     BASELINE_BACKUP="$(mktemp)"
     cp "${BASELINE_FILE}" "${BASELINE_BACKUP}"
-    original_ceiling="$(python3 - "${BASELINE_FILE}" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    data = json.load(handle)
+    base_ceiling="$(python3 - "${REPO_ROOT}" "${ratchet_base_ref}" <<'PY'
+import json, subprocess, sys
+repo_root, ref = sys.argv[1], sys.argv[2]
+proc = subprocess.run(
+    ["git", "-C", repo_root, "show", f"{ref}:.skillsaw-baseline.json"],
+    capture_output=True,
+    text=True,
+    check=True,
+)
+data = json.loads(proc.stdout)
 for entry in data.get("violations", []):
     if (
         entry.get("rule_id") == "context-budget"
@@ -535,18 +544,18 @@ for entry in data.get("violations", []):
         print(entry["value"])
         break
 else:
-    sys.exit("missing AGENTS.md context-budget ceiling")
+    sys.exit("missing AGENTS.md context-budget ceiling in base")
 PY
 )"
 
-    bumped_ceiling=$((original_ceiling + 1))
+    bumped_ceiling=$((base_ceiling + 1))
     baseline_adjust_ceiling "${bumped_ceiling}" >/dev/null
     bump_rc=0
     bump_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || bump_rc=$?
     restore_baseline
 
     if [[ "${bump_rc}" -ne 0 ]] \
-        && echo "${bump_output}" | grep -qF "ceiling for AGENTS.md increased from ${original_ceiling} to ${bumped_ceiling}"; then
+        && echo "${bump_output}" | grep -qF "ceiling for AGENTS.md increased from ${base_ceiling} to ${bumped_ceiling}"; then
         echo "PASS  baseline-ratchet-increase: ceiling bump fails vs ${ratchet_base_ref}"
         PASS=$((PASS + 1))
     else
@@ -557,7 +566,7 @@ PY
 
     BASELINE_BACKUP="$(mktemp)"
     cp "${BASELINE_FILE}" "${BASELINE_BACKUP}"
-    lowered_ceiling=$((original_ceiling - 1))
+    lowered_ceiling=$((base_ceiling - 1))
     baseline_adjust_ceiling "${lowered_ceiling}" >/dev/null
     decrease_rc=0
     decrease_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || decrease_rc=$?

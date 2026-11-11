@@ -270,7 +270,14 @@ class NoRedirectHandlerTests(unittest.TestCase):
 class SafeRefTests(unittest.TestCase):
     def test_typical_refs_are_accepted(self) -> None:
         """Accept ordinary git ref names used as base-branch candidates."""
-        for ref in ("main", "origin/main", "upstream/main", "refs/heads/main"):
+        for ref in (
+            "main",
+            "origin/main",
+            "upstream/main",
+            "refs/heads/main",
+            "HEAD~1",
+            "origin/main~2",
+        ):
             with self.subTest(ref=ref):
                 self.assertTrue(checker.is_safe_ref(ref))
 
@@ -315,35 +322,18 @@ class CandidateRefTests(unittest.TestCase):
                 checker._candidate_base_refs(),
             )
 
-    def test_candidate_ref_resolving_to_head_is_skipped(self) -> None:
-        """Skip candidate refs whose commit SHA matches HEAD."""
+    def test_candidate_ref_resolving_to_head_is_not_skipped(self) -> None:
+        """Do not skip candidate refs whose commit SHA matches HEAD."""
         head_sha = "abc1234"
 
         def fake_commit_sha(repo_root: Path, ref: str) -> str | None:
-            if ref == "HEAD":
-                return head_sha
-            if ref == "main":
-                return head_sha
-            if ref == "origin/main":
-                return "def5678"
-            return None
-
-        with patch.object(checker, "git_commit_sha", side_effect=fake_commit_sha):
-            resolved = checker.resolve_base_ref(Path("/tmp"))
-            self.assertEqual("origin/main", resolved)
-
-    def test_all_candidate_refs_matching_head_return_none(self) -> None:
-        """Return None when all existing candidate refs equal HEAD."""
-        head_sha = "abc1234"
-
-        def fake_commit_sha(repo_root: Path, ref: str) -> str | None:
-            if ref in ("HEAD", "upstream/main", "origin/main", "main"):
+            if ref in ("HEAD", "main"):
                 return head_sha
             return None
 
         with patch.object(checker, "git_commit_sha", side_effect=fake_commit_sha):
             resolved = checker.resolve_base_ref(Path("/tmp"))
-            self.assertIsNone(resolved)
+            self.assertEqual("main", resolved)
 
 
 class CheckRepoTests(unittest.TestCase):
@@ -472,23 +462,23 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("baseline ratchet skipped", messages[0])
 
-    def test_auto_detect_skips_candidate_ref_resolving_to_head(self) -> None:
-        """Reject candidate refs whose resolved SHA equals HEAD during auto-detection."""
-        # self.root has a commit on 'main', and HEAD points to 'main'.
-        # Since 'main' equals HEAD, resolve_base_ref must reject it and return None.
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key
-            not in {
-                "BASELINE_RATCHET_BASE_REF",
-                "GITHUB_BASE_REF",
-                "GITHUB_REPOSITORY",
-            }
-        }
-        with patch.dict(os.environ, env, clear=True):
-            resolved = checker.resolve_base_ref(self.root)
-            self.assertIsNone(resolved)
+    def test_auto_detect_rejects_increase_when_head_matches_main_without_http(
+        self,
+    ) -> None:
+        """Reject working-tree ceiling increase when HEAD points to main, without HTTP fallback."""
+        self._write_baseline(_baseline(_ceiling(value=4100)))
+
+        with patch.object(
+            checker,
+            "fetch_baseline_http",
+            side_effect=AssertionError("HTTP should not be called"),
+        ):
+            exit_code, messages = checker.check_repo(self.root)
+
+        self.assertEqual(1, exit_code)
+        self.assertTrue(messages)
+        self.assertIn("increased from 4000 to 4100", messages[0])
+        self.assertIn("AGENTS.md", messages[0])
 
     def test_http_fallback_rejects_an_increase(self) -> None:
         """Fetch the base baseline over HTTP when no git ref exists."""
