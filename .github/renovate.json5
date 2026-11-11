@@ -114,6 +114,15 @@
       "pinDigests": true,
     },
     {
+      // Group pre-commit hook updates to reduce CI churn, merge queue
+      // latency, and retro agent dispatches. Exclude stbenjam/skillsaw
+      // so it stays grouped with the Skillsaw config version.
+      "description": "Group pre-commit hook updates",
+      "matchManagers": ["pre-commit"],
+      "excludePackageNames": ["stbenjam/skillsaw"],
+      "groupName": "pre-commit hooks",
+    },
+    {
       // Renovate itself releases many times per day; the config-validator
       // hook doesn't need that cadence. Limit to one update per week to
       // avoid PR/CI churn from the renovate/pre-commit-hooks stream.
