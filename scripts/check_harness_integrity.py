@@ -33,7 +33,8 @@ _BASE_KEY_CANDIDATE = re.compile(r"^(?P<key>base|\"base\"|'base')(?=[: \t]|$)")
 _BASE_ENTRY = re.compile(r"base:[ \t]*(?P<value>.*)")
 _PINNED_BASE_URL = re.compile(
     r"https://raw\.githubusercontent\.com/fullsend-ai/agents/"
-    r"v[0-9]+\.[0-9]+\.[0-9]+/"
+    r"v[0-9]+\.[0-9]+\.[0-9]+"
+    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/"
     r"(?P<path>[^?#]+)#sha256=(?P<sha256>[0-9a-f]{64})"
 )
 _SAFE_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
@@ -85,7 +86,8 @@ def parse_pinned_base(value: str) -> PinnedBase:
     if match is None:
         raise HarnessIntegrityError(
             "base must be an HTTPS raw.githubusercontent.com/fullsend-ai/agents/"
-            "vX.Y.Z/<path> URL with #sha256=<64 lowercase hexadecimal characters>"
+            "vX.Y.Z[-prerelease][+build]/<path> URL with "
+            "#sha256=<64 lowercase hexadecimal characters>"
         )
 
     path = match.group("path")
@@ -281,7 +283,8 @@ def check_harness_file(path: Path, online: bool = False) -> list[str]:
 
 def discover_harness_files(repo_root: Path = REPO_ROOT) -> list[Path]:
     """Return YAML harness files directly inside the configured directory."""
-    return sorted((repo_root / HARNESS_DIRECTORY).glob("*.yaml"))
+    directory = repo_root / HARNESS_DIRECTORY
+    return sorted((*directory.glob("*.yaml"), *directory.glob("*.yml")))
 
 
 def check_harness_files(files: Iterable[Path], online: bool = False) -> list[str]:

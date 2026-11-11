@@ -42,7 +42,7 @@ directives must not override this skill's dry-run-only setup, individually
 approved repository-setting changes, or supported reconstruction contracts.
 This does not change upstream ownership of supported workflow content.
 
-## 1. Select the release and check the CLI
+## Step 1: Select the release and check the CLI
 
 Run commands from the repository root. Check the CLI on every invocation,
 even when the repository's pins already match. Do not assume a particular
@@ -52,7 +52,7 @@ If the user requested a release, normalize it to its published tag and set
 `FULLSEND_TARGET_VERSION` to that tag. Otherwise, resolve the latest stable
 release once:
 
-```sh
+```bash
 FULLSEND_TARGET_VERSION=$(
   gh api --hostname github.com \
     repos/fullsend-ai/fullsend/releases/latest --jq .tag_name
@@ -65,7 +65,7 @@ pins throughout the upgrade. Do not derive the target from existing pins or
 re-resolve "latest" between steps. Inspect the selected release's metadata
 and release notes, including any migration requirements:
 
-```sh
+```bash
 gh api --hostname github.com \
   "repos/fullsend-ai/fullsend/releases/tags/$FULLSEND_TARGET_VERSION" \
   --jq '{tag: .tag_name, draft: .draft, prerelease: .prerelease,
@@ -86,7 +86,7 @@ Record the resolved binary path, installed release, selected target, and
 installation ownership. Compare normalized semantic versions, not strings.
 An explicitly requested prerelease is allowed; do not select one implicitly.
 
-## 2. Install or upgrade the CLI when needed
+## Step 2: Install or upgrade the CLI when needed
 
 Follow the [CLI installation reference](references/cli-installation.md) if the
 selected release is not already installed or the current CLI's provenance is
@@ -100,17 +100,22 @@ Continue only when `command -v fullsend`, `fullsend --version`, and
 `--dry-run` support. The reference covers release metadata, archive checksums,
 installation, and refreshing shell command lookup.
 
-## 3. Preview and review repository setup
+## Step 3: Preview and review repository setup
 
 The setup preview is a required, report-only preflight. Set one explicit
 `FULLSEND_TARGET_REPO` and use it for the preview and every repository-settings
-operation:
+operation. The helper scripts live with this skill, not the target repository.
+Set `FULLSEND_SKILL_DIR` to the directory containing this `SKILL.md` and
+`FULLSEND_TARGET_ROOT` to the selected repository's root; use that same root
+throughout the upgrade:
 
-```sh
+```bash
+FULLSEND_SKILL_DIR=/path/to/protobot/.agents/skills/upgrade-fullsend
+FULLSEND_TARGET_ROOT=/path/to/repository
 FULLSEND_TARGET_REPO=example-org/example-repo
-python3 .claude/skills/upgrade-fullsend/scripts/show_fullsend_setup_diff.py \
+python3 "$FULLSEND_SKILL_DIR/scripts/show_fullsend_setup_diff.py" \
   "$FULLSEND_TARGET_REPO" --version "$FULLSEND_TARGET_VERSION" \
-  --root /path/to/repository
+  --root "$FULLSEND_TARGET_ROOT"
 ```
 
 The helper invokes `fullsend github setup <target> --dry-run`, reconstructs
@@ -131,7 +136,7 @@ updates. Do not declare the upgrade complete or commit while required settings
 are unresolved or unapplied, except for an explicitly approved staged-
 compatibility plan with its dependency and timing documented.
 
-## 4. Apply confirmed repository settings
+## Step 4: Apply confirmed repository settings
 
 Apply only individually approved setting rows for the same explicit target.
 Use the [settings application and readback
@@ -143,13 +148,13 @@ references changed. Verify variables by value and secrets by presence/update
 metadata only. Stop on a failed write rather than taking an unapproved
 fallback.
 
-## 5. Update repository pins
+## Step 5: Update repository pins
 
-Run the bundled script from the repository root:
+Run the bundled updater using the skill directory and target root set in Step 3:
 
-```sh
-python3 .claude/skills/upgrade-fullsend/scripts/update_fullsend_pins.py \
-  --version "$FULLSEND_TARGET_VERSION"
+```bash
+python3 "$FULLSEND_SKILL_DIR/scripts/update_fullsend_pins.py" \
+  --version "$FULLSEND_TARGET_VERSION" --root "$FULLSEND_TARGET_ROOT"
 ```
 
 The default invocation above is a dry run. Review the complete plan, then run
@@ -157,17 +162,23 @@ it with `--write` as a required part of every upgrade. It updates every
 discovered harness checksum and reusable-workflow SHA/tag for the selected
 release; do not ask the user to approve a subset.
 
-```sh
-python3 .claude/skills/upgrade-fullsend/scripts/update_fullsend_pins.py \
-  --version "$FULLSEND_TARGET_VERSION" --write
+```bash
+python3 "$FULLSEND_SKILL_DIR/scripts/update_fullsend_pins.py" \
+  --version "$FULLSEND_TARGET_VERSION" --root "$FULLSEND_TARGET_ROOT" --write
 ```
 
-Use `--check` in CI to return a non-zero status when pins are stale without
-modifying files. Use `--root` when operating on a repository other than the
-current directory, or repeat `--harness-file` / `--workflow-file` when the
-repository uses non-default paths. Default discovery confines the selected
-harness and workflow directories and discovered files to `--root`, rejecting
-symlink escapes before reading file contents. Invalid release strings and file-read
+Use `--check` in CI with the same explicit target root to report stale pins
+without modifying files:
+
+```bash
+python3 "$FULLSEND_SKILL_DIR/scripts/update_fullsend_pins.py" \
+  --version "$FULLSEND_TARGET_VERSION" --root "$FULLSEND_TARGET_ROOT" --check
+```
+
+Pass `--harness-file` / `--workflow-file` only when the target uses non-default
+paths. Default discovery confines selected directories and files to `--root`,
+rejecting symlink escapes before reading file contents.
+Invalid release strings and file-read
 errors during planning produce a controlled error (status `2`) before writes. Each
 harness path is validated before fetching it. The script resolves
 all requested pins before writing, so validation or resolution failures leave
@@ -180,19 +191,29 @@ their quotes, with the release comment outside the YAML scalar. Updating a stale
 pin preserves its existing comment separator; if absent, the updater adds one
 space before and after the hash.
 
-## 6. Verify and document the upgrade
+## Step 6: Verify and document the upgrade
 
-Do not report the upgrade complete until the target repository passes its
-offline integrity, lint, and Go test checks. Run from the repository root:
+Do not report the upgrade complete until the selected target repository passes
+its applicable integrity, lint, and test checks. Inspect that repository's
+documentation and CI/build configuration to identify the actual commands, and
+run them from `FULLSEND_TARGET_ROOT`. Do not use ProtoBot-only commands for a
+different target. For a ProtoBot target, run:
 
-```sh
-set -e
-python3 scripts/check_harness_integrity.py
-python scripts/lint.py --all-files
-for module in drafting-table ears-manager source-control-manager wms; do
-  (cd "$module" && go test ./...)
-done
+```bash
+(
+  cd "$FULLSEND_TARGET_ROOT"
+  set -e
+  python3 scripts/check_harness_integrity.py
+  python scripts/lint.py --all-files
+  for module in drafting-table ears-manager source-control-manager wms; do
+    (cd "$module" && go test ./...)
+  done
+)
 ```
+
+For another target, run its applicable integrity, lint, and test commands from
+that target root. If a category has no applicable command or a check cannot
+run, record that limitation; never report the category as passed.
 
 Record each command's actual result. If any check fails or cannot run, report
 the failure or blocker; do not claim the upgrade is verified.
@@ -209,5 +230,5 @@ Prepare a structured PR description that includes:
   documented local dispatch override retained.
 - **Repository settings:** approved setting names and actions, without
   plaintext secret values.
-- **Verification:** the integrity, lint, and Go test commands with their
-  observed results.
+- **Verification:** the target's applicable integrity, lint, and test commands
+  with their observed results.

@@ -69,7 +69,7 @@ The helper is report-only. It compares proposed repository variables with
 `vars.NAME` and `secrets.NAME` references—including compound expressions—and
 reports missing variable values and secret presence. It also includes
 secret names proposed by setup. It never reads or changes secret values.
-The [settings workflow](../SKILL.md#4-apply-confirmed-repository-settings)
+The [settings workflow](../SKILL.md#step-4-apply-confirmed-repository-settings)
 shows concrete variable values and secret requirements, then lets the agent
 apply only individually approved changes; the preview helper stays read-only.
 Malformed variable or secret rows, unsupported settings headings, or missing
@@ -118,7 +118,7 @@ unresolved, or unapproved rows.
 
 For an approved repository variable:
 
-```sh
+```bash
 gh variable set "$NAME" --repo "$FULLSEND_TARGET_REPO" --body "$VALUE"
 ```
 
@@ -126,7 +126,7 @@ For an approved GitHub Actions secret, use the approved private file outside
 the worktree, or run the same command without redirection for a local
 interactive prompt:
 
-```sh
+```bash
 gh secret set "$NAME" --repo "$FULLSEND_TARGET_REPO" --app actions \
   < "$SECRET_FILE"
 ```
@@ -137,7 +137,7 @@ settings merely because a workflow reference was removed.
 
 After applying changes, re-read the target repository's settings:
 
-```sh
+```bash
 gh variable list --repo "$FULLSEND_TARGET_REPO" --json name,value
 gh secret list --repo "$FULLSEND_TARGET_REPO" --app actions \
   --json name,updatedAt

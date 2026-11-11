@@ -4,25 +4,30 @@ import contextlib
 import hashlib
 import importlib
 import io
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _HELPER_SCRIPTS = (
-    Path(__file__).resolve().parent.parent
+    _REPOSITORY_ROOT
     / ".agents"
     / "skills"
     / "upgrade-fullsend"
     / "scripts"
 )
+sys.path.insert(0, str(_REPOSITORY_ROOT))
 sys.path.insert(0, str(_HELPER_SCRIPTS))
 try:
     updater = importlib.import_module("update_fullsend_pins")
     setup_preview = importlib.import_module("show_fullsend_setup_diff")
+    checker = importlib.import_module("scripts.check_harness_integrity")
 finally:
     sys.path.remove(str(_HELPER_SCRIPTS))
+    sys.path.remove(str(_REPOSITORY_ROOT))
 
 
 class FullsendPinUpdaterTests(unittest.TestCase):
@@ -157,8 +162,120 @@ class FullsendPinUpdaterTests(unittest.TestCase):
             ):
                 updater.discover_targets(self.root, explicit=None, kind="harness")
 
+    def test_resolve_workflow_sha_uses_lightweight_tag_sha(self) -> None:
+        expected_sha = "a" * 40
+        result = subprocess.CompletedProcess(
+            args=["git", "ls-remote"],
+            returncode=0,
+            stdout=f"{expected_sha}\trefs/tags/v1.2.3\n",
+            stderr="",
+        )
+
+        with patch.object(updater.subprocess, "run", return_value=result):
+            actual_sha = updater.resolve_workflow_sha("v1.2.3", timeout=5.0)
+
+        self.assertEqual(expected_sha, actual_sha)
+
+    def test_resolve_workflow_sha_prefers_peeled_annotated_tag_sha(self) -> None:
+        tag_sha = "a" * 40
+        commit_sha = "b" * 40
+        result = subprocess.CompletedProcess(
+            args=["git", "ls-remote"],
+            returncode=0,
+            stdout=(
+                f"{tag_sha}\trefs/tags/v1.2.3\n"
+                f"{commit_sha}\trefs/tags/v1.2.3^{{}}\n"
+            ),
+            stderr="",
+        )
+
+        with patch.object(updater.subprocess, "run", return_value=result):
+            actual_sha = updater.resolve_workflow_sha("v1.2.3", timeout=5.0)
+
+        self.assertEqual(commit_sha, actual_sha)
+
+    def test_resolve_workflow_sha_rejects_missing_tag(self) -> None:
+        result = subprocess.CompletedProcess(
+            args=["git", "ls-remote"], returncode=0, stdout="", stderr=""
+        )
+
+        with (
+            patch.object(updater.subprocess, "run", return_value=result),
+            self.assertRaisesRegex(
+                updater.UpdateError, "release tag v1.2.3 was not found"
+            ),
+        ):
+            updater.resolve_workflow_sha("v1.2.3", timeout=5.0)
+
+    def test_written_prerelease_pin_is_accepted_by_integrity_parser(self) -> None:
+        version = "v1.2.3-rc.1+build.2"
+        harness_original = (
+            'base: "https://raw.githubusercontent.com/fullsend-ai/agents/'
+            f'v0.9.0/harness/review.yaml#sha256={"a" * 64}"\n'
+        )
+        workflow_original = (
+            "uses: fullsend-ai/fullsend/.github/workflows/reusable-ci.yml@"
+            f'{"b" * 40} # v0.9.0\n'
+        )
+        self.harness.write_text(harness_original, encoding="utf-8")
+        self.workflow.write_text(workflow_original, encoding="utf-8")
+        harness_body = b"updated harness content\n"
+        expected_digest = hashlib.sha256(harness_body).hexdigest()
+        workflow_sha = "c" * 40
+
+        with (
+            patch.object(updater, "fetch_bytes", return_value=harness_body),
+            patch.object(updater, "resolve_workflow_sha", return_value=workflow_sha),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = updater.main(
+                ["--version", version, "--root", str(self.root), "--write"]
+            )
+
+        self.assertEqual(0, result)
+        base_value = (
+            self.harness.read_text(encoding="utf-8").splitlines()[0].split('"')[1]
+        )
+        parsed = checker.parse_pinned_base(base_value)
+        self.assertEqual(
+            "https://raw.githubusercontent.com/fullsend-ai/agents/"
+            f"{version}/harness/review.yaml",
+            parsed.fetch_url,
+        )
+        self.assertEqual(expected_digest, parsed.expected_sha256)
+
 
 class FullsendSetupPreviewTests(unittest.TestCase):
+
+    def test_setup_state_rejects_secret_count_mismatches_with_status_2(self) -> None:
+        output = (
+            "Would commit: .github/workflows/fullsend.yaml (1 bytes)\n"
+            "Would commit: .github/workflows/prioritize.yml (1 bytes)\n"
+            "Would set repository variables:\n\n"
+            "Would set 2 repository secrets:\n"
+            "  DEPLOY_TOKEN"
+        )
+        error = io.StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as root_directory,
+            patch.object(setup_preview, "resolve_cli_version", return_value="v1.2.3"),
+            patch.object(setup_preview, "run_command", return_value=output),
+            contextlib.redirect_stderr(error),
+        ):
+            result = setup_preview.main(
+                [
+                    "example-org/example-repo",
+                    "--version",
+                    "v1.2.3",
+                    "--root",
+                    root_directory,
+                ]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn("declared 2 repository secrets but listed 1", error.getvalue())
+
     def test_managed_workflow_symlink_cannot_escape_repository_root(self) -> None:
         generated = b"generated"
         with (
@@ -293,23 +410,188 @@ class FullsendSetupPreviewTests(unittest.TestCase):
     def test_workflow_references_are_extracted_from_github_expressions(self) -> None:
         planned = setup_preview.PlannedFile(".github/workflows/review.yml", 0)
         current = (
-            b'run: echo "${{ vars.OLD_URL }} ${{ secrets.OLD_TOKEN }}"\n'
+            b'run: echo "${{ vars.OLD_URL }} ${{ secrets.OLD_TOKEN }} '
+            b'${{ vars["OLD_INDEXED_URL"] }} ${{ secrets[\'OLD_INDEXED_TOKEN\'] }}"\n'
             b"# vars.IGNORED is not an expression\n"
         )
         generated = (
-            b'run: echo "${{ vars.SERVICE_URL }} ${{ secrets.DEPLOY_TOKEN }}"\n'
+            b'run: echo "${{ vars.SERVICE_URL }} ${{ secrets.DEPLOY_TOKEN }} '
+            b'${{ vars[\'INDEXED_SERVICE_URL\'] }} '
+            b'${{ secrets["INDEXED_DEPLOY_TOKEN"] }}"\n'
             b"# vars.IGNORED is not an expression\n"
         )
         rendered = [(planned, current, generated)]
 
         self.assertEqual(
-            ({"SERVICE_URL"}, {"DEPLOY_TOKEN"}),
+            (
+                {"SERVICE_URL", "INDEXED_SERVICE_URL"},
+                {"DEPLOY_TOKEN", "INDEXED_DEPLOY_TOKEN"},
+            ),
             setup_preview.extract_workflow_references(rendered, generated=True),
         )
         self.assertEqual(
-            ({"OLD_URL"}, {"OLD_TOKEN"}),
+            (
+                {"OLD_URL", "OLD_INDEXED_URL"},
+                {"OLD_TOKEN", "OLD_INDEXED_TOKEN"},
+            ),
             setup_preview.extract_workflow_references(rendered, generated=False),
         )
+
+    def test_indexed_workflow_references_are_reported_as_missing(self) -> None:
+        planned = setup_preview.PlannedFile(".github/workflows/review.yml", 0)
+        generated = (
+            b'run: echo "${{ vars[\'SERVICE_URL\'] }} '
+            b'${{ secrets["DEPLOY_TOKEN"] }}"\n'
+        )
+        rendered = [(planned, b"", generated)]
+        variables, secrets = setup_preview.extract_workflow_references(
+            rendered, generated=True
+        )
+        changes = setup_preview.compare_variables({}, {}, variables)
+        output = io.StringIO()
+
+        with contextlib.redirect_stderr(output):
+            setup_preview.print_setup_state(
+                setup_preview.SetupState({}, ()),
+                changes,
+                variables,
+                set(),
+                secrets,
+                set(),
+                set(),
+            )
+
+        self.assertIn(
+            "REVIEW SERVICE_URL: generated workflow references it",
+            output.getvalue(),
+        )
+        self.assertIn("MISSING DEPLOY_TOKEN [generated workflow]", output.getvalue())
+
+    def test_managed_header_names_the_upstream_file(self) -> None:
+        self.assertEqual(
+            "# This file is managed by fullsend. Do not edit it directly.\n"
+            "# Upstream: https://github.com/fullsend-ai/fullsend/blob/main/"
+            "internal/scaffold/fullsend-repo/.github/workflows/fullsend.yaml\n",
+            setup_preview.managed_header(".github/workflows/fullsend.yaml"),
+        )
+
+    def test_resolve_ref_comment_separator_reads_supported_literal(self) -> None:
+        with patch.object(
+            setup_preview,
+            "fetch_bytes",
+            return_value=b'uses += " # " + opts.UpstreamTag',
+        ):
+            separator = setup_preview.resolve_ref_comment_separator(
+                "v1.2.3", timeout=5.0
+            )
+
+        self.assertEqual(" # ", separator)
+
+    def test_render_generated_files_for_both_templates(self) -> None:
+        dispatch_target = ".github/workflows/fullsend.yaml"
+        prioritize_target = ".github/workflows/prioritize.yml"
+        dispatch_template = (
+            b"uses: __REUSABLE_DISPATCH__\n"
+            b"ref: __FULLSEND_AI_REF__\n"
+            b"runner: __GH_RUNNER__\n"
+        )
+        prioritize_template = (
+            b"uses: __REUSABLE_WORKFLOW__\n"
+            b"install_mode: per-org\n"
+            b"ref: __FULLSEND_AI_REF__\n"
+            b"runner: __GH_RUNNER__\n"
+        )
+        version = "v1.2.3"
+        workflow_sha = "a" * 40
+        ref = f"{workflow_sha} # {version}"
+
+        with patch.object(
+            setup_preview,
+            "fetch_bytes",
+            side_effect=[dispatch_template, prioritize_template],
+        ):
+            dispatch = setup_preview.render_generated_file(
+                dispatch_target,
+                version,
+                workflow_sha,
+                "ubuntu-latest",
+                " # ",
+                timeout=5.0,
+            )
+            prioritize = setup_preview.render_generated_file(
+                prioritize_target,
+                version,
+                workflow_sha,
+                "ubuntu-latest",
+                " # ",
+                timeout=5.0,
+            )
+
+        expected_dispatch = (
+            setup_preview.managed_header(dispatch_target)
+            + "uses: fullsend-ai/fullsend/.github/workflows/"
+            f"reusable-dispatch.yml@{ref}\n"
+            f"ref: {ref}\n"
+            "runner: ubuntu-latest\n"
+        ).encode("utf-8")
+        expected_prioritize = (
+            setup_preview.managed_header(prioritize_target)
+            + "uses: fullsend-ai/fullsend/.github/workflows/"
+            f"reusable-prioritize.yml@{ref}\n"
+            "install_mode: per-repo\n"
+            f"ref: {ref}\n"
+            "runner: ubuntu-latest\n"
+        ).encode("utf-8")
+        self.assertEqual(expected_dispatch, dispatch)
+        self.assertEqual(expected_prioritize, prioritize)
+
+    def test_preview_rejects_reconstructed_byte_count_mismatch(self) -> None:
+        generated = b"generated"
+        planned = setup_preview.PlannedFile(
+            ".github/workflows/fullsend.yaml", len(generated) + 1
+        )
+        error = io.StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as root_directory,
+            patch.object(
+                setup_preview, "resolve_cli_version", return_value="v1.2.3"
+            ),
+            patch.object(
+                setup_preview,
+                "run_setup_dry_run",
+                return_value=("", [planned], setup_preview.SetupState({}, ())),
+            ),
+            patch.object(
+                setup_preview, "resolve_workflow_sha", return_value="a" * 40
+            ),
+            patch.object(
+                setup_preview, "resolve_runner", return_value="ubuntu-latest"
+            ),
+            patch.object(
+                setup_preview, "resolve_ref_comment_separator", return_value=" # "
+            ),
+            patch.object(
+                setup_preview, "render_generated_file", return_value=generated
+            ),
+            contextlib.redirect_stderr(error),
+        ):
+            result = setup_preview.main(
+                [
+                    "example-org/example-repo",
+                    "--version",
+                    "v1.2.3",
+                    "--root",
+                    root_directory,
+                ]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn(
+            "reconstructed .github/workflows/fullsend.yaml is 9 bytes",
+            error.getvalue(),
+        )
+        self.assertIn("reported 10 bytes", error.getvalue())
 
 
 if __name__ == "__main__":

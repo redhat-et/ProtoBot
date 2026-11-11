@@ -4,7 +4,7 @@
 
 Record the resolved executable path from `command -v fullsend`, its version, and
 its installation ownership. Compare semantic versions with the exact target
-selected by the [Fullsend upgrade skill](../SKILL.md#1-select-the-release-and-check-the-cli).
+selected by the [Fullsend upgrade skill](../SKILL.md#step-1-select-the-release-and-check-the-cli).
 
 - If the installed release equals the target, reuse it without reinstalling.
 - If the CLI is missing or older, install or upgrade to the target before
@@ -37,7 +37,7 @@ release metadata for the host operating system and architecture. Do not
 hard-code a version or assume an archive layout. Download the selected archive
 and checksum manifest into a temporary staging directory:
 
-```sh
+```bash
 FULLSEND_STAGE=$(mktemp -d)
 gh release download "$FULLSEND_TARGET_VERSION" \
   --repo fullsend-ai/fullsend \

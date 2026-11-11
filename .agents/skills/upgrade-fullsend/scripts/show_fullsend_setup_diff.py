@@ -33,8 +33,14 @@ SETUP_FILE_PATTERN = re.compile(
     r"Would commit:\s+(?P<path>\S+)\s+\((?P<size>\d+) bytes\)"
 )
 GITHUB_EXPRESSION_PATTERN = re.compile(r"\$\{\{(?P<expression>.*?)\}\}", re.DOTALL)
-VARIABLE_REFERENCE_PATTERN = re.compile(r"\bvars\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
-SECRET_REFERENCE_PATTERN = re.compile(r"\bsecrets\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
+VARIABLE_REFERENCE_PATTERN = re.compile(
+    r"\bvars(?:\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)|"
+    r"\[(?P<quote>['\"])(?P<indexed_name>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)\])"
+)
+SECRET_REFERENCE_PATTERN = re.compile(
+    r"\bsecrets(?:\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)|"
+    r"\[(?P<quote>['\"])(?P<indexed_name>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)\])"
+)
 
 
 @dataclass(frozen=True)
@@ -118,6 +124,7 @@ def resolve_cli_version(root: Path, timeout: float) -> str:
 def parse_setup_state(output: str) -> SetupState:
     variables: dict[str, str] = {}
     secrets: list[str] = []
+    expected_secret_count: int | None = None
     section: str | None = None
     seen_sections: set[str] = set()
     for line in output.splitlines():
@@ -126,7 +133,11 @@ def parse_setup_state(output: str) -> SetupState:
             section = "variables"
             seen_sections.add("variables")
             continue
-        if re.fullmatch(r"Would set \d+ repository secrets:", stripped):
+        secret_heading = re.fullmatch(
+            r"Would set (?P<count>\d+) repository secrets:", stripped
+        )
+        if secret_heading is not None:
+            expected_secret_count = int(secret_heading.group("count"))
             section = "secrets"
             seen_sections.add("secrets")
             continue
@@ -166,6 +177,11 @@ def parse_setup_state(output: str) -> SetupState:
         raise UpdateError(
             "the dry-run omitted required repository settings sections: "
             + ", ".join(sorted(missing_sections))
+        )
+    if expected_secret_count != len(secrets):
+        raise UpdateError(
+            "the dry-run declared "
+            f"{expected_secret_count} repository secrets but listed {len(secrets)}"
         )
     return SetupState(variables, tuple(secrets))
 
@@ -278,11 +294,12 @@ def extract_workflow_references(
         for expression in GITHUB_EXPRESSION_PATTERN.finditer(text):
             body = expression.group("expression")
             variables.update(
-                match.group("name")
+                match.group("name") or match.group("indexed_name")
                 for match in VARIABLE_REFERENCE_PATTERN.finditer(body)
             )
             secrets.update(
-                match.group("name") for match in SECRET_REFERENCE_PATTERN.finditer(body)
+                match.group("name") or match.group("indexed_name")
+                for match in SECRET_REFERENCE_PATTERN.finditer(body)
             )
     return variables, secrets
 
