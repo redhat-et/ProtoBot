@@ -4,7 +4,10 @@ name: CI Workflow
 
 on:  # yamllint disable-line rule:truthy
   push:
-    branches: ["**"]
+    # Merge queue entries already run CI through the merge_group trigger.
+    # Skip the ephemeral gh-readonly-queue/** refs so each enqueued commit
+    # runs CI once (issue #312).
+    branches-ignore: ["gh-readonly-queue/**"]
     tags: ["*"]
   pull_request:
     branches:
