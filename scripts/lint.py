@@ -532,6 +532,7 @@ _REGISTRY: dict[str, dict[str, Any]] = {
             "adr-amendments": {
                 "cmd": "python3",
                 "fixed_args": ["scripts/check_adr_amendments.py"],
+                "pass_filenames": False,
                 "types": ["markdown"],
                 "default_files": r"^docs/decisions/.*\.md$",
             },

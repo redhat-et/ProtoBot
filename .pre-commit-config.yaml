@@ -166,4 +166,5 @@ repos:
         name: adr-amendments
         entry: python3 scripts/check_adr_amendments.py
         language: system
+        pass_filenames: false
         files: ^docs/decisions/.*\.md$

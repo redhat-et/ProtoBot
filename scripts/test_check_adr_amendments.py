@@ -131,7 +131,7 @@ class GitRepoCheckTests(unittest.TestCase):
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         self.root = Path(temporary_directory.name)
-        _git(self.root, "init")
+        _git(self.root, "init", "-b", "main")
         _git(self.root, "config", "user.name", "ADR Test")
         _git(self.root, "config", "user.email", "adr-test@example.com")
         _git(self.root, "config", "commit.gpgsign", "false")
@@ -144,11 +144,20 @@ class GitRepoCheckTests(unittest.TestCase):
         _git(self.root, "add", "docs/decisions")
         _git(self.root, "commit", "--no-gpg-sign", "-m", "add ADRs")
 
-    def _check(self, *rel_paths: str) -> tuple[int, str]:
+    def _check(
+        self,
+        *rel_paths: str,
+        baseline_ref: str | None = None,
+    ) -> tuple[int, str]:
         """Run the checker in the temporary repository and capture stdout."""
         stdout = io.StringIO()
+        paths = list(rel_paths) if rel_paths else None
         with contextlib.redirect_stdout(stdout):
-            rc = checker.check(list(rel_paths), repo_root=self.root)
+            rc = checker.check(
+                paths,
+                repo_root=self.root,
+                baseline_ref=baseline_ref,
+            )
         return rc, stdout.getvalue()
 
     def test_unmodified_accepted_adr_passes(self) -> None:
@@ -214,6 +223,108 @@ class GitRepoCheckTests(unittest.TestCase):
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(1, rc)
         self.assertIn("was deleted", output)
+
+    def test_committed_mutation_on_feature_branch_fails_against_baseline(self) -> None:
+        """A mutation committed to a feature branch fails on clean tree against baseline."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        # Clean working tree: working tree == HEAD
+        rc, output = self._check()
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
+        self.assertIn("Use one file per record.", output)
+
+    def test_pre_commit_from_ref_environment_variable(self) -> None:
+        """PRE_COMMIT_FROM_REF overrides default branch discovery."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        os.environ["PRE_COMMIT_FROM_REF"] = "main"
+        try:
+            rc, output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("rewritten or replaced in place", output)
+        finally:
+            os.environ.pop("PRE_COMMIT_FROM_REF", None)
+
+    def test_committed_amendment_on_feature_branch_passes(self) -> None:
+        """Appending and committing an amendment on a feature branch passes."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR + "\n**[Amended November 2026]** Clarified consequences.\n",
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "amend ADR")
+        rc, output = self._check()
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_git_rm_of_accepted_adr_fails(self) -> None:
+        """Removing an accepted ADR with git rm fails when enumerated from baseline."""
+        _git(self.root, "rm", self.adr_rel.as_posix())
+        rc, output = self._check()
+        self.assertEqual(1, rc)
+        self.assertIn("was deleted", output)
+
+    def test_git_mv_and_rewrite_of_accepted_adr_fails(self) -> None:
+        """Renaming and rewriting an accepted ADR fails."""
+        renamed_rel = "docs/decisions/0001-renamed.md"
+        _git(self.root, "mv", self.adr_rel.as_posix(), renamed_rel)
+        renamed_path = self.root / renamed_rel
+        renamed_path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check()
+        self.assertEqual(1, rc)
+        self.assertIn("was deleted (renamed to docs/decisions/0001-renamed.md)", output)
+        self.assertIn("rewritten or replaced in place", output)
+
+    def test_git_mv_without_rewrite_of_accepted_adr_fails(self) -> None:
+        """Renaming an accepted ADR without rewriting still fails because it was moved."""
+        renamed_rel = "docs/decisions/0001-renamed.md"
+        _git(self.root, "mv", self.adr_rel.as_posix(), renamed_rel)
+        rc, output = self._check()
+        self.assertEqual(1, rc)
+        self.assertIn("was deleted (renamed to docs/decisions/0001-renamed.md)", output)
+
+    def test_uncommitted_mutation_on_branch_new_accepted_adr_fails(self) -> None:
+        """A new accepted ADR on a branch falls back to HEAD for local uncommitted checks."""
+        _git(self.root, "checkout", "-b", "feature")
+        new_rel = "docs/decisions/0015-branch-accepted.md"
+        new_path = self.root / new_rel
+        new_path.write_text(_ACCEPTED_ADR, encoding="utf-8")
+        _git(self.root, "add", new_rel)
+        _git(self.root, "commit", "--no-gpg-sign", "-m", "add branch ADR")
+        new_path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check()
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
 
     def test_non_decision_path_is_ignored(self) -> None:
         """Files outside docs/decisions/ are not checked."""

@@ -51,6 +51,12 @@ restore_adr() {
         rm -f "${ADR_BACKUP}"
         ADR_BACKUP=""
     fi
+    git -C "${REPO_ROOT}" restore --staged -- "${ADR_FILE}" 2>/dev/null || true
+    git -C "${REPO_ROOT}" checkout -- "${ADR_FILE}" 2>/dev/null || true
+    if [[ -n "${ADR_RENAMED:-}" ]] && [[ -f "${ADR_RENAMED}" ]]; then
+        git -C "${REPO_ROOT}" restore --staged -- "${ADR_RENAMED}" 2>/dev/null || true
+        rm -f "${ADR_RENAMED}"
+    fi
 }
 
 cleanup() {
@@ -839,6 +845,59 @@ if [[ "${lint_amd_rc}" -eq 0 ]] \
 else
     echo "FAIL  adr-amendments-append: appending an amendment failed (exit ${lint_amd_rc})"
     echo "${lint_amd_output}" | tail -12 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+restore_adr
+
+ADR_RENAMED="${REPO_ROOT}/docs/decisions/0001-requirements-storage-format-renamed.md"
+ADR_RENAMED_REL="docs/decisions/0001-requirements-storage-format-renamed.md"
+git -C "${REPO_ROOT}" mv "${ADR_FILE}" "${ADR_RENAMED}"
+python3 - "${ADR_RENAMED}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+updated = text.replace(
+    "Use **one file per record in YAML format**",
+    "Use **JSONL storage instead**",
+    1,
+)
+if updated == text:
+    raise SystemExit("expected unique ADR decision sentence was not found")
+path.write_text(updated, encoding="utf-8")
+PY
+
+lint_ren_rc=0
+lint_ren_output="$(python3 "${LINT}" --files "${ADR_RENAMED_REL}" 2>&1)" || lint_ren_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_ren_clean="$(echo "${lint_ren_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+if [[ "${lint_ren_rc}" -ne 0 ]] \
+    && echo "${lint_ren_clean}" | grep -qE "✗ adr-amendments( |$)" \
+    && echo "${lint_ren_clean}" | grep -qF "was deleted (renamed to ${ADR_RENAMED_REL})"; then
+    echo "PASS  adr-amendments-rename: renaming and rewriting an accepted ADR is rejected"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  adr-amendments-rename: expected adr-amendments failure on rename (exit ${lint_ren_rc})"
+    echo "${lint_ren_output}" | tail -12 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+restore_adr
+
+ADR_OTHER_REL="docs/decisions/0002-ears-specification-record-schema.md"
+git -C "${REPO_ROOT}" rm -q "${ADR_FILE}"
+
+lint_del_rc=0
+lint_del_output="$(python3 "${LINT}" --files "${ADR_OTHER_REL}" 2>&1)" || lint_del_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_del_clean="$(echo "${lint_del_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+if [[ "${lint_del_rc}" -ne 0 ]] \
+    && echo "${lint_del_clean}" | grep -qE "✗ adr-amendments( |$)" \
+    && echo "${lint_del_clean}" | grep -qF "accepted architecture decision record was deleted"; then
+    echo "PASS  adr-amendments-deletion: deleting an accepted ADR is rejected"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  adr-amendments-deletion: expected adr-amendments failure on deletion (exit ${lint_del_rc})"
+    echo "${lint_del_output}" | tail -12 | sed 's/^/    /'
     FAIL=$((FAIL + 1))
 fi
 restore_adr
