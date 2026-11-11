@@ -196,8 +196,8 @@ space before and after the hash.
 Do not report the upgrade complete until the selected target repository passes
 its applicable integrity, lint, and test checks. Inspect that repository's
 documentation and CI/build configuration to identify the actual commands, and
-run them from `FULLSEND_TARGET_ROOT`. Do not use ProtoBot-only commands for a
-different target. For a ProtoBot target, run:
+run them from `FULLSEND_TARGET_ROOT`. For a non-ProtoBot target, use that
+repository's verification commands. For a ProtoBot target, run:
 
 ```bash
 (
@@ -211,10 +211,8 @@ different target. For a ProtoBot target, run:
 )
 ```
 
-For another target, run its applicable integrity, lint, and test commands from
-that target root. If a category has no applicable command or a check cannot
-run, record that limitation; never report the category as passed.
-
+If a category has no applicable command or a check cannot run, record that
+limitation; never report the category as passed.
 Record each command's actual result. If any check fails or cannot run, report
 the failure or blocker; do not claim the upgrade is verified.
 

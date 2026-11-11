@@ -515,7 +515,7 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "cmd": "python3",
                 "fixed_args": ["scripts/check_harness_integrity.py"],
                 "pass_filenames": False,
-                "default_files": r"^\.fullsend/harness/[^/]+\.yaml$",
+                "default_files": r"^\.fullsend/harness/[^/]+\.ya?ml$",
             },
             "baseline-ratchet": {
                 "cmd": "python3",

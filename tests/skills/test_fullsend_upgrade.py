@@ -13,11 +13,7 @@ from unittest.mock import patch
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _HELPER_SCRIPTS = (
-    _REPOSITORY_ROOT
-    / ".agents"
-    / "skills"
-    / "upgrade-fullsend"
-    / "scripts"
+    _REPOSITORY_ROOT / ".agents" / "skills" / "upgrade-fullsend" / "scripts"
 )
 sys.path.insert(0, str(_REPOSITORY_ROOT))
 sys.path.insert(0, str(_HELPER_SCRIPTS))
@@ -183,8 +179,7 @@ class FullsendPinUpdaterTests(unittest.TestCase):
             args=["git", "ls-remote"],
             returncode=0,
             stdout=(
-                f"{tag_sha}\trefs/tags/v1.2.3\n"
-                f"{commit_sha}\trefs/tags/v1.2.3^{{}}\n"
+                f"{tag_sha}\trefs/tags/v1.2.3\n{commit_sha}\trefs/tags/v1.2.3^{{}}\n"
             ),
             stderr="",
         )
@@ -215,7 +210,7 @@ class FullsendPinUpdaterTests(unittest.TestCase):
         )
         workflow_original = (
             "uses: fullsend-ai/fullsend/.github/workflows/reusable-ci.yml@"
-            f'{"b" * 40} # v0.9.0\n'
+            f"{'b' * 40} # v0.9.0\n"
         )
         self.harness.write_text(harness_original, encoding="utf-8")
         self.workflow.write_text(workflow_original, encoding="utf-8")
@@ -246,7 +241,6 @@ class FullsendPinUpdaterTests(unittest.TestCase):
 
 
 class FullsendSetupPreviewTests(unittest.TestCase):
-
     def test_setup_state_rejects_secret_count_mismatches_with_status_2(self) -> None:
         output = (
             "Would commit: .github/workflows/fullsend.yaml (1 bytes)\n"
@@ -416,7 +410,7 @@ class FullsendSetupPreviewTests(unittest.TestCase):
         )
         generated = (
             b'run: echo "${{ vars.SERVICE_URL }} ${{ secrets.DEPLOY_TOKEN }} '
-            b'${{ vars[\'INDEXED_SERVICE_URL\'] }} '
+            b"${{ vars['INDEXED_SERVICE_URL'] }} "
             b'${{ secrets["INDEXED_DEPLOY_TOKEN"] }}"\n'
             b"# vars.IGNORED is not an expression\n"
         )
@@ -440,8 +434,7 @@ class FullsendSetupPreviewTests(unittest.TestCase):
     def test_indexed_workflow_references_are_reported_as_missing(self) -> None:
         planned = setup_preview.PlannedFile(".github/workflows/review.yml", 0)
         generated = (
-            b'run: echo "${{ vars[\'SERVICE_URL\'] }} '
-            b'${{ secrets["DEPLOY_TOKEN"] }}"\n'
+            b'run: echo "${{ vars[\'SERVICE_URL\'] }} ${{ secrets["DEPLOY_TOKEN"] }}"\n'
         )
         rendered = [(planned, b"", generated)]
         variables, secrets = setup_preview.extract_workflow_references(
@@ -554,20 +547,14 @@ class FullsendSetupPreviewTests(unittest.TestCase):
 
         with (
             tempfile.TemporaryDirectory() as root_directory,
-            patch.object(
-                setup_preview, "resolve_cli_version", return_value="v1.2.3"
-            ),
+            patch.object(setup_preview, "resolve_cli_version", return_value="v1.2.3"),
             patch.object(
                 setup_preview,
                 "run_setup_dry_run",
                 return_value=("", [planned], setup_preview.SetupState({}, ())),
             ),
-            patch.object(
-                setup_preview, "resolve_workflow_sha", return_value="a" * 40
-            ),
-            patch.object(
-                setup_preview, "resolve_runner", return_value="ubuntu-latest"
-            ),
+            patch.object(setup_preview, "resolve_workflow_sha", return_value="a" * 40),
+            patch.object(setup_preview, "resolve_runner", return_value="ubuntu-latest"),
             patch.object(
                 setup_preview, "resolve_ref_comment_separator", return_value=" # "
             ),
