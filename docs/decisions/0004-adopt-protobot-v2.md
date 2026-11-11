@@ -46,7 +46,7 @@ The project keeps these V1 components:
 - The Drafting Table and its tool-call guard
 - `eval/eliciting-requirements/`
 - `docs/decisions/`
-- `docs/related-work.md`
+- `docs/architecture/related-work.md`
 
 The project reduces `docs/architecture/agent-harness/` to the OpenCode binding
 only.
@@ -57,8 +57,8 @@ that appendix lands.
 
 This decision extends the path taxonomy in Appendix A of `ProtoBotV2.md`.
 `docs/**` is Process-class, not Implementation-class. Background documents,
-such as `docs/related-work.md` and the architecture decision records, remain
-human-reviewed and may accompany either class.
+such as `docs/architecture/related-work.md` and the architecture decision
+records, remain human-reviewed and may accompany either class.
 
 V1 specifications and accepted ADRs remain the current contracts until the
 removal pull request that supersedes each one merges.
