@@ -414,15 +414,18 @@ func (s *localSession) Git(ctx context.Context, args ...string) (ExecResult, err
 		memoryExceeded = output.exceeded()
 	case <-output.exceededChannel():
 		killCmdProcess(cmd)
-		<-done
+		killErr := <-done
+		_ = killErr // the wait error is not used here
 		memoryExceeded = true
 	case <-ctx.Done():
 		killCmdProcess(cmd)
-		<-done
+		killErr := <-done
+		_ = killErr // the wait error is not used here
 		callerCancelled = true
 	case <-sessionCtx.Done():
 		killCmdProcess(cmd)
-		<-done
+		killErr := <-done
+		_ = killErr // the wait error is not used here
 	}
 	elapsed := time.Since(start)
 
@@ -674,11 +677,13 @@ func (s *localSession) sleepLocked(ctx context.Context, req ExecRequest) (ExecRe
 	case waitErr = <-done:
 	case <-ctx.Done():
 		killCmdProcess(cmd)
-		<-done
+		killErr := <-done
+		_ = killErr // the wait error is not used here
 		callerCancelled = true
 	case <-sessionCtx.Done():
 		killCmdProcess(cmd)
-		<-done
+		killErr := <-done
+		_ = killErr // the wait error is not used here
 	}
 	s.mu.Lock()
 	s.removeCmdLocked(tp)

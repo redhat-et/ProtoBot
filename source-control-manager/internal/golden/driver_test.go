@@ -476,10 +476,12 @@ func reapServer(cmd *exec.Cmd) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
-	case <-done:
+	case waitErr := <-done:
+		_ = waitErr // the wait error is not used here
 	case <-time.After(serverWaitTimeout):
 		_ = cmd.Process.Kill()
-		<-done
+		killErr := <-done
+		_ = killErr // the wait error is not used here
 	}
 }
 
