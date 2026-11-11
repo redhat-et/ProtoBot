@@ -4,7 +4,7 @@ package guard
 // contract. Tool names remain row data; the guard policy is shared logic.
 var openCodeVocabulary = toolVocabulary{
 	harness:       "opencode",
-	version:       "1.18.30",
+	version:       "2.0.28",
 	writeTools:    []string{"edit", "write", "apply_patch"},
 	shellTool:     "bash",
 	readTools:     map[string]string{"read": "filePath"},

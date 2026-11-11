@@ -1,7 +1,7 @@
 # Drafting Table guard
 
 `drafting-table-guard` is the standalone Go module for the shared Drafting
-Table tool-call guard. This release implements the OpenCode 1.18.30 tool
+Table tool-call guard. This release implements the OpenCode v2 (2.0.28) tool
 vocabulary row; other harnesses are not accepted.
 
 The OpenCode row recognizes `edit`, `write`, and `apply_patch` as file-writing

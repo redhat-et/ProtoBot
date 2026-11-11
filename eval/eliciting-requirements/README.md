@@ -32,6 +32,23 @@ The references describe semantic properties and acceptable behavior. They do
 not require one exact wording, because multiple EARS sentences can preserve
 the same intent.
 
+## OpenCode v2
+
+`scripts/run-opencode.sh` requires an OpenCode v2 binary on `PATH`
+(`opencode --version` reports `2.x`). It rejects a missing binary and any
+1.x version before it writes config or invokes the CLI. Install v2 with
+`npm i -g @opencode/cli` (or another v2 installer from the
+[OpenCode repository](https://github.com/anomalyco/opencode)). Do not
+install OpenCode 1.x. The wrapper uses v2 `run` flags (`--standalone`,
+`--format json`, `--auto`, `--model`) from the case workspace; it does
+not pass the v1 `--dir` flag.
+
+Verify the version gate and CLI flags without a live model:
+
+```sh
+bash eval/eliciting-requirements/scripts/run-opencode_test.sh
+```
+
 ## Harness Workflow
 
 From the repository root, install or load Agent Eval Harness and run:

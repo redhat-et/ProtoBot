@@ -1,5 +1,72 @@
 #!/usr/bin/env bash
+# Run the eliciting-requirements skill through OpenCode v2.
+#
+# ProtoBot requires OpenCode v2 (@opencode/cli). This wrapper rejects a
+# missing binary and any non-2.x version before it writes config
+# or invokes the CLI. v2 `run` has no `--dir` flag and uses cwd/PWD as
+# the project directory; `--standalone` keeps each case off the v2
+# background service.
 set -euo pipefail
+
+require_opencode_v2() {
+  if ! command -v opencode >/dev/null 2>&1; then
+    printf '%s\n' \
+      "error: opencode is not on PATH." \
+      "ProtoBot requires OpenCode v2 (npm i -g @opencode/cli)." \
+      "v1.x is not supported." >&2
+    exit 1
+  fi
+
+  local raw_version_text version_string="" major=""
+  raw_version_text="$(opencode --version 2>&1)" || {
+    printf '%s\n' \
+      "error: opencode --version failed." \
+      "ProtoBot requires OpenCode v2; v1.x is not supported." \
+      "output: ${raw_version_text}" >&2
+    exit 1
+  }
+
+  local line
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" =~ ^[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}|\[[a-zA-Z]+\]|(info|debug|warn|warning|error|trace|notice):) ]]; then
+      continue
+    fi
+    if [[ "${line}" =~ (^|[^a-zA-Z0-9_])[oO]pen[cC]ode[^0-9a-zA-Z]*v?(([0-9]+)\.[0-9]+\.[0-9]+) ]]; then
+      version_string="${BASH_REMATCH[2]}"
+      major="${BASH_REMATCH[3]}"
+      break
+    fi
+  done <<< "${raw_version_text}"
+
+  if [[ -z "${version_string}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      if [[ "${line}" =~ ^[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}|\[[a-zA-Z]+\]|(info|debug|warn|warning|error|trace|notice):) ]]; then
+        continue
+      fi
+      if [[ "${line}" =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+        version_string="${BASH_REMATCH[0]}"
+        major="${BASH_REMATCH[1]}"
+      fi
+    done <<< "${raw_version_text}"
+  fi
+
+  if [[ -z "${version_string}" ]]; then
+    printf '%s\n' \
+      "error: could not parse an OpenCode version from:" \
+      "${raw_version_text}" \
+      "ProtoBot requires OpenCode v2; v1.x is not supported." >&2
+    exit 1
+  fi
+
+  if (( major != 2 )); then
+    printf '%s\n' \
+      "error: OpenCode ${version_string} is not v2." \
+      "ProtoBot requires OpenCode v2 and rejects v1.x." >&2
+    exit 1
+  fi
+}
+
+require_opencode_v2
 
 workspace=${1:?workspace is required}
 model=${2:?model is required}
@@ -43,9 +110,11 @@ printf '%s\n' \
   '  }' \
   '}' > "$workspace/opencode.json"
 
+# v2 `run` has no `--dir`; it takes the project directory from cwd/PWD.
+# `--standalone` uses a private server instead of the v2 background service.
 opencode_args=(
   run
-  --dir "$workspace"
+  --standalone
   --model "$model"
   --format json
   --auto
@@ -61,8 +130,12 @@ if command -v bwrap >/dev/null 2>&1; then
     --proc /proc \
     --share-net \
     --setenv XDG_DATA_HOME "$data_dir" \
+    --setenv PWD "$workspace" \
     --chdir "$workspace" \
     -- opencode "${opencode_args[@]}"
 else
-  opencode "${opencode_args[@]}"
+  (
+    cd "$workspace"
+    opencode "${opencode_args[@]}"
+  )
 fi
