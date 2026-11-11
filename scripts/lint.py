@@ -485,7 +485,7 @@ _REGISTRY: dict[str, dict[str, Any]] = {
             },
         },
     },
-    # ── Local: gofmt, go vet, baseline ratchet ────────────
+    # ── Local: gofmt, go vet, baseline ratchet, ADR amendments ────
     "local": {
         "installer": "system",
         "hooks": {
@@ -528,6 +528,12 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "fixed_args": ["scripts/test_check_baseline_ratchet.py"],
                 "pass_filenames": False,
                 "default_files": r"^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$",
+            },
+            "adr-amendments": {
+                "cmd": "python3",
+                "fixed_args": ["scripts/check_adr_amendments.py"],
+                "types": ["markdown"],
+                "default_files": r"^docs/decisions/.*\.md$",
             },
         },
     },

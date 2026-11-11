@@ -279,9 +279,9 @@
       "fingerprint": "9ac2052ca695ae1d",
       "rule_id": "context-budget",
       "file_path": "AGENTS.md",
-      "message": "Estimated 4,036 tokens exceeds agents-md warn limit of 4,000",
+      "message": "Estimated 4,269 tokens exceeds agents-md warn limit of 4,000",
       "severity": "warning",
-      "value": 4036,
+      "value": 4269,
       "baseline_mode": "ceiling"
     }
   ]

@@ -26,6 +26,8 @@ AGENTS_BACKUP=""
 BASELINE_FILE="${REPO_ROOT}/.skillsaw-baseline.json"
 BASELINE_BACKUP=""
 RATCHET="${REPO_ROOT}/scripts/check_baseline_ratchet.py"
+ADR_FILE="${REPO_ROOT}/docs/decisions/0001-requirements-storage-format.md"
+ADR_BACKUP=""
 
 restore_agents_md() {
     if [[ -n "${AGENTS_BACKUP}" ]] && [[ -f "${AGENTS_BACKUP}" ]]; then
@@ -43,9 +45,18 @@ restore_baseline() {
     fi
 }
 
+restore_adr() {
+    if [[ -n "${ADR_BACKUP}" ]] && [[ -f "${ADR_BACKUP}" ]]; then
+        cp "${ADR_BACKUP}" "${ADR_FILE}"
+        rm -f "${ADR_BACKUP}"
+        ADR_BACKUP=""
+    fi
+}
+
 cleanup() {
     restore_agents_md
     restore_baseline
+    restore_adr
     for f in "${STAGED_FILES[@]}"; do
         git -C "${REPO_ROOT}" restore --staged -- "${f}" 2>/dev/null || true
     done
@@ -758,6 +769,79 @@ if ${unstaged_ok}; then
 else
     FAIL=$((FAIL + 1))
 fi
+
+# ── ADR amendment convention ────────────────────────────────
+
+echo ""
+echo "── ADR amendments ──────────────────────────────────────"
+
+ADR_REL="docs/decisions/0001-requirements-storage-format.md"
+
+lint_adr_rc=0
+lint_adr_output="$(python3 "${LINT}" --files "${ADR_REL}" 2>&1)" || lint_adr_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_adr_clean="$(echo "${lint_adr_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+if [[ "${lint_adr_rc}" -eq 0 ]] \
+    && echo "${lint_adr_clean}" | grep -qE "✓ adr-amendments( |$)"; then
+    echo "PASS  adr-amendments-wiring: existing accepted ADRs pass"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  adr-amendments-wiring: adr-amendments did not pass (exit ${lint_adr_rc})"
+    echo "${lint_adr_output}" | tail -8 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+
+ADR_BACKUP="$(mktemp)"
+cp "${ADR_FILE}" "${ADR_BACKUP}"
+python3 - "${ADR_FILE}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+updated = text.replace(
+    "Use **one file per record in YAML format**",
+    "Use **JSONL storage instead**",
+    1,
+)
+if updated == text:
+    raise SystemExit("expected unique ADR decision sentence was not found")
+path.write_text(updated, encoding="utf-8")
+PY
+
+lint_mut_rc=0
+lint_mut_output="$(python3 "${LINT}" --files "${ADR_REL}" 2>&1)" || lint_mut_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_mut_clean="$(echo "${lint_mut_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+if [[ "${lint_mut_rc}" -ne 0 ]] \
+    && echo "${lint_mut_clean}" | grep -qE "✗ adr-amendments( |$)" \
+    && echo "${lint_mut_clean}" | grep -qF "rewritten or replaced in place"; then
+    echo "PASS  adr-amendments-mutation: in-place rewrite is rejected"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  adr-amendments-mutation: expected adr-amendments failure (exit ${lint_mut_rc})"
+    echo "${lint_mut_output}" | tail -12 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+restore_adr
+
+ADR_BACKUP="$(mktemp)"
+cp "${ADR_FILE}" "${ADR_BACKUP}"
+printf '\n**[Amended November 2026]** Test amendment that must not fail the check.\n' >> "${ADR_FILE}"
+
+lint_amd_rc=0
+lint_amd_output="$(python3 "${LINT}" --files "${ADR_REL}" 2>&1)" || lint_amd_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_amd_clean="$(echo "${lint_amd_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+if [[ "${lint_amd_rc}" -eq 0 ]] \
+    && echo "${lint_amd_clean}" | grep -qE "✓ adr-amendments( |$)"; then
+    echo "PASS  adr-amendments-append: dated amendment block is allowed"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  adr-amendments-append: appending an amendment failed (exit ${lint_amd_rc})"
+    echo "${lint_amd_output}" | tail -12 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+restore_adr
 
 # ── Summary ──────────────────────────────────────────────────
 

@@ -162,3 +162,8 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$
+      - id: adr-amendments
+        name: adr-amendments
+        entry: python3 scripts/check_adr_amendments.py
+        language: system
+        files: ^docs/decisions/.*\.md$

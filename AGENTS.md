@@ -228,6 +228,24 @@ must follow these rules:
    identifies staleness in a registered specification artifact, a staleness
    finding that prescribes `ears-manager artifact put`, not a hand edit.
 
+7. **Preserve accepted architecture decision records as
+   immutable historical records.** Accepted architecture
+   decision records (`docs/decisions/`) are immutable
+   historical records. Never rewrite or replace accepted
+   decision text in place. When subsequent design evolution
+   amends or refines an accepted architecture decision
+   record, append a dated amendment block
+   (`**[Amended Month Year]**`) describing the change, its
+   rationale, and references to updated architecture
+   documents. Review agents must verify that changes to
+   accepted architecture decision records never rewrite or
+   replace accepted decision text in place, and that when
+   subsequent design evolution amends or refines an accepted
+   architecture decision record, the change appends a dated
+   amendment block (`**[Amended Month Year]**`) describing
+   the change, its rationale, and references to updated
+   architecture documents.
+
 ## Agent skills
 
 ### Rules for creating or modifying skill files
