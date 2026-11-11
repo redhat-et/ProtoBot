@@ -85,6 +85,16 @@
       "automerge": false,
     },
     {
+      // Group GitHub Actions updates to reduce CI churn, merge queue
+      // latency, and retro agent dispatches across workflow action
+      // dependencies. Exclude fullsend-ai/fullsend so it stays in the
+      // dedicated fullsend group with automerge: false.
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "excludePackageNames": ["fullsend-ai/fullsend"],
+      "groupName": "github-actions",
+    },
+    {
       // Registries without release timestamps would otherwise leave Docker
       // updates pending indefinitely.
       "description": "Allow container updates without release timestamp",
