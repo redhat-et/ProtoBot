@@ -128,6 +128,12 @@ class PathFilterTests(unittest.TestCase):
 class GitRepoCheckTests(unittest.TestCase):
     def setUp(self) -> None:
         """Create a temporary git repository with one accepted ADR."""
+        saved_env = {}
+        for var in ("PRE_COMMIT_FROM_REF", "GITHUB_BASE_SHA", "GITHUB_BASE_REF"):
+            if var in os.environ:
+                saved_env[var] = os.environ.pop(var)
+        if saved_env:
+            self.addCleanup(os.environ.update, saved_env)
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         self.root = Path(temporary_directory.name)
@@ -556,6 +562,96 @@ class GitRepoCheckTests(unittest.TestCase):
         rc, output = self._check("README.md")
         self.assertEqual(0, rc)
         self.assertEqual("", output)
+
+    def test_github_base_ref_option_injection_fails_closed_and_does_not_execute(
+        self,
+    ) -> None:
+        """Environment-derived refs starting with options fail closed and are not executed."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        _git(self.root, "branch", "-D", "main")
+        marker = self.root / "injection_marker"
+        os.environ["GITHUB_BASE_REF"] = f"--upload-pack=touch {marker}"
+        try:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc, _output = self._check()
+            self.assertEqual(1, rc)
+            self.assertFalse(marker.exists())
+        finally:
+            os.environ.pop("GITHUB_BASE_REF", None)
+
+    def test_symlinked_accepted_adr_fails(self) -> None:
+        """Replacing an accepted ADR with a symlink fails the check."""
+        target = self.root / "docs" / "notes.md"
+        target.write_text("Not the accepted ADR text.\n", encoding="utf-8")
+        path = self.root / self.adr_rel
+        path.unlink()
+        path.symlink_to("../notes.md")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc, _output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("not a regular file", stderr.getvalue())
+
+    def test_shallow_clone_deepens_to_find_merge_base(self) -> None:
+        """A shallow depth-1 clone deepens fetch from origin to resolve merge-base."""
+        with tempfile.TemporaryDirectory() as tmp_remote_dir:
+            remote_path = Path(tmp_remote_dir) / "remote"
+            _git(Path(tmp_remote_dir), "init", "--bare", "-b", "main", str(remote_path))
+            _git(self.root, "remote", "add", "origin", str(remote_path))
+            _git(self.root, "push", "origin", "main")
+            _git(self.root, "checkout", "-b", "feature")
+            feature_path = self.root / self.adr_rel
+            feature_path.write_text(
+                _ACCEPTED_ADR + "\n**[Amended October 2026]** Feature amendment.\n",
+                encoding="utf-8",
+            )
+            _git(self.root, "commit", "--no-gpg-sign", "-am", "amend on feature")
+            _git(self.root, "push", "origin", "feature")
+
+            # Push a newer amendment to main on remote
+            _git(self.root, "checkout", "main")
+            main_path = self.root / self.adr_rel
+            main_path.write_text(
+                _ACCEPTED_ADR + "\n**[Amended November 2026]** Main amendment.\n",
+                encoding="utf-8",
+            )
+            _git(self.root, "commit", "--no-gpg-sign", "-am", "amend on main")
+            _git(self.root, "push", "origin", "main")
+
+            # Create a depth-1 clone of feature
+            with tempfile.TemporaryDirectory() as tmp_clone_dir:
+                clone_path = Path(tmp_clone_dir) / "clone"
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "--depth=1",
+                        "--branch=feature",
+                        str(remote_path),
+                        str(clone_path),
+                    ],
+                    capture_output=True,
+                    check=True,
+                )
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    rc = checker.check(
+                        None,
+                        repo_root=clone_path,
+                    )
+                self.assertEqual(0, rc)
+                self.assertEqual("", stdout.getvalue())
+            _git(self.root, "remote", "remove", "origin")
 
 
 class LiveRepoTests(unittest.TestCase):

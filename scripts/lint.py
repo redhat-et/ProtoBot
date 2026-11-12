@@ -533,6 +533,7 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "cmd": "python3",
                 "fixed_args": ["scripts/check_adr_amendments.py"],
                 "pass_filenames": False,
+                "always_run": True,
                 "types": ["markdown"],
                 "default_files": r"^docs/decisions/.*\.md$",
             },
@@ -567,6 +568,10 @@ def _run_hook(
     # tool so that hooks with no applicable files are skipped
     # cheaply (e.g. hadolint in a repo with no Dockerfiles).
     pass_filenames = hook_info.get("pass_filenames", True)
+    # always_run mirrors pre-commit: the hook runs even when no file
+    # matches its filter. Only pass_filenames-false hooks declare it;
+    # a pass_filenames-true hook with no matches keeps skipping.
+    always_run = bool(hook_yaml.get("always_run") or hook_info.get("always_run"))
     candidate_files = list(files)
     if not pass_filenames and deleted_files:
         candidate_files.extend(deleted_files)
@@ -580,7 +585,7 @@ def _run_hook(
     if pass_filenames:
         hook_files = [f for f in hook_files if (REPO_ROOT / f).is_file()]
 
-    if not hook_files:
+    if not hook_files and not (always_run and not pass_filenames):
         return "skip", "no matching files"
 
     # ── Builtin hooks ──────────────────────────────────────────
@@ -826,6 +831,17 @@ def _check_parity(config: dict[str, Any]) -> bool:
     return ok
 
 
+def _any_always_run(config: dict[str, Any]) -> bool:
+    """Return True when any configured hook is marked ``always_run``."""
+    for repo in config.get("repos", []):
+        reg = _REGISTRY.get(_normalize_url(repo["repo"])) or {}
+        for h in repo.get("hooks", []):
+            hinfo = reg.get("hooks", {}).get(h["id"], {})
+            if h.get("always_run") or hinfo.get("always_run"):
+                return True
+    return False
+
+
 # ── Entrypoint ─────────────────────────────────────────────────
 
 _STATUS_ICON: dict[str, str] = {
@@ -870,7 +886,7 @@ def main() -> int:
     files = _get_files(args)
     deleted_files = _get_deleted_files(args)
 
-    if not files and not deleted_files:
+    if not files and not deleted_files and not _any_always_run(config):
         print("No files to check.")
         return 0
 

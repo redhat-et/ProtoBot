@@ -46,13 +46,15 @@ restore_baseline() {
 }
 
 restore_adr() {
+    git -C "${REPO_ROOT}" restore --staged -- "${ADR_FILE}" 2>/dev/null || true
+    git -C "${REPO_ROOT}" checkout -- "${ADR_FILE}" 2>/dev/null || true
+    # Also undo any staged deletion of the whole ADR directory.
+    git -C "${REPO_ROOT}" checkout HEAD -- docs/decisions 2>/dev/null || true
     if [[ -n "${ADR_BACKUP}" ]] && [[ -f "${ADR_BACKUP}" ]]; then
         cp "${ADR_BACKUP}" "${ADR_FILE}"
         rm -f "${ADR_BACKUP}"
         ADR_BACKUP=""
     fi
-    git -C "${REPO_ROOT}" restore --staged -- "${ADR_FILE}" 2>/dev/null || true
-    git -C "${REPO_ROOT}" checkout -- "${ADR_FILE}" 2>/dev/null || true
     if [[ -n "${ADR_RENAMED:-}" ]] && [[ -f "${ADR_RENAMED}" ]]; then
         git -C "${REPO_ROOT}" restore --staged -- "${ADR_RENAMED}" 2>/dev/null || true
         rm -f "${ADR_RENAMED}"
@@ -919,6 +921,30 @@ else
     FAIL=$((FAIL + 1))
 fi
 restore_adr
+
+# Regression: staging the deletion of every ADR leaves no file
+# matching ^docs/decisions/.*\.md$ in --all-files mode (git ls-files
+# no longer lists the deleted paths). Without always_run the hook
+# was skipped and the deletion passed; it must run and fail instead.
+git -C "${REPO_ROOT}" rm -q -r docs/decisions
+
+lint_all_rc=0
+lint_all_output="$(python3 "${LINT}" --all-files 2>&1)" || lint_all_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_all_clean="$(echo "${lint_all_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+
+git -C "${REPO_ROOT}" checkout HEAD -- docs/decisions 2>/dev/null || true
+
+if [[ "${lint_all_rc}" -ne 0 ]] \
+    && echo "${lint_all_clean}" | grep -qE "✗ adr-amendments( |$)" \
+    && echo "${lint_all_clean}" | grep -qF "accepted architecture decision record was deleted"; then
+    echo "PASS  adr-amendments-always-run: hook runs when no ADR file matches"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  adr-amendments-always-run: expected adr-amendments failure with no matching ADR file (exit ${lint_all_rc})"
+    echo "${lint_all_output}" | tail -12 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
 
 # ── Summary ──────────────────────────────────────────────────
 

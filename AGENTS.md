@@ -18,10 +18,6 @@
 
 ## Workflow files and CI boundaries
 
-Fullsend agents running via GitHub workflows use GitHub App tokens
-that lack `workflows: write` permissions. Commits from Fullsend
-agents running via GitHub workflows that create or modify any file
-under `.github/workflows/` are rejected by GitHub at push time.
 Agents must follow these rules:
 
 1. **Workflow file restrictions.** Fullsend agents running via
@@ -47,8 +43,8 @@ A governed scope defines a domain of applicability, while a list
 or governed collection defines the sibling set within that domain.
 When creating or modifying any numbered rule in `AGENTS.md`, any
 specification document under `docs/`, any skill file under
-`.agents/skills/`, or an entry in any future governed scope added
-later, agents must follow these rules:
+`.agents/skills/`, or an entry in any future governed scope, agents must
+follow these rules:
 
 1. **Read all sibling entries first.** Before drafting or
    revising an entry, read every other entry in the same list
@@ -77,27 +73,25 @@ later, agents must follow these rules:
    intra-entry terminology drift, not only sibling-entry
    terminology matching.
 
-Examples of sibling entries for each governed scope listed above:
+Examples of sibling entries:
 
 - **Numbered rules in `AGENTS.md`:** the other numbered
-  rules in that same list.
+  rules in the same list.
 - **Specification documents under `docs/`:** every other
-  governed Markdown document under `docs/`.
+  governed Markdown document.
 - **Skill files under `.agents/skills/`:** every other
-  skill file under `.agents/skills/`.
+  skill file.
 
 ## Specification document hierarchy
 
 Every Markdown file under `docs/` is a governed hierarchy member,
 including files added later. Membership is the `docs/` prefix, not
-the list. Omission from the list does not exclude a file or leave
-membership undecided.
+the list.
 
 - `docs/vision.md` — registered Vision artifact (purpose, users,
-  outcomes), registered in `.protobot/project.yaml`.
+  outcomes).
 - `docs/architecture.md` — registered Architecture artifact (external
-  interfaces, persistent state, environmental constraints),
-  registered in `.protobot/project.yaml`.
+  interfaces, persistent state, environmental constraints).
 - `docs/architecture/overview.md` — guiding principles, EARS
   format, workflow, and platform.
 - `docs/architecture/components.md` — component architecture,
@@ -123,7 +117,7 @@ membership undecided.
   versioned evaluation fixture schema and result contract.
 - `docs/architecture/open-questions.md` — unresolved design
   questions across all areas.
-- `docs/decisions/` — architecture decision records (ADRs).
+- `docs/decisions/` — architecture decision records.
 
 [git-integration-doc]: docs/architecture/git-integration.md
 [validation-rules-doc]: docs/architecture/validation-rules.md
@@ -188,9 +182,8 @@ must follow these rules:
    or when Rule 4 identifies staleness in a registered specification
    artifact, apply the update exclusively via
    `ears-manager artifact put` within an active change set. Run
-   formatters and linters prior to `ears-manager artifact put` so the
-   registry digest covers canonical content, and verify with
-   `ears-manager check` before committing.
+   formatters and linters prior to `ears-manager artifact put`, and
+   verify with `ears-manager check` before committing.
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
@@ -204,47 +197,41 @@ must follow these rules:
    or canonical-content delta to have a matching `artifact_id` in an
    `artifact_operations[]` entry in any proposed change set, and rejects
    unregistration of an artifact-registry entry present on the default
-   branch. This confirms manifest association only; it does not prove
+   branch. It confirms manifest association only, not that
    `ears-manager artifact put` was invoked. Reviewers must flag hand edits
    they can identify, not claim CLI provenance from an operation record.
    Separately, whenever a PR modifies
    [.protobot/project.yaml](.protobot/project.yaml), inspect the project
-   configuration under Rule 5 of the specification-document rules in
-   `AGENTS.md` and flag any hand edit, even if no registered specification
-   artifact is changed. Run `ears-manager check` on a checkout or worktree of
-   the recorded PR head; a check on the base branch is not evidence. Require
-   it to pass without `artifact.digest_mismatch`, `artifact.operation_missing`,
-   or `artifact.unregistered`. Metadata-only changes to an artifact-registry
-   entry do not by themselves require an artifact operation. Findings should
-   include each listed diagnostic when a PR creates or modifies a registered
-   specification artifact, or when Rule 4 identifies staleness in a registered
-   specification artifact; any hand edit identified while inspecting
-   a registered specification artifact when a PR creates or modifies a
-   registered specification artifact, or when Rule 4 identifies staleness in
-   a registered specification artifact; each listed diagnostic and any hand
-   edit identified in [.protobot/project.yaml](.protobot/project.yaml)
-   whenever a PR modifies [.protobot/project.yaml](.protobot/project.yaml),
-   even if no registered specification artifact is changed; and, when Rule 4
-   identifies staleness in a registered specification artifact, a staleness
-   finding that prescribes `ears-manager artifact put`, not a hand edit.
+   configuration under Rule 5 and flag any hand edit, even if no
+   registered specification artifact is changed. Run the same
+   `ears-manager check` on the recorded PR head; a check on the base
+   branch is not evidence. Require it to pass without
+   `artifact.digest_mismatch`, `artifact.operation_missing`, or
+   `artifact.unregistered`. Metadata-only changes to an artifact-registry
+   entry do not by themselves require an artifact operation. Findings
+   should include, when a PR creates or modifies a registered
+   specification artifact or Rule 4 identifies staleness in a registered
+   specification artifact: each listed diagnostic; and any hand edit
+   identified while inspecting a registered specification artifact; each
+   listed diagnostic and any hand edit identified in
+   [.protobot/project.yaml](.protobot/project.yaml) whenever a PR modifies
+   [.protobot/project.yaml](.protobot/project.yaml), even if no registered
+   specification artifact is changed; and, when Rule 4 identifies
+   staleness in a registered specification artifact, a staleness finding
+   that prescribes `ears-manager artifact put`, not a hand edit.
 
-7. **Preserve accepted architecture decision records as
-   immutable historical records.** Accepted architecture
-   decision records (`docs/decisions/`) are immutable
-   historical records. Never rewrite or replace accepted
-   decision text in place. When subsequent design evolution
-   amends or refines an accepted architecture decision
-   record, append a dated amendment block
-   (`**[Amended Month Year]**`) describing the change, its
-   rationale, and references to updated architecture
-   documents. Review agents must verify that changes to
-   accepted architecture decision records never rewrite or
-   replace accepted decision text in place, and that when
-   subsequent design evolution amends or refines an accepted
-   architecture decision record, the change appends a dated
-   amendment block (`**[Amended Month Year]**`) describing
-   the change, its rationale, and references to updated
-   architecture documents.
+7. **Preserve accepted architecture decision records.**
+   Accepted architecture decision records (`docs/decisions/`) are
+   immutable historical records. Never rewrite or replace accepted
+   decision text in place. When design evolution amends an accepted
+   architecture decision record, append a dated amendment block
+   (`**[Amended Month Year]**`) with the change, its rationale, and
+   references to updated architecture documents. Review agents must
+   verify that accepted decision text is never rewritten or replaced
+   in place, and that when design evolution amends an accepted
+   architecture decision record, the change appends the dated
+   amendment block (`**[Amended Month Year]**`) with the change, its
+   rationale, and references to updated architecture documents.
 
 ## Agent skills
 

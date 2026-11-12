@@ -18,6 +18,7 @@ import argparse
 import difflib
 import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -94,13 +95,19 @@ def _git(
 def _relative_to_repo(path: Path, repo_root: Path) -> Path | None:
     """Return *path* relative to *repo_root*, or None if it is outside."""
     try:
-        resolved = path.resolve()
-        root = repo_root.resolve()
-    except OSError:
+        norm_root = Path(os.path.normpath(repo_root))
+        if path.is_absolute():
+            norm_path = Path(os.path.normpath(path))
+        else:
+            norm_path = Path(os.path.normpath(norm_root / path))
+        if norm_path.is_relative_to(norm_root):
+            return norm_path.relative_to(norm_root)
+        resolved_root = repo_root.resolve()
+        if norm_path.is_relative_to(resolved_root):
+            return norm_path.relative_to(resolved_root)
         return None
-    if not resolved.is_relative_to(root):
+    except (ValueError, OSError):
         return None
-    return resolved.relative_to(root)
 
 
 def _fetch_target(repo_root: Path, target: str) -> bool:
@@ -153,11 +160,39 @@ def resolve_baseline_ref(
 
     def _resolve_commit(target: str) -> str | None:
         rev = _git(repo_root, "rev-parse", "--verify", f"{target}^{{commit}}")
-        if rev.returncode == 0 and rev.stdout.strip():
-            mb = _git(repo_root, "merge-base", "HEAD", target)
-            if mb.returncode == 0 and mb.stdout.strip():
-                return mb.stdout.strip()
-            return rev.stdout.strip()
+        if rev.returncode != 0 or not rev.stdout.strip():
+            return None
+        mb = _git(repo_root, "merge-base", "HEAD", target)
+        if mb.returncode == 0 and mb.stdout.strip():
+            return mb.stdout.strip()
+        is_shallow = (
+            _git(repo_root, "rev-parse", "--is-shallow-repository").stdout.strip()
+            == "true"
+        )
+        if is_shallow:
+            env = {"GIT_TERMINAL_PROMPT": "0"}
+            depth = 50
+            while True:
+                fetch_res = _git(
+                    repo_root,
+                    "fetch",
+                    f"--deepen={depth}",
+                    "origin",
+                    env=env,
+                )
+                if fetch_res.returncode != 0:
+                    break
+                mb = _git(repo_root, "merge-base", "HEAD", target)
+                if mb.returncode == 0 and mb.stdout.strip():
+                    return mb.stdout.strip()
+                if (
+                    _git(
+                        repo_root, "rev-parse", "--is-shallow-repository"
+                    ).stdout.strip()
+                    != "true"
+                ):
+                    break
+                depth = min(depth * 2, 500)
         return None
 
     if explicit_ref:
@@ -446,7 +481,19 @@ def check(
         if not is_accepted(hist_text):
             continue
 
-        if not path.is_file():
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            st = None
+        except OSError as exc:
+            print(
+                f"ERROR: {rel_posix}: cannot inspect path ({type(exc).__name__})",
+                file=sys.stderr,
+            )
+            failed = True
+            continue
+
+        if st is None:
             new_path_posix = renames.get(rel_posix)
             if new_path_posix:
                 print(
@@ -456,7 +503,11 @@ def check(
                 failed = True
                 handled_renames.add(new_path_posix)
                 new_path = repo_root / new_path_posix
-                if new_path.is_file():
+                try:
+                    nst = os.lstat(new_path)
+                except OSError:
+                    nst = None
+                if nst and stat.S_ISREG(nst.st_mode):
                     try:
                         new_text = new_path.read_text(encoding="utf-8")
                     except OSError as exc:
@@ -474,6 +525,14 @@ def check(
             else:
                 print(f"{rel_posix}: accepted architecture decision record was deleted")
                 failed = True
+            continue
+
+        if not stat.S_ISREG(st.st_mode):
+            print(
+                f"ERROR: {rel_posix}: not a regular file",
+                file=sys.stderr,
+            )
+            failed = True
             continue
 
         try:

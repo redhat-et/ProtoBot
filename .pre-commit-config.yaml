@@ -167,4 +167,11 @@ repos:
         entry: python3 scripts/check_adr_amendments.py
         language: system
         pass_filenames: false
+        # Pre-commit's staged-file list excludes deletions
+        # (--diff-filter=ACMRTUXB), so a deletion-only commit can
+        # match no file. always_run: true makes pre-commit run the
+        # hook anyway; files: stays as scope documentation and is
+        # harmless because pass_filenames: false means no filenames
+        # are passed either way.
+        always_run: true
         files: ^docs/decisions/.*\.md$
