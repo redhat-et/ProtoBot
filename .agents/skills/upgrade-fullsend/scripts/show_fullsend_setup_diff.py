@@ -580,7 +580,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             extract_workflow_references(rendered_files, generated=False)
         )
     except (OSError, UnicodeDecodeError, UpdateError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
     print(
@@ -611,7 +611,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             generated_variable_references,
         )
     except (OSError, UnicodeDecodeError, UpdateError) as exc:
-        print(f"error: repository settings lookup failed: {exc}", file=sys.stderr)
+        print(f"ERROR: repository settings lookup failed: {exc}", file=sys.stderr)
         return 2
 
     variable_review_required = any(

@@ -58,6 +58,7 @@ class HarnessIntegrityTests(unittest.TestCase):
         build_opener.assert_not_called()
 
     def test_prerelease_and_build_pin_is_accepted_by_parser(self) -> None:
+        """Accept prerelease and build metadata in a pinned base URL."""
         base = (
             "https://raw.githubusercontent.com/fullsend-ai/agents/"
             "v1.2.3-rc.1+build.2/harness/review.yaml#sha256=" + "a" * 64

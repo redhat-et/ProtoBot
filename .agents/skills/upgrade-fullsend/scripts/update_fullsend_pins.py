@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import os
 import re
 import stat
@@ -14,8 +15,9 @@ import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 AGENTS_RAW_BASE = "https://raw.githubusercontent.com/fullsend-ai/agents"
 FULLSEND_REPOSITORY = "fullsend-ai/fullsend"
@@ -37,9 +39,42 @@ WORKFLOW_PIN_PATTERN = re.compile(
     r"(?:(?P<sep>[ \t]+#[ \t]*)(?P<tag>v[^\s]+))?"
 )
 
+NETWORK_READ_DEADLINE_SECONDS = 30
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+RESPONSE_READ_CHUNK_BYTES = 64 * 1024
+
 
 class UpdateError(RuntimeError):
     """A user-actionable failure while resolving or preparing pins."""
+
+
+class _UnexpectedRedirectError(ValueError):
+    """A Fullsend release response attempted a redirect."""
+
+
+class _ResponseTooLargeError(ValueError):
+    """A Fullsend release response exceeds the configured size limit."""
+
+
+class _ResponseReadDeadlineError(TimeoutError):
+    """Reading a Fullsend release response exceeded its total deadline."""
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Reject redirects before urllib can request their target URLs."""
+
+    def redirect_request(
+        self,
+        request: Request,
+        response: object,
+        code: int,
+        message: str,
+        headers: object,
+        new_url: str,
+    ) -> Request | None:
+        raise _UnexpectedRedirectError(
+            "redirect rejected while fetching Fullsend release content"
+        )
 
 
 @dataclass(frozen=True)
@@ -66,16 +101,85 @@ def normalize_version(value: str) -> str:
     return version
 
 
+def _set_response_socket_timeout(response: object, timeout: float) -> None:
+    """Keep each response-body read within its operation and total deadlines."""
+    response_stream = getattr(response, "fp", None)
+    raw_stream = getattr(response_stream, "raw", None)
+    response_socket = getattr(raw_stream, "_sock", None)
+    if response_socket is not None:
+        response_socket.settimeout(timeout)
+
+
+def _read_response_content(response: object, timeout: float) -> bytes:
+    """Read a bounded release response incrementally under a total deadline."""
+    deadline = monotonic() + NETWORK_READ_DEADLINE_SECONDS
+    response_reader = getattr(response, "read1", None)
+    if response_reader is None:
+        response_reader = response.read
+
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise _ResponseReadDeadlineError(
+                f"response read exceeded the "
+                f"{NETWORK_READ_DEADLINE_SECONDS}-second deadline"
+            )
+        _set_response_socket_timeout(response, min(timeout, remaining))
+        chunk = response_reader(
+            min(RESPONSE_READ_CHUNK_BYTES, MAX_RESPONSE_BYTES + 1 - size)
+        )
+        if monotonic() > deadline:
+            raise _ResponseReadDeadlineError(
+                f"response read exceeded the "
+                f"{NETWORK_READ_DEADLINE_SECONDS}-second deadline"
+            )
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > MAX_RESPONSE_BYTES:
+            raise _ResponseTooLargeError(
+                f"release response exceeds the {MAX_RESPONSE_BYTES}-byte limit"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _response_url(response: object) -> str | None:
+    """Return the final response URL when the response exposes it."""
+    geturl = getattr(response, "geturl", None)
+    if callable(geturl):
+        url = geturl()
+    else:
+        url = getattr(response, "url", None)
+    return url if isinstance(url, str) else None
+
+
 def fetch_bytes(url: str, timeout: float) -> bytes:
+    if not url.startswith("https://"):
+        raise UpdateError("refusing to fetch a non-HTTPS URL")
+
     request = Request(url, headers={"User-Agent": "upgrade-fullsend"})
     try:
-        with urlopen(request, timeout=timeout) as response:
-            return response.read()
+        opener = build_opener(_NoRedirectHandler())
+        with opener.open(request, timeout=timeout) as response:
+            if _response_url(response) != url:
+                raise _UnexpectedRedirectError(
+                    "final response URL is missing or differs from requested HTTPS URL"
+                )
+            return _read_response_content(response, timeout)
     except HTTPError as exc:
         raise UpdateError(f"failed to fetch {url}: HTTP {exc.code}") from exc
     except URLError as exc:
         raise UpdateError(f"failed to fetch {url}: {exc.reason}") from exc
-    except OSError as exc:
+    except (
+        _UnexpectedRedirectError,
+        _ResponseTooLargeError,
+        _ResponseReadDeadlineError,
+    ) as exc:
+        raise UpdateError(f"failed to fetch {url}: {exc}") from exc
+    except (OSError, http.client.HTTPException) as exc:
         raise UpdateError(f"failed to fetch {url}: {exc}") from exc
 
 
@@ -146,11 +250,9 @@ def discover_targets(
 
     if kind == "harness":
         directory = root / ".fullsend" / "harness"
-        pattern = "*.y*ml"
     else:
         directory = root / ".github" / "workflows"
-        pattern = "*.y*ml"
-
+    patterns = ("*.yaml", "*.yml")
     if not directory.is_dir():
         raise UpdateError(f"could not find Fullsend {kind} directory: {directory}")
     resolved_directory = directory.resolve()
@@ -163,6 +265,7 @@ def discover_targets(
     return sorted(
         {
             resolve_target(root, str(path))
+            for pattern in patterns
             for path in resolved_directory.glob(pattern)
             if path.is_file()
         }
@@ -367,7 +470,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if plan is not None:
                 plans.append(plan)
     except (OSError, UpdateError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
     print(f"Fullsend target: {version}")
@@ -391,7 +494,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     for plan in plans:
-        atomic_write(plan.path, plan.updated)
+        try:
+            atomic_write(plan.path, plan.updated)
+        except OSError as exc:
+            print(
+                f"ERROR: failed to write {relative_path(plan.path, root)}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
     print(f"Updated {len(plans)} file(s).")
     return 0
 

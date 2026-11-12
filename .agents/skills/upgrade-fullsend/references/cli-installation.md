@@ -21,7 +21,7 @@ manager-owned binary with an extracted archive.
 
 For a manually installed CLI, use `fullsend self-update` only when the active
 CLI's help documents support for the exact target and `--dry-run`. The command
-was introduced in v0.55.0 and verifies the release's Sigstore signature.
+was introduced in `v0.55.0` and verifies the release's Sigstore signature.
 Review `fullsend self-update --version "$FULLSEND_TARGET_VERSION" --dry-run`,
 then run the same command without `--dry-run` only after the required local
 tool-change approval. Older CLI versions may not support this command; use the

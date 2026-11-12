@@ -42,25 +42,38 @@ previewed.
 
 ## Generated workflow synchronization
 
-The generated diff is the selected-release workflow content, not a suggestion
-to update only integrity pins. The upgrade skill synchronizes both managed
-workflow files to that content.
+The helper renders upstream templates only; it does not reconstruct
+downstream/local workflow additions. Inspect every complete current-versus-
+generated hunk for each managed workflow. Inventory the target repository's
+local additions and customizations, identify which behavior remains intended,
+and preserve each reviewed addition unless its removal is explicitly
+approved. Never silently delete reviewed local behavior just because it is
+absent from the generated content. Synchronize the upstream-generated content
+to the selected release while retaining intended, reviewed downstream
+additions.
 
-In `.github/workflows/fullsend.yaml`, preserve the repository-local dispatch
-additions and their adjacent explanation:
+For ProtoBot, preserve the following three repository-local `dispatch` `if`
+customizations in `.github/workflows/fullsend.yaml`:
 
 - Permit non-bot `issue_comment` events without the upstream `/fs-` prefix
   requirement.
 - Exclude Renovate `pull_request_target` events only for review-starting
   actions: `opened`, `synchronize`, `ready_for_review`, or `labeled` with the
   `ready-for-review` label. Preserve other actions, including `closed`.
-- Do not add a Renovate `pull_request_review` exclusion; the local workflow
-  has none. The upstream `fullsend/scaffold-install` exclusion for both
-  `pull_request_target` and `pull_request_review` remains generated content,
-  not a downstream override.
+- Do not add a Renovate `pull_request_review` exclusion; the ProtoBot local
+  workflow has none. The upstream `fullsend/scaffold-install` exclusion for
+  both `pull_request_target` and `pull_request_review` remains generated
+  content, not a downstream override.
 
-`.github/workflows/prioritize.yml` has no downstream override. The final
-preview should show no other workflow-content difference.
+Also preserve ProtoBot's local stop-fix job, which authorizes `/fs-fix-stop`
+and applies `fullsend-no-fix`. These dispatch rules and additions are
+ProtoBot-specific; do not apply the dispatch rules verbatim to other
+repositories. For any other target, inventory and preserve its own intended
+downstream behavior instead.
+
+For ProtoBot, `.github/workflows/prioritize.yml` has no downstream override.
+Inspect that file independently for every other target; do not assume the
+ProtoBot state applies elsewhere.
 
 ## Settings report
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Validate pinned Fullsend harness URLs and optionally verify their hashes.
 
-By default this checks the local ``.fullsend/harness/*.yaml`` entries without
-network access. Pass ``--online`` to fetch each pinned raw file and compare its
-exact response bytes with the recorded SHA-256 digest, or ``--online-if-ci`` to
-do so only when ``CI=true``.
+By default this checks local ``.fullsend/harness/*.yaml`` and
+``.fullsend/harness/*.yml`` entries without network access. Pass ``--online``
+to fetch each pinned raw file and compare its exact response bytes with the
+recorded SHA-256 digest, or ``--online-if-ci`` to do so only when ``CI=true``.
 """
 
 from __future__ import annotations

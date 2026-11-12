@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -26,11 +27,39 @@ finally:
     sys.path.remove(str(_REPOSITORY_ROOT))
 
 
+_TEST_HARNESS_URL = (
+    "https://raw.githubusercontent.com/fullsend-ai/agents/v1.2.3/harness/review.yaml"
+)
+
+
+class _FakeResponse(io.BytesIO):
+    def __init__(self, content: bytes, response_url: str) -> None:
+        super().__init__(content)
+        self._response_url = response_url
+        self.read_sizes: list[int] = []
+        self.bytes_read = 0
+        self.socket_timeouts: list[float] = []
+        self.fp = SimpleNamespace(
+            raw=SimpleNamespace(
+                _sock=SimpleNamespace(settimeout=self.socket_timeouts.append)
+            )
+        )
+
+    def geturl(self) -> str:
+        return self._response_url
+
+    def read1(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        content = self.read(size)
+        self.bytes_read += len(content)
+        return content
+
+
 class FullsendPinUpdaterTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
-        self.root = Path(temporary_directory.name)
+        self.root = Path(temporary_directory.name).resolve()
         self.harness = self.root / ".fullsend" / "harness" / "review.yaml"
         self.workflow = self.root / ".github" / "workflows" / "review.yml"
         self.harness.parent.mkdir(parents=True)
@@ -124,6 +153,222 @@ class FullsendPinUpdaterTests(unittest.TestCase):
             f"@{workflow_sha} # v1.2.3",
             self.workflow.read_text(encoding="utf-8"),
         )
+
+    def test_workflow_update_preserves_quoted_scalars_and_comment_formatting(
+        self,
+    ) -> None:
+        prefix = "fullsend-ai/fullsend/.github/workflows/reusable-ci.yml@"
+        single_sha = "a" * 40
+        double_sha = "b" * 40
+        unquoted_sha = "d" * 40
+        workflow_original = (
+            "jobs:\n"
+            f"  single:\n    uses: '{prefix}{single_sha}' # v0.9.0\n"
+            f'  double:\n    uses: "{prefix}{double_sha}"  #  v0.9.1\n'
+            f"  unquoted:\n    uses: {prefix}{unquoted_sha}\n"
+        )
+        self.workflow.write_text(workflow_original, encoding="utf-8")
+        workflow_sha = "c" * 40
+
+        plan = updater.update_workflow_file(self.workflow, "v1.2.3", workflow_sha)
+
+        expected = (
+            "jobs:\n"
+            f"  single:\n    uses: '{prefix}{workflow_sha}' # v1.2.3\n"
+            f'  double:\n    uses: "{prefix}{workflow_sha}"  #  v1.2.3\n'
+            f"  unquoted:\n    uses: {prefix}{workflow_sha} # v1.2.3\n"
+        )
+        self.assertIsNotNone(plan)
+        assert plan is not None
+        self.assertEqual(expected, plan.updated.decode("utf-8"))
+
+    def test_discover_targets_only_includes_yaml_extensions(self) -> None:
+        for kind, directory in (
+            ("harness", self.harness.parent),
+            ("workflow", self.workflow.parent),
+        ):
+            filenames = (
+                "accepted.yaml",
+                "accepted.yml",
+                "ignored.yxml",
+                "ignored.yaaml",
+            )
+            for filename in filenames:
+                (directory / filename).write_text("", encoding="utf-8")
+            expected = sorted(directory / filename for filename in filenames[:2])
+
+            self.assertEqual(
+                expected,
+                updater.discover_targets(self.root, explicit=None, kind=kind),
+            )
+
+    def test_fetch_bytes_accepts_matching_https_response(self) -> None:
+        requested_url = _TEST_HARNESS_URL
+        response = _FakeResponse(b"release content", requested_url)
+        with (
+            patch.object(updater, "build_opener") as build_opener,
+            patch.object(updater, "monotonic", return_value=0.0),
+        ):
+            build_opener.return_value.open.return_value = response
+            content = updater.fetch_bytes(requested_url, timeout=5.0)
+
+        self.assertEqual(b"release content", content)
+        self.assertIsInstance(
+            build_opener.call_args.args[0], updater._NoRedirectHandler
+        )
+        open_call = build_opener.return_value.open.call_args
+        self.assertEqual(requested_url, open_call.args[0].full_url)
+        self.assertEqual(5.0, open_call.kwargs["timeout"])
+        self.assertEqual([5.0, 5.0], response.socket_timeouts)
+
+    def test_fetch_bytes_rejects_redirects_before_following(self) -> None:
+        requested_url = _TEST_HARNESS_URL
+        redirected_url = "https://example.invalid/redirected.yaml"
+        requested_urls: list[str] = []
+
+        def build_redirecting_opener(
+            handler: updater._NoRedirectHandler,
+        ) -> object:
+            class RedirectingOpener:
+                def open(self, request: updater.Request, timeout: float) -> None:
+                    requested_urls.append(request.full_url)
+                    handler.redirect_request(
+                        request, None, 302, "Found", {}, redirected_url
+                    )
+
+            return RedirectingOpener()
+
+        with (
+            patch.object(
+                updater, "build_opener", side_effect=build_redirecting_opener
+            ) as build_opener,
+            self.assertRaisesRegex(updater.UpdateError, "redirect rejected"),
+        ):
+            updater.fetch_bytes(requested_url, timeout=5.0)
+
+        self.assertEqual([requested_url], requested_urls)
+        self.assertIsInstance(
+            build_opener.call_args.args[0], updater._NoRedirectHandler
+        )
+
+    def test_fetch_bytes_rejects_non_https_requests(self) -> None:
+        with (
+            patch.object(updater, "build_opener") as build_opener,
+            self.assertRaisesRegex(updater.UpdateError, "non-HTTPS"),
+        ):
+            updater.fetch_bytes("http://example.invalid/review.yaml", timeout=5.0)
+
+        build_opener.assert_not_called()
+
+    def test_fetch_bytes_rejects_an_unexpected_final_url(self) -> None:
+        requested_url = _TEST_HARNESS_URL
+        response = _FakeResponse(
+            b"must not be read", "https://example.invalid/redirected.yaml"
+        )
+        with patch.object(updater, "build_opener") as build_opener:
+            build_opener.return_value.open.return_value = response
+            with self.assertRaisesRegex(updater.UpdateError, "final response URL"):
+                updater.fetch_bytes(requested_url, timeout=5.0)
+
+        self.assertEqual(0, response.bytes_read)
+
+    def test_fetch_bytes_rejects_oversized_responses(self) -> None:
+        requested_url = _TEST_HARNESS_URL
+        response = _FakeResponse(b"x" * (updater.MAX_RESPONSE_BYTES + 1), requested_url)
+        with (
+            patch.object(updater, "build_opener") as build_opener,
+            patch.object(updater, "monotonic", return_value=0.0),
+        ):
+            build_opener.return_value.open.return_value = response
+            with self.assertRaisesRegex(
+                updater.UpdateError,
+                f"{updater.MAX_RESPONSE_BYTES}-byte limit",
+            ):
+                updater.fetch_bytes(requested_url, timeout=5.0)
+
+        self.assertEqual(updater.MAX_RESPONSE_BYTES + 1, response.bytes_read)
+        self.assertEqual(1, response.read_sizes[-1])
+
+    def test_fetch_bytes_enforces_total_read_deadline(self) -> None:
+        requested_url = _TEST_HARNESS_URL
+        response = _FakeResponse(b"release content", requested_url)
+        with (
+            patch.object(updater, "build_opener") as build_opener,
+            patch.object(
+                updater,
+                "monotonic",
+                side_effect=(
+                    0.0,
+                    0.0,
+                    updater.NETWORK_READ_DEADLINE_SECONDS + 0.1,
+                ),
+            ),
+        ):
+            build_opener.return_value.open.return_value = response
+            with self.assertRaisesRegex(updater.UpdateError, "deadline"):
+                updater.fetch_bytes(requested_url, timeout=5.0)
+
+        self.assertEqual([5.0], response.socket_timeouts)
+
+    def test_updater_errors_use_uppercase_prefix(self) -> None:
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as error,
+        ):
+            result = updater.main(
+                ["--version", "not-a-version", "--root", str(self.root)]
+            )
+
+        self.assertEqual(2, result)
+        self.assertTrue(error.getvalue().startswith("ERROR: invalid version"))
+
+    def test_write_error_returns_status_two_without_multi_file_rollback(
+        self,
+    ) -> None:
+        old_harness_digest = "a" * 64
+        old_workflow_sha = "b" * 40
+        harness_original = (
+            'base: "https://raw.githubusercontent.com/fullsend-ai/agents/'
+            f'v0.9.0/harness/review.yaml#sha256={old_harness_digest}"\n'
+        )
+        workflow_original = (
+            "uses: fullsend-ai/fullsend/.github/workflows/reusable-ci.yml@"
+            f"{old_workflow_sha} # v0.9.0\n"
+        )
+        self.harness.write_text(harness_original, encoding="utf-8")
+        self.workflow.write_text(workflow_original, encoding="utf-8")
+        harness_body = b"updated harness content\n"
+        harness_digest = hashlib.sha256(harness_body).hexdigest()
+        workflow_sha = "c" * 40
+        real_replace = updater.os.replace
+
+        def fail_workflow_replace(source: str, destination: str | Path) -> None:
+            if Path(destination) == self.workflow:
+                raise OSError("simulated replace failure")
+            real_replace(source, destination)
+
+        with (
+            patch.object(updater, "fetch_bytes", return_value=harness_body),
+            patch.object(updater, "resolve_workflow_sha", return_value=workflow_sha),
+            patch.object(updater.os, "replace", side_effect=fail_workflow_replace),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as error,
+        ):
+            result = updater.main(
+                ["--version", "v1.2.3", "--root", str(self.root), "--write"]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn(
+            "ERROR: failed to write .github/workflows/review.yml: "
+            "simulated replace failure",
+            error.getvalue(),
+        )
+        self.assertIn(
+            f"v1.2.3/harness/review.yaml#sha256={harness_digest}",
+            self.harness.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(workflow_original, self.workflow.read_text(encoding="utf-8"))
 
     def test_explicit_target_cannot_escape_repository_root(self) -> None:
         outside = self.root.parent / f"{self.root.name}-outside.yaml"

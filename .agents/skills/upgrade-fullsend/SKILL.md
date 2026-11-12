@@ -6,15 +6,15 @@ description: >
   and apply repository-setting changes only after individual approval.
 ---
 
-# Fullsend upgrade
+# Upgrading Fullsend
 
 Use this skill only in interactive contributor sessions. Fullsend agents running
-through GitHub workflows must not modify files under `.github/workflows/`;
-their GitHub App tokens lack `workflows: write`, and GitHub rejects those
-commits. Workflow-file changes here are for local coding agents or human
-contributors, as permitted by `AGENTS.md`. Do not invoke this skill from
-headless Fullsend CI agents. When upgrading another repository, do not copy
-this skill into that repository's `.agents/skills/`.
+via GitHub workflows must not modify files under `.github/workflows/`; their
+GitHub App tokens lack `workflows: write`, and GitHub rejects those commits.
+Workflow-file changes here are for local coding agents or human contributors,
+as permitted by `AGENTS.md`. Fullsend agents running via GitHub workflows must
+not invoke this skill. When upgrading another repository, do not copy this
+skill into that repository's `.agents/skills/`.
 
 Use this skill to upgrade the Fullsend CLI and a repository's Fullsend
 integration to a selected release. Every upgrade synchronizes both generated
@@ -119,14 +119,19 @@ python3 "$FULLSEND_SKILL_DIR/scripts/show_fullsend_setup_diff.py" \
 ```
 
 The helper invokes `fullsend github setup <target> --dry-run`, reconstructs
-both generated workflow files for the selected release, verifies their byte
-counts, and prints the raw output, complete unified diff, and settings report.
-Never invoke setup without `--dry-run`. Both generated workflow files and the
-complete set of integrity pins are required upgrade changes; do not ask the
-user to approve a subset. Synchronize both files to the generated content,
-preserving only the documented dispatch override in
-`.github/workflows/fullsend.yaml`; `.github/workflows/prioritize.yml` has no
-override.
+both upstream-generated workflow files for the selected release, verifies
+their byte counts, and prints the raw output, complete unified diff, and
+settings report. Never invoke setup without `--dry-run`. It reconstructs
+upstream templates only. Review the complete current-versus-generated diff,
+inventory the target's local workflow additions, and preserve each reviewed
+addition unless its removal is explicitly approved; never silently delete
+local behavior. See the [workflow synchronization
+contract](references/github-setup.md#generated-workflow-synchronization) for
+ProtoBot's `stop-fix` job and dispatch customizations. Do not apply ProtoBot's
+dispatch rules verbatim to another repository. Both generated workflow files
+and the complete set of integrity pins are required upgrade changes; do not
+ask the user to approve a subset. Synchronize both workflows to the
+selected-release content while retaining reviewed local additions.
 
 Review repository settings separately. Follow
 [the setup reference](references/github-setup.md) for report interpretation,
@@ -224,8 +229,8 @@ Prepare a structured PR description that includes:
 - **Harness compatibility:** every affected overlay and the evidence for its
   compatibility with the selected release. A matching checksum proves file
   identity, not behavioral compatibility.
-- **Workflow synchronization:** the generated workflow changes and the
-  documented local dispatch override retained.
+- **Workflow synchronization:** the generated workflow changes and each
+  reviewed downstream addition retained.
 - **Repository settings:** approved setting names and actions, without
   plaintext secret values.
 - **Verification:** the target's applicable integrity, lint, and test commands
