@@ -10,21 +10,32 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class OpenCodeConfigTest(unittest.TestCase):
-    def test_guard_plugin_is_removed(self) -> None:
+    def test_guard_plugin_is_removed_from_repo_root(self) -> None:
         self.assertFalse((ROOT / ".opencode/plugins/protobot-guard.js").exists())
+
+    def test_fixture_guard_plugin_exists_for_replay(self) -> None:
+        self.assertTrue((ROOT / "tests/drafting-table/protobot-guard.js").is_file())
 
     def test_drafting_table_binding_files_remain(self) -> None:
         self.assertTrue((ROOT / ".opencode/agents/drafting-table.md").is_file())
         self.assertTrue((ROOT / ".opencode/commands/drafting-table.md").is_file())
 
-    def test_root_opencode_json_only_disables_sharing(self) -> None:
+    def test_root_opencode_json_disables_sharing_and_protects_protobot(self) -> None:
         path = ROOT / "opencode.json"
         self.assertTrue(path.is_file())
-        self.assertEqual(json.loads(path.read_text()), {"share": "disabled"})
+        config = json.loads(path.read_text())
+        self.assertEqual(config.get("share"), "disabled")
+        self.assertEqual(
+            config.get("permission", {}).get("edit", {}).get(".protobot/**"),
+            "deny",
+        )
 
     def test_root_opencode_json_has_no_legacy_references(self) -> None:
         text = (ROOT / "opencode.json").read_text()
-        for token in ("source-control-manager", "wms", "ears-manager", ".protobot/"):
+        config = json.loads(text)
+        self.assertNotIn("mcp", config)
+        self.assertNotIn("apply_patch", config.get("permission", {}))
+        for token in ("source-control-manager", "wms", "ears-manager"):
             with self.subTest(token=token):
                 self.assertNotIn(token, text)
 

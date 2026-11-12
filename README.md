@@ -118,10 +118,10 @@ for indirect governed writes.
 The OpenCode binding (`.opencode/`, the shared
 `.agents/drafting-table.yaml` manifest, and the `drafting-specifications`
 session skill) targets OpenCode v2 (designed against OpenCode 2.0.28).
-Root `opencode.json` disables session sharing only; it does not start MCP
-servers or deny file edits. The headless replay command exercises the
-historical #77 baseline driver pinned to OpenCode 1.18.30 until #77
-re-runs it on v2:
+Root `opencode.json` disables session sharing and denies edits under
+`.protobot/`; it does not start MCP servers. The headless replay
+command exercises the historical #77 baseline driver pinned to OpenCode
+1.18.30 until #77 re-runs it on v2:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 OPENCODE_BIN=/path/to/opencode-1.18.30/bin/opencode \

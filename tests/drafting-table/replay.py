@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "docs/architecture/fixtures/drafting-table-opencode-golden.jsonl"
 WMS_STUB = ROOT / "tests/drafting-table/wms_stub.py"
 GH_STUB = ROOT / "tests/drafting-table/gh_stub.py"
+GUARD_PLUGIN_FIXTURE = ROOT / "tests/drafting-table/protobot-guard.js"
 PINNED_OPENCODE = "1.18.30"
 PROJECT_ID = "fixture-project"
 CHANGE_SET_ID = "CS-00002"
@@ -323,9 +324,9 @@ def copy_project_inputs(project: Path) -> None:
         )
     shutil.copytree(ROOT / ".opencode/agents", project / ".opencode/agents")
     shutil.copytree(ROOT / ".opencode/commands", project / ".opencode/commands")
-    plugins = ROOT / ".opencode/plugins"
-    if plugins.is_dir():
-        shutil.copytree(plugins, project / ".opencode/plugins")
+    plugin_dir = project / ".opencode/plugins"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(GUARD_PLUGIN_FIXTURE, plugin_dir / "protobot-guard.js")
     (project / "docs").mkdir()
     (project / "docs/vision.md").write_text(
         "# Fixture Vision\n\nLocal deterministic fixture.\n"
@@ -1423,7 +1424,7 @@ def run_scenario(
                 str(path.relative_to(ROOT)): sha256(path)
                 for path in sorted(skill_files())
             }
-            for path in (WMS_STUB, GH_STUB):
+            for path in (WMS_STUB, GH_STUB, GUARD_PLUGIN_FIXTURE):
                 source_hashes[str(path.relative_to(ROOT))] = sha256(path)
             source_hashes[str(Path(__file__).resolve().relative_to(ROOT))] = sha256(
                 Path(__file__).resolve()

@@ -60,7 +60,7 @@ Table harness are not version pins.
 | This binding and the adapter contract | Spec | Designed against OpenCode 2.0.28; 1.18.30 notes are historical |
 | `docs/architecture.md` strawman, overview, components, UX | Spec | Name OpenCode as the first harness; not install paths |
 | `eval/eliciting-requirements/baselines/v1/` and `/eval-run --run-id v2` | Eval | Baseline and run identifiers, not OpenCode versions |
-| Binding files under `.opencode/` | Install (issue #77) | Project-scope v2 layout, but the checked-in `.opencode/plugins/protobot-guard.js` remains the v1 named export with `chat.params` until #77 updates the replay harness; no repository-managed installer yet |
+| Binding files under `.opencode/` | Install (issue #77) | Project-scope v2 layout; the v1 plugin (`.opencode/plugins/protobot-guard.js`) was removed to unblock sessions, leaving H8 inactive in-repo until a v2 shim is restored (#77); no repository-managed installer yet |
 | `tests/drafting-table/replay.py` | Executable | Historical #77 fixture driver; still pins 1.18.30 and v1 CLI flags until #77 ports it to v2; non-operative for v2 |
 | `tests/drafting-table/README.md` | Doc | Historical #77 fixture instructions; exercises the 1.18.30 baseline driver until #77 re-runs on v2; non-operative for v2 |
 | `docs/architecture/fixtures/drafting-table-opencode-golden.jsonl` | Fixture | Recorded #77 golden run (`opencode_version: 1.18.30`); historical baseline, non-operative for v2 |
@@ -77,22 +77,22 @@ the wrapper (or the same version check) before use. Install v2 with
 
 ### Installed files
 
-The binding is four files. At project scope they sit beside the shared
-layer:
+The binding is three checked-in files; the v1 plugin
+(`.opencode/plugins/protobot-guard.js`) was removed pending the v2 plugin
+implementation. At project scope they sit beside the shared layer:
 
 ```text
 <project root>/
 ├── opencode.json                        rules for every OpenCode agent
 ├── .opencode/
 │   ├── agents/drafting-table.md         the Drafting Table role
-│   ├── commands/drafting-table.md       the drafting-table entry point
-│   └── plugins/protobot-guard.js        the shim that calls the guard
+│   └── commands/drafting-table.md       the drafting-table entry point
 └── .agents/                             shared layer (harness-neutral)
     ├── drafting-table.yaml
     └── skills/
 ```
 
-At user scope the same four files go under `~/.config/opencode/`.
+At user scope the corresponding files go under `~/.config/opencode/`.
 Project config is merged after user config, so a project that carries
 the binding overrides a user-scope install. A user-scope install also
 needs the `external_directory` rule in
@@ -104,57 +104,29 @@ needs the `external_directory` rule in
 {
   "$schema": "https://opencode.ai/config.json",
   "share": "disabled",
-  "mcp": {
-    "wms": {
-      "type": "local",
-      "command": ["<WMS Adapter MCP server, named by #31>"],
-      "enabled": false
-    },
-    "scm": {
-      "type": "local",
-      "command": ["source-control-manager", "serve", "--face", "drafting-table"]
-    }
-  },
   "permission": {
-    "apply_patch": "deny",
     "edit": {
       ".protobot/**": "deny"
-    },
-    "wms_*": "deny",
-    "scm_*": "deny"
+    }
   }
 }
 ```
 
 - **`share` is `disabled`**, because OpenCode's share feature uploads a
   session (H11).
-- **The `wms` and `scm` servers** are the manifest's MCP servers (H2).
-  OpenCode names their tools `wms_<normalized-operation>` and
-  `scm_<operation>`, where separators in the canonical operation name
-  become underscores. The `wms` command value is a placeholder until #31
-  names the server. The `scm` server is the Drafting Table face of the
-  [Source Control Manager](../source-control-manager.md), which runs
-  every Git and Git host operation of the role. Neither entry holds a
-  credential. The placeholder `wms` command stays disabled until #31
-  provides an executable server. `ears-manager` needs no entry: it is a
-  shell operation.
 - **`edit` is denied under `.protobot/` for every agent.** The `edit`
   rule covers every OpenCode file tool: `edit`, `write`, and the patch
   tool. It is the native `.protobot/` slice of guard rule 3 and holds
   even when plugins do not load; the other protected-path checks remain
   the guard's responsibility.
-- **`apply_patch` is denied globally**, so file patches reach the guard
-  only through direct hook fixtures; the native tool is not offered in
-  the resolved OpenCode tool set.
-- **The `wms` and `scm` tools are denied here and allowed only in the
-  `drafting-table` agent**, a native copy of the MCP half of guard rule
-  4. The `ears-manager` half has no native copy: the agent's `bash`
-  rules allow it in the role, and the guard refuses it elsewhere. The
-  agent's named allows match the normalized names in the manifest; the
-  guard independently enforces the same list.
+- **MCP server entries and global `apply_patch` denial were removed.**
+  The missing-binary MCP spawn (`source-control-manager`) and global
+  `apply_patch: deny` were removed from root `opencode.json` to unblock
+  ordinary agent sessions. WMS/SCM tool integration is deferred to
+  milestone M2.
 
-This file disables the unimplemented WMS placeholder and adds permission
-denials, but no allow rules;
+This file disables session sharing and adds the `.protobot/**` edit denial,
+but no allow rules;
 [How the rules combine](#how-the-rules-combine) explains why.
 
 ### The `drafting-table` agent
@@ -321,17 +293,17 @@ record ([Traces](adapter-contract.md#traces)).
 
 ### The guard shim
 
-`.opencode/plugins/protobot-guard.js` connects OpenCode to the shared
-[guard](adapter-contract.md#the-guard) (H8). OpenCode has no
-`PreToolUse` command hook, so the shim does the translation.
+The v1 shim `.opencode/plugins/protobot-guard.js` was removed to unblock
+ordinary sessions; H8 is not active in-repo until a v2 shim is restored.
+OpenCode has no `PreToolUse` command hook, so the target shim will do the
+translation to the shared [guard](adapter-contract.md#the-guard) (H8).
 
 Issue #77 targets OpenCode v2's plugin contract: OpenCode v2 loads a
 local plugin as a default export with an `id` and a `setup` (or `effect`)
 function; a v1 module such as
 `export const Plugin = async (ctx) => ({ "tool.execute.before": … })`
-is not a valid v2 plugin. Pending #77's test replay harness update,
-the checked-in shim in `.opencode/plugins/protobot-guard.js` remains the v1
-named export (`export const ProtoBotGuard = ...`) using `chat.params` and
+is not a valid v2 plugin. The historical v1 shim used named export
+(`export const ProtoBotGuard = ...`) with `chat.params` and
 `tool.execute.before`.
 
 The v2 target design:
@@ -339,10 +311,9 @@ The v2 target design:
 1. **Reads the role from the hook event.** OpenCode v2's
    `tool.execute.before` event names `agent`, `tool`, `sessionID`,
    `messageID`, `id`, and `input`. `drafting-table` is the Drafting
-   Table role; every other agent is `other`. Historically (and in the
-   checked-in shim pending #77), OpenCode 1.18.30 did not put the agent
-   on this hook, and the shim used `chat.params` instead; that is not the
-   v2 contract.
+   Table role; every other agent is `other`. Historically, OpenCode
+   1.18.30 did not put the agent on this hook, and the v1 shim used
+   `chat.params` instead; that is not the v2 contract.
 2. **Builds the guard input.** For each tool call it writes the
    `PreToolUse` JSON — `hook_event_name`, `session_id`, `cwd`,
    `tool_name`, and `tool_input` from the call's arguments — and runs
@@ -523,8 +494,8 @@ against OpenCode 2.0.28 source; it did not re-run the stub model.
    call, and its text reaches the model and the session record. On
    1.18.30 the `chat.params` hook carried the agent name. OpenCode v2
    puts `agent` on the `tool.execute.before` event, so the target shim
-   should not use `chat.params`; the checked-in shim still uses
-   `chat.params` pending #77.
+   should not use `chat.params`; the v1 shim using `chat.params` was
+   removed pending #77.
 8. Session export writes the session record as JSON with the agent,
    the model and provider, the OpenCode version, and every tool call.
    `--sanitize` redacts message text, tool arguments, and tool results,
