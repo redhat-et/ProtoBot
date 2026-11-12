@@ -72,14 +72,22 @@ def historical_mutations(
     return mutations
 
 
-def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _git(
+    repo_root: Path,
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Run a git command in *repo_root* and return the completed process."""
+    run_env = dict(os.environ)
+    if env:
+        run_env.update(env)
     return subprocess.run(
         ["git", *args],
         capture_output=True,
         text=True,
         cwd=str(repo_root),
         check=False,
+        env=run_env,
     )
 
 
@@ -95,11 +103,16 @@ def _relative_to_repo(path: Path, repo_root: Path) -> Path | None:
     return resolved.relative_to(root)
 
 
-def _fetch_target(repo_root: Path, target: str) -> None:
-    """Attempt to fetch *target* (SHA or ref name) from origin."""
+def _fetch_target(repo_root: Path, target: str) -> bool:
+    """Attempt to fetch *target* (SHA or ref name) from origin.
+
+    Returns True if a named remote ref or commit object was successfully
+    fetched from origin, False otherwise.
+    """
+    env = {"GIT_TERMINAL_PROMPT": "0"}
     if re.fullmatch(r"[0-9a-fA-F]{7,64}", target):
-        _git(repo_root, "fetch", "--depth=1", "origin", target)
-        return
+        res = _git(repo_root, "fetch", "--depth=1", "origin", target, env=env)
+        return res.returncode == 0
     clean_ref = target
     for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
         if clean_ref.startswith(prefix):
@@ -111,9 +124,9 @@ def _fetch_target(repo_root: Path, target: str) -> None:
         "--depth=1",
         "origin",
         f"+refs/heads/{clean_ref}:refs/remotes/origin/{clean_ref}",
+        env=env,
     )
-    if res.returncode != 0:
-        _git(repo_root, "fetch", "--depth=1", "origin", target)
+    return res.returncode == 0
 
 
 def resolve_baseline_ref(
@@ -149,25 +162,46 @@ def resolve_baseline_ref(
 
     if explicit_ref:
         resolved = _resolve_commit(explicit_ref)
-        if not resolved:
-            _fetch_target(repo_root, explicit_ref)
-            resolved = _resolve_commit(explicit_ref)
+        if not resolved and _fetch_target(repo_root, explicit_ref):
+            clean_ref = explicit_ref
+            for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
+                if clean_ref.startswith(prefix):
+                    clean_ref = clean_ref[len(prefix) :]
+                    break
+            for candidate in [
+                explicit_ref,
+                f"origin/{clean_ref}",
+                f"refs/remotes/origin/{clean_ref}",
+            ]:
+                resolved = _resolve_commit(candidate)
+                if resolved:
+                    break
         return resolved
 
     from_ref = os.environ.get("PRE_COMMIT_FROM_REF")
     if from_ref:
         resolved = _resolve_commit(from_ref)
-        if not resolved:
-            _fetch_target(repo_root, from_ref)
-            resolved = _resolve_commit(from_ref)
+        if not resolved and _fetch_target(repo_root, from_ref):
+            clean_ref = from_ref
+            for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
+                if clean_ref.startswith(prefix):
+                    clean_ref = clean_ref[len(prefix) :]
+                    break
+            for candidate in [
+                from_ref,
+                f"origin/{clean_ref}",
+                f"refs/remotes/origin/{clean_ref}",
+            ]:
+                resolved = _resolve_commit(candidate)
+                if resolved:
+                    break
         if resolved:
             return resolved
 
     base_sha = os.environ.get("GITHUB_BASE_SHA")
     if base_sha:
         resolved = _resolve_commit(base_sha)
-        if not resolved:
-            _fetch_target(repo_root, base_sha)
+        if not resolved and _fetch_target(repo_root, base_sha):
             resolved = _resolve_commit(base_sha)
         if resolved:
             return resolved
@@ -175,24 +209,27 @@ def resolve_baseline_ref(
 
     base_ref = os.environ.get("GITHUB_BASE_REF")
     if base_ref:
+        clean_base = base_ref
+        for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
+            if clean_base.startswith(prefix):
+                clean_base = clean_base[len(prefix) :]
+                break
         for candidate in [
-            f"origin/{base_ref}",
-            base_ref,
-            f"refs/remotes/origin/{base_ref}",
+            f"origin/{clean_base}",
+            clean_base,
+            f"refs/remotes/origin/{clean_base}",
         ]:
             resolved = _resolve_commit(candidate)
             if resolved:
                 return resolved
-        _fetch_target(repo_root, base_ref)
-        for candidate in [
-            f"origin/{base_ref}",
-            base_ref,
-            f"refs/remotes/origin/{base_ref}",
-            "FETCH_HEAD",
-        ]:
-            resolved = _resolve_commit(candidate)
-            if resolved:
-                return resolved
+        if _fetch_target(repo_root, base_ref):
+            for candidate in [
+                f"origin/{clean_base}",
+                f"refs/remotes/origin/{clean_base}",
+            ]:
+                resolved = _resolve_commit(candidate)
+                if resolved:
+                    return resolved
         return None
 
     candidates = [
@@ -207,15 +244,14 @@ def resolve_baseline_ref(
             return resolved
 
     for default_branch in ["main", "master"]:
-        _fetch_target(repo_root, default_branch)
-        for target in [
-            f"origin/{default_branch}",
-            default_branch,
-            "FETCH_HEAD",
-        ]:
-            resolved = _resolve_commit(target)
-            if resolved:
-                return resolved
+        if _fetch_target(repo_root, default_branch):
+            for target in [
+                f"origin/{default_branch}",
+                f"refs/remotes/origin/{default_branch}",
+            ]:
+                resolved = _resolve_commit(target)
+                if resolved:
+                    return resolved
 
     resolved = _resolve_commit("refs/remotes/origin/HEAD")
     if resolved:

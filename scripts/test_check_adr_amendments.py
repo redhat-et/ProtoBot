@@ -345,6 +345,14 @@ class GitRepoCheckTests(unittest.TestCase):
             )
             _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
             _git(self.root, "branch", "-D", "main")
+            _git(self.root, "update-ref", "-d", "refs/remotes/origin/main")
+            verify_missing = subprocess.run(
+                ["git", "rev-parse", "--verify", "origin/main"],
+                cwd=str(self.root),
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(0, verify_missing.returncode)
             os.environ["GITHUB_BASE_REF"] = "main"
             try:
                 rc, output = self._check()
@@ -353,6 +361,84 @@ class GitRepoCheckTests(unittest.TestCase):
             finally:
                 os.environ.pop("GITHUB_BASE_REF", None)
                 _git(self.root, "remote", "remove", "origin")
+
+    def test_github_base_ref_stale_fetch_head_on_fetch_failure_fails_closed(
+        self,
+    ) -> None:
+        """A stale FETCH_HEAD at HEAD is not consulted when fetching GITHUB_BASE_REF fails."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        _git(self.root, "branch", "-D", "main")
+        _git(self.root, "update-ref", "-d", "refs/remotes/origin/main")
+        broken_remote = str(self.root / "nonexistent-remote")
+        _git(self.root, "remote", "add", "origin", broken_remote)
+
+        head_sha = _git(self.root, "rev-parse", "HEAD").stdout.strip()
+        (self.root / ".git" / "FETCH_HEAD").write_text(
+            f"{head_sha}\t\tbranch 'feature' of {broken_remote}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            head_sha,
+            _git(self.root, "rev-parse", "FETCH_HEAD").stdout.strip(),
+        )
+
+        os.environ["GITHUB_BASE_REF"] = "missing-branch"
+        try:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc, _output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("cannot resolve default-branch baseline", stderr.getvalue())
+        finally:
+            os.environ.pop("GITHUB_BASE_REF", None)
+            _git(self.root, "remote", "remove", "origin")
+
+    def test_default_branch_stale_fetch_head_on_fetch_failure_fails_closed(
+        self,
+    ) -> None:
+        """A stale FETCH_HEAD at HEAD is not consulted when default branch fetch fails."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        _git(self.root, "branch", "-D", "main")
+        _git(self.root, "update-ref", "-d", "refs/remotes/origin/main")
+        broken_remote = str(self.root / "nonexistent-remote")
+        _git(self.root, "remote", "add", "origin", broken_remote)
+
+        head_sha = _git(self.root, "rev-parse", "HEAD").stdout.strip()
+        (self.root / ".git" / "FETCH_HEAD").write_text(
+            f"{head_sha}\t\tbranch 'feature' of {broken_remote}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            head_sha,
+            _git(self.root, "rev-parse", "FETCH_HEAD").stdout.strip(),
+        )
+
+        try:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc, _output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("cannot resolve default-branch baseline", stderr.getvalue())
+        finally:
+            _git(self.root, "remote", "remove", "origin")
 
     def test_missing_baseline_ref_fails_closed(self) -> None:
         """When no default-branch baseline can be resolved, check fails closed."""
