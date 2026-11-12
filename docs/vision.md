@@ -1,296 +1,146 @@
 # ProtoBot: Vision
 
-> Initial Sketch artifact — September 2026
+> ProtoBot V2 · November 2026
 
 **Contents:**
 
 - [Purpose](#purpose)
 - [Intended users](#intended-users)
 - [Desired outcomes](#desired-outcomes)
-- [Role in the pipeline](#role-in-the-pipeline)
-- [What is a successful prototype](#what-is-a-successful-prototype)
-- [Prototype vs. production boundary](#prototype-vs-production-boundary)
-- [Self-hosting: the first project](#self-hosting-the-first-project)
-  - [Scope of the first project](#scope-of-the-first-project)
-  - [Non-goals](#non-goals)
-- [Assumptions](#assumptions)
+- [Role in the Hermes pipeline](#role-in-the-hermes-pipeline)
+- [A Git-native specification factory](#a-git-native-specification-factory)
+- [What V2 keeps](#what-v2-keeps)
+- [Authority](#authority)
 
 ---
 
 ## Purpose
 
-ProtoBot is a spec-first software development system. It takes
-structured requirement specifications and generates working, tested,
-inspected prototypes suitable for customer demonstrations, not final
-products.
+ProtoBot is a Git-native specification factory. It turns prose into
+precise EARS requirements, and those requirements are the authoritative
+artifact from which code is derived.
 
-People define _what_ the system should do in precise, structured
-EARS requirements. Everything after that is fully autonomous: test
-generation, code generation, independent inspection, and merge.
-If the prototype is wrong, we fix the authoritative side of the
-mismatch: desired behavior changes go through the specification,
-while code that contradicts an approved requirement is regenerated
-or fixed against that requirement. If we need to start over, we
-discard everything except the specification and regenerate.
+The durable asset is the specification stored in Git: the Vision,
+Architecture, requirements, and interfaces. Code and ordinary tests are
+derived artifacts that converge on the approved requirement text. If
+behavior needs to change, the change belongs in the specification first;
+the implementation follows.
 
-The specification is the durable asset. The code is a disposable,
-regenerable artifact.
-
----
+ProtoBot keeps this idea small enough for one person to understand and
+operate. Git provides history, branches, review, and merge approval.
+GitHub provides issue coordination and automation. ProtoBot does not
+rebuild those primitives in a separate platform.
 
 ## Intended users
 
-ProtoBot serves Red Hat teams that need to validate ideas quickly
-before committing to full product implementation.
+ProtoBot serves Red Hat teams that need to turn an idea into a precise,
+validated specification and then into working, demonstrable software.
 
 The primary users are:
 
-- **Stakeholders and architects** who have validated an idea through
-  IdeaBot and need a working prototype for customer demonstrations
-  and feedback.
-- **Engineers** who define observable system behavior through
-  structured specifications rather than by writing code directly.
+- **Stakeholders and architects** who have researched an idea with
+  IdeaBot and need a clear, reviewable statement of the intended
+  behavior.
+- **Engineers and specification authors** who refine source intent into
+  complete EARS requirements and interface definitions rather than
+  treating generated code as the source of truth.
+- **Implementation and review agents** that use the approved
+  specification as their shared input for coding, testing, and
+  independent review.
 
-ProtoBot must work for a single developer running locally
-(single-player mode) as well as for teams collaborating through a
-standard PR workflow (multi-player mode). Individual developer
-adoption is the on-ramp to broader enterprise deployment. ProtoBot
-must work without requiring an OpenShift or Kubernetes cluster.
-
----
+The workflow supports both a single developer working locally and a team
+collaborating through Git branches, pull requests, and reviews.
 
 ## Desired outcomes
 
 A successful ProtoBot deployment achieves the following:
 
-1. **Idea validation.** Stakeholders can show a working prototype to
-   customers and gather concrete feedback on whether the idea solves
-   a real problem.
-2. **Specification-driven development.** The human's effort goes into
-   defining precise, unambiguous requirements. The system handles
-   implementation autonomously.
-3. **Independent verification.** Tests and code are generated
-   independently by separate agents that cannot see each other's
-   output. Correctness is established when independently generated
-   tests pass against independently generated code.
-4. **Traceable conformance.** Every requirement has clear provenance
-   (who authored it, when, which PR merged it) and commit-scoped
-   conformance evidence (which implementation satisfied it, verified
-   by which tests, at which specification commit).
-5. **Evaluable components.** Every agentic component in the system
-   can be fed a known input, measured against a known output, and
-   independently improved. This is an architectural constraint, not
-   a nice-to-have.
-6. **Clean handoff.** The specification is the deliverable.
-   TransferBot transfers requirements and test expectations to a
-   product team. The prototype is a demonstration artifact, not a
-   product.
+1. **Prose becomes precise requirements.** A stakeholder goal, source
+   issue, or body of research is elicited into unambiguous EARS
+   statements reviewed by humans.
+2. **The specification remains authoritative.** Requirement text, not
+   generated code, defines the intended behavior. Code and tests are
+   derived evidence that the system is converging on that specification.
+3. **Traceability stays visible.** Each active requirement can be traced
+   to its Git history and to ordinary test evidence or an explicit,
+   visible gap.
+4. **Validation is deterministic.** Specification structure, EARS form,
+   identifiers, references, and replacement rules are checked
+   mechanically before implementation proceeds.
+5. **Behavior is demonstrable.** A recorded revision has a reproducible
+   acceptance procedure, expected results, and visible known limitations
+   that a person can inspect.
+6. **Agent handoff is well-defined.** The Drafting Table elicits and
+   organizes the specification; the Fullsend coder and reviewer receive
+   the approved requirements as their authoritative input.
+7. **The system stays comprehensible.** The complete workflow fits
+   within ordinary Git and GitHub concepts rather than a custom control
+   plane.
 
----
-
-## Role in the pipeline
+## Role in the Hermes pipeline
 
 ProtoBot is the second tool in the Hermes pipeline:
 
 ```text
 IdeaBot --> ProtoBot --> TransferBot
-(idea)     (prototype)   (product transfer)
+(idea)     (specification) (product transfer)
 ```
 
-- **IdeaBot** captures and researches ideas, refines them through
-  AI-assisted discovery, and produces structured research artifacts.
-- **ProtoBot** turns those ideas into working, tested, inspected
-  prototypes with enough quality for customer demonstrations.
-- **TransferBot** hands the prototype's specifications and test
-  expectations (not the code) to a product team for real
-  implementation.
+- **IdeaBot** captures and researches ideas. Its artifacts provide the
+  initial evidence, constraints, and assumptions for a new project and
+  seed the first Drafting Table session.
+- **ProtoBot** elicits precise EARS requirements, validates and reviews
+  them, and hands the approved specification to implementation and
+  review agents.
+- **TransferBot** receives the specification and its test expectations,
+  not the prototype's source code, so a product team can continue from
+  what was specified and demonstrated.
 
-The initial handoff from IdeaBot to ProtoBot is manual: a new
-project is started by providing IdeaBot's research artifacts in the
-initial Sketching session to seed the project. Automated integration
-can come later.
+The handoff preserves intent. It carries the specification revision,
+interface definitions, test evidence, review conclusions, and known
+gaps so the next stage does not have to reconstruct why the system
+behaves as it does.
 
-The handoff from ProtoBot to TransferBot is the specifications
-and conformance evidence, not the prototype's source code. The
-prototype is disposable by design. Its purpose is to validate the
-idea and gather feedback.
+## A Git-native specification factory
 
----
+The specification lives with the code as plain files in the repository.
+A specification change is proposed as a pull request; human review and
+merge approve it. The complete specification on the default branch is
+the current target. Git history and merged specification pull requests
+provide provenance without creating a separate delivery record.
 
-## What is a successful prototype
+GitHub Issues carry coordination and ownership, never behavioral
+authority. Fullsend coders can work in parallel on disjoint requirement
+scopes, while the Fullsend reviewer assesses their work independently
+against the requirement text. Each reported result remains tied to an
+exact repository revision.
 
-A prototype is successful when it meets all of the following
-criteria:
+This model makes the specification the common boundary between people
+and agents. People decide what the system should do. Agents help
+determine how to satisfy that description and produce the evidence that
+they have done so.
 
-1. **Observable behavior matches the specification.** Every approved
-   EARS requirement has conformance evidence: independently generated
-   tests pass against independently generated code at a specific,
-   immutable specification commit.
-2. **Independent inspection passes.** Security, test completeness,
-   code quality, and spec conformance inspectors have reviewed the
-   work. All findings are resolved (defects fixed, spec gaps
-   addressed, or explicitly declared out of scope with independent
-   confirmation).
-3. **Demonstrations are possible.** The prototype produces working
-   demonstration artifacts (recorded terminal sessions, screenshots,
-   self-verifying documents, or animated GIFs as appropriate to the
-   interface types) that show the system working as specified.
-4. **The specification is transferable.** The EARS requirements,
-   interface definitions, and conformance evidence are structured,
-   complete, and suitable for handoff to TransferBot and ultimately
-   to a product team.
+## What V2 keeps
 
-A successful prototype does _not_ require:
+ProtoBot V2 keeps the capabilities that make requirement-driven
+development trustworthy:
 
-- Production-grade performance, scalability, or reliability
-- Complete error handling for edge cases the specification does not
-  cover
-- Deployment infrastructure beyond what is needed for demonstration
-- Long-term maintainability of the generated code
+- **Specification validation** checks record structure, EARS form,
+  identifier integrity, references, and replacement rules.
+- **Traceability** connects active requirements to current test
+  evidence, Git history, and any explicit gaps.
+- **Agent handoff** gives drafting, implementation, and review agents a
+  shared, human-approved description of the intended behavior.
 
----
+These capabilities are the product. The surrounding platform is not.
 
-## Prototype vs. production boundary
+## Authority
 
-The prototype is an artifact that proves an idea works. It is not
-production software. The boundary is:
+This document explains and organizes the intent behind ProtoBot V2. It
+does not impose an obligation or add a condition.
 
-| Prototype (ProtoBot's output) | Production (product team's responsibility) |
-| --- | --- |
-| Validates that the idea is feasible and useful | Delivers a reliable, maintained product |
-| Covers specified behavior exhaustively | Covers unspecified edge cases, degraded modes, and operational concerns |
-| Generated code, regenerable from specification | Hand-maintained or separately generated code, owned long-term |
-| Demo-quality (works for customer demonstrations) | Production-quality (works under real load, real failures, real adversaries) |
-| Disposable: specification survives, code does not | Durable: both specification and code are maintained |
-| Tested by independently generated test suites | Tested by the product team's test strategy, seeded by transferred expectations |
-| Single deployment target for demo purposes | Multi-environment deployment, CI/CD, rollback, monitoring |
-
-The prototype's durable output is the specification and the evidence
-that the specification can be satisfied by an implementation. The
-code itself is deliberately disposable. TransferBot transfers
-requirements and test expectations, not code.
-
----
-
-## Self-hosting: the first project
-
-ProtoBot's initial project is to build itself. This bootstrapping
-strategy serves two purposes: it produces a working system, and it
-validates that system under real-world conditions during
-construction.
-
-### Scope of the first project
-
-The initial self-hosting effort builds the components ProtoBot needs
-to function:
-
-1. **Specification Toolkit** — the portable skills, tools, and
-   prompts that encode how to do Sketching and Dimensioning, including
-   the general-purpose EARS elicitation capability, loadable into any
-   compatible agent harness.
-2. **`ears-manager`** — the CLI tool for managing the structured
-   specification store (EARS requirements, interfaces, change sets).
-3. **WMS Adapter** — a thin integration layer over the chosen work
-   management backend, starting with GitHub Issues.
-4. **Job Site** — the autonomous execution engine, starting with a
-   Fullsend integration; a direct OpenShell adapter as the fallback.
-5. **Validation Rules** — shared domain logic for work item
-   lifecycle transitions.
-6. **Source Control Manager** — the deterministic component that
-   turns a proposed change set into commits, pushes, and PRs on the
-   user's request, so that no agent runs Git itself. `ears-manager`
-   cuts every change-set branch except the initialization branch; see
-   [`change-set
-   create`](architecture/ears-manager-cli.md#change-set-create).
-
-The interactive work starts locally in OpenCode with draft
-Specification Toolkit skills. The first Job Site implementation is
-a Fullsend integration spike; the direct OpenShell adapter preserves
-a local/custom path and tests the backend abstraction. The initial
-prototype output types should be whatever ProtoBot's own components
-need (CLI tools, Go binaries, etc.).
-
-### Non-goals
-
-The following are explicitly out of scope for the first self-hosting
-project:
-
-1. **Web Drafting Table.** The TUI Drafting Table (OpenCode or Claude
-   Code with Specification Toolkit skills) is sufficient for
-   bootstrapping. A web UI can be built later as a separate project.
-2. **Multiple WMS backends.** The first project targets GitHub
-   Issues. Jira, GitLab, Beads, and Trello adapters are future work.
-3. **Automated IdeaBot integration.** The handoff from IdeaBot is
-   manual for the first project.
-4. **Kit ecosystem.** Kits are a reusable import mechanism. The first
-   project uses project-local specifications and Inspector
-   definitions directly.
-5. **Multi-project hosting.** The first project is one ProtoBot
-   instance building one project (itself). Multi-tenancy is future
-   work.
-6. **Production deployment infrastructure.** ProtoBot runs locally
-   or in CI. An OpenShift-hosted Job Site with auto-dispatch is a
-   later milestone.
-7. **All prototype output types.** The initial set covers what
-   ProtoBot itself needs (CLI tools, Go binaries). Web UIs, native
-   GUIs, and other output types expand over time.
-8. **Formal compliance certification.** HU-02 compliance and AIA
-   submission are tracked as open questions, not first-project
-   deliverables.
-
----
-
-## Assumptions
-
-The following assumptions underlie this Vision. If any prove false,
-the affected design areas will need revisiting:
-
-1. **EARS is sufficient for ProtoBot's own specifications.** The six
-   EARS patterns can express the requirements for ProtoBot's
-   components (CLI tools, APIs, agent behavior). If ProtoBot's own
-   specifications strain EARS, the format or tooling will need
-   extension.
-2. **Dual-model isolation is practical.** Generating tests and code
-   independently from the same specification, where neither Worker
-   sees the other's output, produces correct and useful prototypes.
-   IdeaBot's oracle-gaming observation and external reimplementation
-   evidence support this, but ProtoBot will be the first system to
-   use it end-to-end.
-3. **Agents can triage test failures reliably.** The Building phase
-   depends on a triage mechanism that correctly attributes failures
-   to tests, code, or both. The mechanism's design is an open
-   question, but the architecture assumes one can be built.
-4. **Specification gaps can be surfaced proactively.** The
-   Dimensioning phase depends on the agent aggressively identifying
-   unspecified behavior before the autonomous phase begins.
-   IdeaBot's experience with Hyrum's Law (unspecified behavior
-   becoming de facto contract) shows this is critical.
-5. **OpenShell or a compatible sandbox provides adequate isolation.**
-   The security model assumes kernel-enforced, deny-by-default
-   execution environments. If OpenShell cannot satisfy the sandbox
-   contract on a target platform, the portable OCI/microVM fallback
-   must be built.
-6. **GitHub's permission model is sufficient for the approval gate.**
-   The multi-player workflow uses PR merge as the human approval
-   boundary, relying on branch protection rules, CODEOWNERS, and
-   required reviews.
-
----
-
-## Related Documents
-
-- [Architecture overview](architecture/overview.md) — guiding
-  principles, EARS format, workflow, and platform
-- [System components](architecture/components.md) — component
-  architecture, interfaces, and cross-cutting concerns
-- [User interaction flow](architecture/user-interaction-flow.md) —
-  phase details, sequence diagrams, and testing strategy
-- [Drafting table UX](architecture/drafting-table-ux.md) — stable
-  interaction contract for the first local Drafting Table
-- [Open design questions](architecture/open-questions.md) —
-  unresolved decisions across all areas
-- [Related work](architecture/related-work.md) — internal and
-  external projects informing the design
-- [Evaluation corpus schema and result contract](architecture/evaluation-corpus.md)
-  — versioned fixtures, holdout isolation, and stage-attributed
-  results
+EARS requirement text is the complete normative statement of behavior
+or an explicit implementation constraint. The Vision, Architecture,
+interfaces, metadata, and tests organize, explain, or provide evidence
+for those requirements; none of them silently adds a condition or
+outcome. An obligation exists only when the requirement text states it.
