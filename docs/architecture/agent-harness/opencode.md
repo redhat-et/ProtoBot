@@ -102,31 +102,19 @@ needs the `external_directory` rule in
 
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
-  "share": "disabled",
-  "permission": {
-    "edit": {
-      ".protobot/**": "deny"
-    }
-  }
+  "share": "disabled"
 }
 ```
 
 - **`share` is `disabled`**, because OpenCode's share feature uploads a
   session (H11).
-- **`edit` is denied under `.protobot/` for every agent.** The `edit`
-  rule covers every OpenCode file tool: `edit`, `write`, and the patch
-  tool. It is the native `.protobot/` slice of guard rule 3 and holds
-  even when plugins do not load; the other protected-path checks remain
-  the guard's responsibility.
-- **MCP server entries and global `apply_patch` denial were removed.**
-  The missing-binary MCP spawn (`source-control-manager`) and global
-  `apply_patch: deny` were removed from root `opencode.json` to unblock
-  ordinary agent sessions. WMS/SCM tool integration is deferred to
+- **MCP server entries, permission denials, and global `apply_patch` denial were
+  removed.** The missing-binary MCP spawn (`source-control-manager`), permission
+  denials, and global `apply_patch: deny` were removed from root `opencode.json`
+  to unblock ordinary agent sessions. WMS/SCM tool integration is deferred to
   milestone M2.
 
-This file disables session sharing and adds the `.protobot/**` edit denial,
-but no allow rules;
+This file disables session sharing, but adds no allow or deny rules;
 [How the rules combine](#how-the-rules-combine) explains why.
 
 ### The `drafting-table` agent
@@ -343,8 +331,7 @@ binding:
 A user's own agent file can still override the project rules, because
 an agent's rules come last. That agent is not the Drafting Table;
 in-repo H8 is inactive until the v2 plugin is restored (#77), so such
-an agent is limited to native OpenCode permission rules (including the root
-`.protobot/**` edit deny).
+an agent is limited to native OpenCode permission rules.
 
 ---
 
@@ -391,7 +378,9 @@ binding cannot know in advance is hidden too.
 | `opencode run --standalone --agent drafting-table --format json "/drafting-table"` | A headless session; this is the v2 headless entry issue #77 should use. The message is the `/drafting-table` command; v2 `run` has no `--command` flag. `--standalone` uses a private server instead of the v2 background service; the checked-in historical driver still uses `--command` without `--standalone` until that port. |
 
 Later turns must also run on `drafting-table`. A turn on another agent
-has no governed tools, and the guard refuses them.
+has no governed tools; in-repo H8 is inactive pending #77, so other-agent
+turns are limited to native OpenCode permission rules rather than guard
+refusal.
 
 ### The first consumer in OpenCode
 
@@ -410,7 +399,7 @@ rejects OpenCode 1.x before it writes that config.
 | # | Obligation | OpenCode binding | Status |
 | --- | --- | --- | --- |
 | H1 | Discover Toolkit skills from `.agents/skills/` | Native discovery | Observed (behavior 1); the fixture has not run |
-| H2 | The `ears-manager` CLI and the `wms` and `scm` tools for the role | `ears-manager *` in the bash rules; the `wms` and `scm` entries and named normalized tool rules | Designed; pattern matching observed on 1.18.30 (behavior 5), the `wms` and `scm` servers not yet. The `scm` server serves MCP revision 2026-07-28 and the legacy 2025-11-25 ([MCP protocol](../source-control-manager.md#mcp-protocol)); the fixture records which one OpenCode v2 negotiates |
+| H2 | The `ears-manager` CLI and the `wms` and `scm` tools for the role | `ears-manager *` in the bash rules; root `opencode.json` has no `wms`/`scm` MCP entries; named tool allows in the agent file are inert until M2 restores those servers | Designed; pattern matching observed on 1.18.30 (behavior 5), the `wms` and `scm` servers not yet. The `scm` server serves MCP revision 2026-07-28 and the legacy 2025-11-25 ([MCP protocol](../source-control-manager.md#mcp-protocol)); the fixture records which one OpenCode v2 negotiates |
 | H3 | `drafting-table` entry point | The command and the agent | Designed; `--agent` observed in the stub runs, the command file not yet |
 | H4 | Resume on every entry, continued session, and compaction | Command prompt and session skill; `--continue` and `--session` continue a session | Designed |
 | H5 | Nothing on idle or exit | The target shim registers no idle or exit hook (shim not checked in pending #77) | Designed |
@@ -435,7 +424,7 @@ row that depends on the guard:
 
 | Write route to a guarded path | `drafting-table` agent | Every other agent |
 | --- | --- | --- |
-| File tool under `.protobot/` project controls | Tool not offered | Refused by the project rule and the guard |
+| File tool under `.protobot/` project controls | Tool not offered | Refused by the active guard |
 | File tool under Git metadata or reserved harness binding paths/files (`.agents/`, `.claude/`, `.codex/`, `.opencode/`, `.github/`, `opencode.json`, `AGENTS.md`, or `CLAUDE.md`) | Tool not offered | Refused by the active guard |
 | File tool under the selected adapter manifest path and its containing directory/`skills/` subtree | Tool not offered | Refused by the active guard, whether or not the selected manifest exists |
 | File tool under configured store paths read from `project.yaml` and resolved safely | Tool not offered | Refused by the active guard |

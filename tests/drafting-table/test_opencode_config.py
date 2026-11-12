@@ -20,22 +20,17 @@ class OpenCodeConfigTest(unittest.TestCase):
         self.assertTrue((ROOT / ".opencode/agents/drafting-table.md").is_file())
         self.assertTrue((ROOT / ".opencode/commands/drafting-table.md").is_file())
 
-    def test_root_opencode_json_disables_sharing_and_protects_protobot(self) -> None:
+    def test_root_opencode_json_only_disables_sharing(self) -> None:
         path = ROOT / "opencode.json"
         self.assertTrue(path.is_file())
-        config = json.loads(path.read_text())
-        self.assertEqual(config.get("share"), "disabled")
-        self.assertEqual(
-            config.get("permission", {}).get("edit", {}).get(".protobot/**"),
-            "deny",
-        )
+        self.assertEqual(json.loads(path.read_text()), {"share": "disabled"})
 
     def test_root_opencode_json_has_no_legacy_references(self) -> None:
         text = (ROOT / "opencode.json").read_text()
         config = json.loads(text)
         self.assertNotIn("mcp", config)
-        self.assertNotIn("apply_patch", config.get("permission", {}))
-        for token in ("source-control-manager", "wms", "ears-manager"):
+        self.assertNotIn("permission", config)
+        for token in ("source-control-manager", "wms", "ears-manager", ".protobot/"):
             with self.subTest(token=token):
                 self.assertNotIn(token, text)
 
