@@ -618,14 +618,21 @@ class GitRepoCheckTests(unittest.TestCase):
             _git(self.root, "commit", "--no-gpg-sign", "-am", "amend on feature")
             _git(self.root, "push", "origin", "feature")
 
-            # Push a newer amendment to main on remote
+            # Push two newer amendments to main on remote (>=2 commits ahead of branch point)
             _git(self.root, "checkout", "main")
             main_path = self.root / self.adr_rel
             main_path.write_text(
-                _ACCEPTED_ADR + "\n**[Amended November 2026]** Main amendment.\n",
+                _ACCEPTED_ADR + "\n**[Amended November 2026]** Main amendment 1.\n",
                 encoding="utf-8",
             )
-            _git(self.root, "commit", "--no-gpg-sign", "-am", "amend on main")
+            _git(self.root, "commit", "--no-gpg-sign", "-am", "amend on main 1")
+            main_path.write_text(
+                _ACCEPTED_ADR
+                + "\n**[Amended November 2026]** Main amendment 1.\n\n"
+                + "**[Amended December 2026]** Main amendment 2.\n",
+                encoding="utf-8",
+            )
+            _git(self.root, "commit", "--no-gpg-sign", "-am", "amend on main 2")
             _git(self.root, "push", "origin", "main")
 
             # Create a depth-1 clone of feature
@@ -651,6 +658,55 @@ class GitRepoCheckTests(unittest.TestCase):
                     )
                 self.assertEqual(0, rc)
                 self.assertEqual("", stdout.getvalue())
+            _git(self.root, "remote", "remove", "origin")
+
+    def test_shallow_clone_unresolvable_merge_base_bounds_and_fails_closed(
+        self,
+    ) -> None:
+        """Deepen loop bounds and fails closed when merge-base cannot resolve."""
+        with tempfile.TemporaryDirectory() as tmp_remote_dir:
+            remote_path = Path(tmp_remote_dir) / "remote"
+            _git(Path(tmp_remote_dir), "init", "--bare", "-b", "main", str(remote_path))
+            _git(self.root, "remote", "add", "origin", str(remote_path))
+            _git(self.root, "push", "origin", "main")
+
+            # Create orphan branch on remote with completely disjoint history
+            _git(self.root, "checkout", "--orphan", "disjoint")
+            _git(self.root, "rm", "-rf", ".")
+            (self.root / "README.md").write_text("Disjoint branch\n", encoding="utf-8")
+            _git(self.root, "add", "README.md")
+            _git(self.root, "commit", "--no-gpg-sign", "-m", "disjoint root")
+            _git(self.root, "push", "origin", "disjoint")
+
+            with tempfile.TemporaryDirectory() as tmp_clone_dir:
+                clone_path = Path(tmp_clone_dir) / "clone"
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "--depth=1",
+                        "--branch=disjoint",
+                        str(remote_path),
+                        str(clone_path),
+                    ],
+                    capture_output=True,
+                    check=True,
+                )
+                # Fetch main into clone
+                _git(
+                    clone_path,
+                    "fetch",
+                    "--depth=1",
+                    "origin",
+                    "+refs/heads/main:refs/remotes/origin/main",
+                )
+                # Attempt to resolve baseline against origin/main; histories are disjoint
+                resolved = checker.resolve_baseline_ref(
+                    clone_path, explicit_ref="origin/main"
+                )
+                self.assertIsNone(resolved)
+            _git(self.root, "checkout", "main")
+            _git(self.root, "branch", "-D", "disjoint")
             _git(self.root, "remote", "remove", "origin")
 
 

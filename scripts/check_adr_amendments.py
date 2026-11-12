@@ -162,6 +162,7 @@ def resolve_baseline_ref(
         rev = _git(repo_root, "rev-parse", "--verify", f"{target}^{{commit}}")
         if rev.returncode != 0 or not rev.stdout.strip():
             return None
+        target_sha = rev.stdout.strip()
         mb = _git(repo_root, "merge-base", "HEAD", target)
         if mb.returncode == 0 and mb.stdout.strip():
             return mb.stdout.strip()
@@ -172,19 +173,51 @@ def resolve_baseline_ref(
         if is_shallow:
             env = {"GIT_TERMINAL_PROMPT": "0"}
             depth = 50
-            while True:
-                fetch_res = _git(
+            clean_ref = target
+            for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
+                if clean_ref.startswith(prefix):
+                    clean_ref = clean_ref[len(prefix) :]
+                    break
+            is_sha = bool(re.fullmatch(r"[0-9a-fA-F]{7,64}", clean_ref))
+            max_attempts = 10
+            for _ in range(max_attempts):
+                fetched_anything = False
+                res_sha = _git(
+                    repo_root,
+                    "fetch",
+                    f"--deepen={depth}",
+                    "origin",
+                    target_sha,
+                    env=env,
+                )
+                if res_sha.returncode == 0:
+                    fetched_anything = True
+                if not is_sha:
+                    res_ref = _git(
+                        repo_root,
+                        "fetch",
+                        f"--deepen={depth}",
+                        "origin",
+                        f"+refs/heads/{clean_ref}:refs/remotes/origin/{clean_ref}",
+                        env=env,
+                    )
+                    if res_ref.returncode == 0:
+                        fetched_anything = True
+                res_origin = _git(
                     repo_root,
                     "fetch",
                     f"--deepen={depth}",
                     "origin",
                     env=env,
                 )
-                if fetch_res.returncode != 0:
-                    break
+                if res_origin.returncode == 0:
+                    fetched_anything = True
+
                 mb = _git(repo_root, "merge-base", "HEAD", target)
                 if mb.returncode == 0 and mb.stdout.strip():
                     return mb.stdout.strip()
+                if not fetched_anything:
+                    break
                 if (
                     _git(
                         repo_root, "rev-parse", "--is-shallow-repository"
