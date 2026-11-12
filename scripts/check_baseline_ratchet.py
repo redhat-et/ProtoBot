@@ -44,6 +44,18 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _SAFE_REF = re.compile(r"^(?!-)[A-Za-z0-9._/@+~-]+$")
 _GITHUB_REPOSITORY = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 _ORIGIN_GITHUB = re.compile(r"(?:github\.com[:/])(?P<repo>[^/]+/[^/]+?)(?:\.git)?$")
+_CONTROL_BYTES = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def sanitize_log_string(value: str) -> str:
+    """Strip CR/LF, ASCII control bytes, and ASCII '::' from log strings."""
+    sanitized = _CONTROL_BYTES.sub("", value)
+    while "::" in sanitized:
+        sanitized = sanitized.replace("::", "")
+    return sanitized
+
+
+_sanitize_log_string = sanitize_log_string
 
 
 class BaselineRatchetError(ValueError):
@@ -196,27 +208,32 @@ def fetch_baseline_http(repository: str, branch: str) -> str | None:
 
 def parse_baseline(raw: str, source: str) -> dict[str, Any]:
     """Parse a skillsaw baseline document from *raw* JSON text."""
+    clean_source = sanitize_log_string(source)
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as error:
         raise BaselineRatchetError(
-            f"ERROR: invalid JSON in {source}: {error.msg}"
+            f"ERROR: invalid JSON in {clean_source}: {sanitize_log_string(error.msg)}"
         ) from error
     if not isinstance(data, dict):
         raise BaselineRatchetError(
-            f"ERROR: {source} must be a JSON object, not {type(data).__name__}"
+            f"ERROR: {clean_source} must be a JSON object, not {type(data).__name__}"
         )
     violations = data.get("violations", [])
     if not isinstance(violations, list):
-        raise BaselineRatchetError(f"ERROR: {source} field 'violations' must be a list")
+        raise BaselineRatchetError(
+            f"ERROR: {clean_source} field 'violations' must be a list"
+        )
     return data
 
 
 def _ceiling_number(value: object, file_path: str, source: str) -> int:
     """Return *value* as an int, rejecting bools and non-integers."""
     if isinstance(value, bool) or not isinstance(value, int):
+        clean_path = sanitize_log_string(file_path)
+        clean_source = sanitize_log_string(source)
         raise BaselineRatchetError(
-            f"ERROR: {source} ceiling for {file_path} has a non-integer value"
+            f"ERROR: {clean_source} ceiling for {clean_path} has a non-integer value"
         )
     return value
 
@@ -226,10 +243,11 @@ def ceiling_values(
 ) -> dict[tuple[str, str], list[int]]:
     """Index ceiling entries as ``(file_path, rule_id) -> [values]``."""
     index: dict[tuple[str, str], list[int]] = {}
+    clean_source = sanitize_log_string(source)
     for entry in data.get("violations", []):
         if not isinstance(entry, dict):
             raise BaselineRatchetError(
-                f"ERROR: {source} violations must be JSON objects"
+                f"ERROR: {clean_source} violations must be JSON objects"
             )
         if entry.get("baseline_mode") != "ceiling":
             continue
@@ -237,15 +255,16 @@ def ceiling_values(
         rule_id = entry.get("rule_id")
         if not isinstance(file_path, str) or not file_path:
             raise BaselineRatchetError(
-                f"ERROR: {source} ceiling entry is missing file_path"
+                f"ERROR: {clean_source} ceiling entry is missing file_path"
             )
+        clean_path = sanitize_log_string(file_path)
         if not isinstance(rule_id, str) or not rule_id:
             raise BaselineRatchetError(
-                f"ERROR: {source} ceiling for {file_path} is missing rule_id"
+                f"ERROR: {clean_source} ceiling for {clean_path} is missing rule_id"
             )
         if "value" not in entry:
             raise BaselineRatchetError(
-                f"ERROR: {source} ceiling for {file_path} is missing a value"
+                f"ERROR: {clean_source} ceiling for {clean_path} is missing a value"
             )
         number = _ceiling_number(entry["value"], file_path, source)
         index.setdefault((file_path, rule_id), []).append(number)
@@ -271,9 +290,10 @@ def compare_ceilings(head: dict[str, Any], base: dict[str, Any]) -> list[str]:
         base_val = min(base_numbers)
         head_val = max(head_index[key])
         if head_val > base_val:
+            clean_path = sanitize_log_string(file_path)
             diagnostics.append(
                 "ERROR: .skillsaw-baseline.json ceiling for "
-                f"{file_path} increased from {base_val} to {head_val}. "
+                f"{clean_path} increased from {base_val} to {head_val}. "
                 "Baseline ceilings may only ratchet downwards or remain "
                 "unchanged."
             )
@@ -304,9 +324,13 @@ def load_base_baseline(
     """
     if explicit_ref is not None:
         if not is_safe_ref(explicit_ref):
-            raise BaselineRatchetError(f"ERROR: invalid --base-ref {explicit_ref!r}")
+            raise BaselineRatchetError(
+                f"ERROR: invalid --base-ref {sanitize_log_string(explicit_ref)!r}"
+            )
         if not git_ref_exists(repo_root, explicit_ref):
-            raise BaselineRatchetError(f"ERROR: --base-ref {explicit_ref} not found")
+            raise BaselineRatchetError(
+                f"ERROR: --base-ref {sanitize_log_string(explicit_ref)} not found"
+            )
         raw = git_show_file(repo_root, explicit_ref, BASELINE_RELATIVE_PATH)
         source = f"{explicit_ref}:{BASELINE_RELATIVE_PATH}"
         if raw is None:
@@ -382,7 +406,10 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
 
     if diagnostics:
         return 1, diagnostics
-    return 0, [f"Validated {n_ceilings} ceiling(s) against {source}; none increased."]
+    clean_source = sanitize_log_string(source)
+    return 0, [
+        f"Validated {n_ceilings} ceiling(s) against {clean_source}; none increased."
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -397,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     exit_code, messages = check_repo(REPO_ROOT, base_ref=args.base_ref)
     stream = sys.stderr if exit_code else sys.stdout
     for message in messages:
-        print(message, file=stream)
+        print(sanitize_log_string(message), file=stream)
     return exit_code
 
 

@@ -54,6 +54,19 @@ class CompareCeilingsTests(unittest.TestCase):
         )
         self.assertEqual([expected], diagnostics)
 
+    def test_increase_sanitizes_file_path(self) -> None:
+        """Strip control bytes and :: from file_path in increase diagnostics."""
+        malicious_path = "AGENTS.md\n::warning::bump"
+        diagnostics = checker.compare_ceilings(
+            _baseline(_ceiling(file_path=malicious_path, value=4100)),
+            _baseline(_ceiling(file_path=malicious_path, value=4000)),
+        )
+        self.assertEqual(1, len(diagnostics))
+        diag = diagnostics[0]
+        self.assertNotIn("\n", diag)
+        self.assertNotIn("::", diag)
+        self.assertIn("AGENTS.mdwarningbump", diag)
+
     def test_same_value_is_accepted(self) -> None:
         """Allow a ceiling that matches the base value."""
         diagnostics = checker.compare_ceilings(
@@ -177,6 +190,89 @@ class ParseBaselineTests(unittest.TestCase):
             checker.ceiling_values(_baseline(entry), "working tree")
 
         self.assertIn("missing file_path", str(raised.exception))
+
+    def test_non_integer_ceiling_sanitizes_file_path(self) -> None:
+        """Strip control bytes and :: from file_path in non-integer error messages."""
+        malicious_path = "AGENTS.md\n::warning::injected\r\n::add-mask::token"
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(
+                _baseline(_ceiling(file_path=malicious_path, value="bad")),  # type: ignore[arg-type]
+                "working tree",
+            )
+        msg = str(raised.exception)
+        self.assertNotIn("\n", msg)
+        self.assertNotIn("\r", msg)
+        self.assertNotIn("::", msg)
+        self.assertIn("AGENTS.mdwarninginjectedadd-masktoken", msg)
+
+    def test_missing_rule_id_sanitizes_file_path(self) -> None:
+        """Strip control bytes and :: from file_path when rule_id is missing."""
+        malicious_path = "AGENTS.md\n::warning::payload"
+        entry = _ceiling(file_path=malicious_path)
+        del entry["rule_id"]
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(_baseline(entry), "working tree")
+        msg = str(raised.exception)
+        self.assertNotIn("\n", msg)
+        self.assertNotIn("::", msg)
+        self.assertIn("AGENTS.mdwarningpayload", msg)
+
+    def test_missing_value_sanitizes_file_path(self) -> None:
+        """Strip control bytes and :: from file_path when value is missing."""
+        malicious_path = "AGENTS.md\r\n::warning::payload"
+        entry = _ceiling(file_path=malicious_path)
+        del entry["value"]
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(_baseline(entry), "working tree")
+        msg = str(raised.exception)
+        self.assertNotIn("\r", msg)
+        self.assertNotIn("\n", msg)
+        self.assertNotIn("::", msg)
+        self.assertIn("AGENTS.mdwarningpayload", msg)
+
+
+class SanitizeLogStringTests(unittest.TestCase):
+    def test_clean_string_is_unchanged(self) -> None:
+        """Leave safe strings without newlines, control bytes, or :: untouched."""
+        self.assertEqual("AGENTS.md", checker.sanitize_log_string("AGENTS.md"))
+        self.assertEqual(
+            "docs/vision.md", checker.sanitize_log_string("docs/vision.md")
+        )
+        self.assertEqual(
+            "path with spaces.txt", checker.sanitize_log_string("path with spaces.txt")
+        )
+
+    def test_strip_crlf_and_control_bytes(self) -> None:
+        """Strip CR, LF, null bytes, escape characters, and DEL."""
+        self.assertEqual("foobar", checker.sanitize_log_string("foo\r\nbar"))
+        self.assertEqual(
+            "foobar", checker.sanitize_log_string("foo\x00\x07\x1b\x7fbar")
+        )
+        self.assertEqual("foobar", checker.sanitize_log_string("\n\rfoo\tbar\n"))
+
+    def test_strip_ascii_colons(self) -> None:
+        """Strip ASCII '::' workflow command delimiters, including nested or repeated."""
+        self.assertEqual("warning", checker.sanitize_log_string("::warning::"))
+        self.assertEqual("", checker.sanitize_log_string("::::"))
+        self.assertEqual(":", checker.sanitize_log_string(":::"))
+        self.assertEqual(
+            "set-output name=xval",
+            checker.sanitize_log_string("::set-output name=x::val"),
+        )
+
+    def test_strip_crlf_and_workflow_commands_combined(self) -> None:
+        """Neutralize workflow command injection payloads in interpolated values."""
+        payload = (
+            "AGENTS.md\r\n::warning::malicious workflow command\n::add-mask::secret"
+        )
+        sanitized = checker.sanitize_log_string(payload)
+        self.assertNotIn("\r", sanitized)
+        self.assertNotIn("\n", sanitized)
+        self.assertNotIn("::", sanitized)
+        self.assertEqual(
+            "AGENTS.mdwarningmalicious workflow commandadd-masksecret",
+            sanitized,
+        )
 
 
 class GitHubSourceTests(unittest.TestCase):
@@ -607,6 +703,26 @@ class CheckRepoTests(unittest.TestCase):
 
         self.assertEqual(1, result)
         self.assertIn("increased from 4000 to 4100", stderr.getvalue())
+
+    def test_cli_sanitizes_workflow_commands_in_diagnostics(self) -> None:
+        """Verify that main() strips control bytes and :: before printing to stream."""
+        malicious_path = "AGENTS.md\n::warning::injected\n"
+        self._write_baseline(
+            _baseline(_ceiling(file_path=malicious_path, value="invalid"))
+        )  # type: ignore[arg-type]
+        stderr = io.StringIO()
+
+        with (
+            patch.object(checker, "REPO_ROOT", self.root),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = checker.main(["--base-ref", "main"])
+
+        self.assertEqual(1, result)
+        out = stderr.getvalue()
+        self.assertEqual(1, out.count("\n"))
+        self.assertNotIn("::", out)
+        self.assertIn("AGENTS.mdwarninginjected", out)
 
 
 if __name__ == "__main__":
