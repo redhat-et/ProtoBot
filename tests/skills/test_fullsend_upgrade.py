@@ -747,7 +747,9 @@ class FullsendSetupPreviewTests(unittest.TestCase):
             "  TIMEOUT_SECONDS = 30\n\n"
             "Would set 2 repository secrets:\n"
             "  DEPLOY_TOKEN\n"
-            "  CLOUD_KEY"
+            "  CLOUD_KEY\n"
+            "\n"
+            "Would remove stale vendored assets at .fullsend/bin/fullsend (if present)"
         )
         root = Path("/offline/repository")
         target = "example-org/example-repo"

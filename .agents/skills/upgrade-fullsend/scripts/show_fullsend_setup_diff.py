@@ -152,6 +152,13 @@ def parse_setup_state(output: str) -> SetupState:
         if not stripped:
             continue
 
+        if (
+            section == "secrets"
+            and stripped
+            == "Would remove stale vendored assets at .fullsend/bin/fullsend (if present)"
+        ):
+            section = None
+            continue
         if section == "variables":
             match = re.match(
                 r"\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<value>.*)$",

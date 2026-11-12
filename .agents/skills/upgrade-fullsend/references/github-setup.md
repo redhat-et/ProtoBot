@@ -88,6 +88,12 @@ apply only individually approved changes; the preview helper stays read-only.
 Malformed variable or secret rows, unsupported settings headings, or missing
 required settings sections cause a controlled failure (status `2`), not an
 empty settings plan.
+
+The setup output may include the non-setting footer
+`Would remove stale vendored assets at .fullsend/bin/fullsend (if present)`
+after the secrets list. The helper accepts only that exact footer in this
+position and continues to print the raw output for review.
+
 When the helper exits with status `3`, it reports a workflow difference or
 unresolved repository settings. This is a report status: apply the mandatory
 workflow and pin updates, and request approval only before changing repository
