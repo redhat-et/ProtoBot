@@ -323,7 +323,7 @@ The v2 target design:
    the call before the tool runs and returns that message to the model
    as the tool result, and keeps it in the session record.
 
-The shim holds no rule, reads no project file, and does nothing when a
+The target shim holds no rule, reads no project file, and does nothing when a
 session is idle or ends (H5).
 
 ### How the rules combine
@@ -341,8 +341,10 @@ binding:
 | A catch-all deny in an agent file | It follows the allow that OpenCode adds for each discovered skill's directory, so a skill outside the project cannot read its own `references/` | A user-scope install adds `external_directory` allow for `~/.agents/skills/*` to the agent |
 
 A user's own agent file can still override the project rules, because
-an agent's rules come last. That agent is not the Drafting Table, and
-the guard still applies to it.
+an agent's rules come last. That agent is not the Drafting Table;
+in-repo H8 is inactive until the v2 plugin is restored (#77), so such
+an agent is limited to native OpenCode permission rules (including the root
+`.protobot/**` edit deny).
 
 ---
 
@@ -411,10 +413,10 @@ rejects OpenCode 1.x before it writes that config.
 | H2 | The `ears-manager` CLI and the `wms` and `scm` tools for the role | `ears-manager *` in the bash rules; the `wms` and `scm` entries and named normalized tool rules | Designed; pattern matching observed on 1.18.30 (behavior 5), the `wms` and `scm` servers not yet. The `scm` server serves MCP revision 2026-07-28 and the legacy 2025-11-25 ([MCP protocol](../source-control-manager.md#mcp-protocol)); the fixture records which one OpenCode v2 negotiates |
 | H3 | `drafting-table` entry point | The command and the agent | Designed; `--agent` observed in the stub runs, the command file not yet |
 | H4 | Resume on every entry, continued session, and compaction | Command prompt and session skill; `--continue` and `--session` continue a session | Designed |
-| H5 | Nothing on idle or exit | The shim registers no idle or exit hook | Designed |
+| H5 | Nothing on idle or exit | The target shim registers no idle or exit hook (shim not checked in pending #77) | Designed |
 | H6 | Replayable session record | OpenCode's session record and `opencode session export`; the resolved rules come from `opencode debug agents` | Observed on 1.18.30 for `opencode export` (behavior 8); v2 command is `opencode session export` |
 | H7 | Headless replay with no permission prompt | `opencode run --standalone --format json`, a replay provider, no `ask` rules | Observed for the replay provider and the `ask` rejection (behaviors 6, 9); the fixture has not run |
-| H8 | Invoke the guard on each tool call and enforce its decision | The shim | Active-hook refusal is observed (behavior 7); if the plugin is absent or no hook is registered, allowed `ears-manager` commands bypass guard-only shell restrictions, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (recorded gap); `"*": deny` still refuses `git` and `gh` |
+| H8 | Invoke the guard on each tool call and enforce its decision | The target shim (shim not checked in pending #77) | Historical 1.18.30 observation only (behavior 7); shim not checked in, leaving H8 inactive in-repo pending #77. If the plugin is absent or no hook is registered, allowed `ears-manager` commands bypass guard-only shell restrictions, so a credential file or an expanded variable such as `$GH_TOKEN` can reach governed state (recorded gap); `"*": deny` still refuses `git` and `gh` |
 | H9 | Hide file-writing, subagent, and web tools | `"*": deny` | Observed (behavior 3) |
 | H10 | Toolkit skills only | `skill` rule with `"*": deny` first; other skills are hidden from the model's list and refused | Observed (behavior 2) |
 | H11 | No credential in binding files; no session upload | Placeholders; `share: disabled` | Designed |
