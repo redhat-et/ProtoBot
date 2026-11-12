@@ -4,5 +4,6 @@ use (
 	./drafting-table
 	./ears-manager
 	./source-control-manager
+	./validator
 	./wms
 )

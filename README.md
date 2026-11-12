@@ -79,6 +79,10 @@ source-control-manager/
   internal/golden/          # the golden repository fixture, replayed
   internal/testing/         # the gh and ears-manager stubs of the fixture
   internal/jobsite/         # Worker projection isolation and sandbox contract (#78, #79)
+validator/
+  go.mod
+  cmd/validator/            # V2 specification validator CLI
+  internal/cli/             # checkout path and comparison-base arguments
 wms/
   go.mod
   adapter/                  # backend-neutral wire types and operation surfaces
@@ -98,6 +102,7 @@ The install targets are:
 go install github.com/redhat-et/protobot/ears-manager/cmd/ears-manager@latest
 go install github.com/redhat-et/protobot/source-control-manager/cmd/source-control-manager@latest
 go install github.com/redhat-et/protobot/drafting-table/cmd/drafting-table-guard@latest
+go install github.com/redhat-et/protobot/validator/cmd/validator@latest
 ```
 
 Run the Drafting Table guard's local Go checks from its module:
