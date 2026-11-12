@@ -150,7 +150,6 @@ def parse_setup_state(output: str) -> SetupState:
                 f"{heading.group('section')} heading"
             )
         if not stripped:
-            section = None
             continue
 
         if section == "variables":

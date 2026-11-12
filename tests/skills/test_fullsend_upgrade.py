@@ -551,6 +551,103 @@ class FullsendPinUpdaterTests(unittest.TestCase):
 
 
 class FullsendSetupPreviewTests(unittest.TestCase):
+    def run_preview(
+        self,
+        current_workflow: bytes,
+        generated_workflow: bytes,
+        setup_state: setup_preview.SetupState,
+    ) -> tuple[int, str, str]:
+        with tempfile.TemporaryDirectory() as root_directory:
+            root = Path(root_directory)
+            workflow_path = root / ".github" / "workflows" / "fullsend.yaml"
+            workflow_path.parent.mkdir(parents=True)
+            workflow_path.write_bytes(current_workflow)
+            planned_file = setup_preview.PlannedFile(
+                ".github/workflows/fullsend.yaml", len(generated_workflow)
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with (
+                patch.object(
+                    setup_preview, "resolve_cli_version", return_value="v1.2.3"
+                ),
+                patch.object(
+                    setup_preview,
+                    "run_setup_dry_run",
+                    return_value=("", [planned_file], setup_state),
+                ),
+                patch.object(
+                    setup_preview, "resolve_workflow_sha", return_value="a" * 40
+                ),
+                patch.object(
+                    setup_preview, "resolve_runner", return_value="ubuntu-latest"
+                ),
+                patch.object(
+                    setup_preview,
+                    "resolve_ref_comment_separator",
+                    return_value=" # ",
+                ),
+                patch.object(
+                    setup_preview,
+                    "render_generated_file",
+                    return_value=generated_workflow,
+                ),
+                patch.object(setup_preview, "list_current_variables", return_value={}),
+                patch.object(setup_preview, "list_current_secrets", return_value=set()),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                result = setup_preview.main(
+                    [
+                        "example-org/example-repo",
+                        "--version",
+                        "v1.2.3",
+                        "--root",
+                        str(root),
+                    ]
+                )
+
+        return result, stdout.getvalue(), stderr.getvalue()
+
+    def test_preview_returns_zero_when_workflows_and_settings_are_in_sync(self) -> None:
+        workflow = b"jobs: {}\n"
+
+        result, _, error = self.run_preview(
+            workflow,
+            workflow,
+            setup_preview.SetupState({}, ()),
+        )
+
+        self.assertEqual(0, result)
+        self.assertNotIn("# REVIEW REQUIRED", error)
+
+    def test_preview_returns_three_when_generated_workflow_differs(self) -> None:
+        result, output, error = self.run_preview(
+            b"jobs: {}\n",
+            b"jobs:\n  check: {}\n",
+            setup_preview.SetupState({}, ()),
+        )
+
+        self.assertEqual(3, result)
+        self.assertIn("+jobs:\n", output)
+        self.assertIn("# REVIEW REQUIRED", error)
+
+    def test_preview_returns_three_when_generated_secret_is_missing(self) -> None:
+        workflow = (
+            b"jobs:\n  check:\n    env:\n      TOKEN: ${{ secrets.DEPLOY_TOKEN }}\n"
+        )
+
+        result, _, error = self.run_preview(
+            workflow,
+            workflow,
+            setup_preview.SetupState({}, ("DEPLOY_TOKEN",)),
+        )
+
+        self.assertEqual(3, result)
+        self.assertIn("MISSING DEPLOY_TOKEN", error)
+        self.assertIn("# REVIEW REQUIRED", error)
+
     def test_setup_state_rejects_secret_count_mismatches_with_status_2(self) -> None:
         output = (
             "Would commit: .github/workflows/fullsend.yaml (1 bytes)\n"
@@ -647,6 +744,7 @@ class FullsendSetupPreviewTests(unittest.TestCase):
             "Would commit: .github/workflows/prioritize.yml (240 bytes)\n"
             "Would set repository variables:\n"
             "  SERVICE_URL = https://example.invalid/api\n\n"
+            "  TIMEOUT_SECONDS = 30\n\n"
             "Would set 2 repository secrets:\n"
             "  DEPLOY_TOKEN\n"
             "  CLOUD_KEY"
@@ -672,7 +770,10 @@ class FullsendSetupPreviewTests(unittest.TestCase):
         )
         self.assertEqual(
             setup_preview.SetupState(
-                {"SERVICE_URL": "https://example.invalid/api"},
+                {
+                    "SERVICE_URL": "https://example.invalid/api",
+                    "TIMEOUT_SECONDS": "30",
+                },
                 ("DEPLOY_TOKEN", "CLOUD_KEY"),
             ),
             state,
