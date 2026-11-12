@@ -454,9 +454,19 @@ class CheckRepoTests(unittest.TestCase):
         env = {
             key: value
             for key, value in os.environ.items()
-            if key not in {"BASELINE_RATCHET_BASE_REF", "GITHUB_BASE_REF"}
+            if key
+            not in {
+                "BASELINE_RATCHET_BASE_REF",
+                "GITHUB_BASE_REF",
+                "CI",
+                "GITHUB_ACTIONS",
+                "GITHUB_REPOSITORY",
+            }
         }
-        with patch.dict(os.environ, env, clear=True):
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(checker, "fetch_baseline_http", return_value=None),
+        ):
             exit_code, messages = checker.check_repo(other)
 
         self.assertEqual(0, exit_code)
