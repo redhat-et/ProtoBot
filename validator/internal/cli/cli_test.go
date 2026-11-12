@@ -141,6 +141,37 @@ func TestRunTargetIsFile(t *testing.T) {
 	}
 }
 
+func TestRunValidSpecRecords(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+status: active
+`)
+	writeSpecFile(t, target, "spec/interfaces/cli.yaml", "name: cli\nkind: cli\ndescription: Validator command line.\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunLayoutDiagnostics(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+}
+
 func TestRunIsDeterministic(t *testing.T) {
 	target := t.TempDir()
 	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")
@@ -181,4 +212,15 @@ func moduleRoot(t *testing.T) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(file), "..", "..")
+}
+
+func writeSpecFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

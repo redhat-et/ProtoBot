@@ -6,8 +6,12 @@ comparison base; it does not contact a tracker, a network service, or
 an external daemon.
 
 This module is the foundation for later check groups. The command line
-accepts the checkout path and comparison base. Schema, EARS, identifier,
-and reference checks land in follow-on work.
+accepts the checkout path and comparison base. It reads requirement and
+interface YAML records from `spec/requirements/` and `spec/interfaces/`
+in the target checkout. Missing directories are treated as empty.
+Unreadable files, non-YAML entries, and malformed YAML produce
+diagnostics. Schema, EARS, identifier, and reference checks land in
+follow-on work.
 
 ```text
 validator --target PATH --base REF
