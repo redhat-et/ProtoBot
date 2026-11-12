@@ -902,6 +902,24 @@ else
 fi
 restore_adr
 
+git -C "${REPO_ROOT}" rm -q "${ADR_FILE}"
+
+lint_del_default_rc=0
+lint_del_default_output="$(python3 "${LINT}" 2>&1)" || lint_del_default_rc=$?
+# shellcheck disable=SC2001  # regex substitution requires sed
+lint_del_default_clean="$(echo "${lint_del_default_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+if [[ "${lint_del_default_rc}" -ne 0 ]] \
+    && echo "${lint_del_default_clean}" | grep -qE "✗ adr-amendments( |$)" \
+    && echo "${lint_del_default_clean}" | grep -qF "accepted architecture decision record was deleted"; then
+    echo "PASS  adr-amendments-deletion-default: deleting an accepted ADR is rejected under default lint.py"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL  adr-amendments-deletion-default: expected adr-amendments failure on deletion with no --files (exit ${lint_del_default_rc})"
+    echo "${lint_del_default_output}" | tail -12 | sed 's/^/    /'
+    FAIL=$((FAIL + 1))
+fi
+restore_adr
+
 # ── Summary ──────────────────────────────────────────────────
 
 echo ""

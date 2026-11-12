@@ -262,6 +262,94 @@ class GitRepoCheckTests(unittest.TestCase):
         finally:
             os.environ.pop("PRE_COMMIT_FROM_REF", None)
 
+    def test_github_base_ref_environment_variable(self) -> None:
+        """GITHUB_BASE_REF resolves the baseline branch when main is renamed or custom."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        _git(self.root, "branch", "-m", "main", "custom-base")
+        os.environ["GITHUB_BASE_REF"] = "custom-base"
+        try:
+            rc, output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("rewritten or replaced in place", output)
+        finally:
+            os.environ.pop("GITHUB_BASE_REF", None)
+
+    def test_github_base_sha_environment_variable(self) -> None:
+        """GITHUB_BASE_SHA resolves the baseline commit SHA."""
+        base_sha = _git(self.root, "rev-parse", "main").stdout.strip()
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        _git(self.root, "branch", "-D", "main")
+        os.environ["GITHUB_BASE_SHA"] = base_sha
+        try:
+            rc, output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("rewritten or replaced in place", output)
+        finally:
+            os.environ.pop("GITHUB_BASE_SHA", None)
+
+    def test_missing_baseline_ref_fails_closed(self) -> None:
+        """When no default-branch baseline can be resolved, check fails closed."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        _git(self.root, "branch", "-D", "main")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc, _output = self._check()
+        self.assertEqual(1, rc)
+        self.assertIn("cannot resolve default-branch baseline", stderr.getvalue())
+
+    def test_invalid_explicit_baseline_ref_fails_closed(self) -> None:
+        """An invalid explicit baseline ref fails closed."""
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc, _output = self._check(baseline_ref="nonexistent-ref")
+        self.assertEqual(1, rc)
+        self.assertIn("cannot resolve default-branch baseline", stderr.getvalue())
+
+    def test_git_show_blob_missing_path_returns_none(self) -> None:
+        """A path not in the tree returns (None, None)."""
+        text, err = checker._git_show_blob(
+            self.root,
+            "HEAD:docs/decisions/nonexistent.md",
+        )
+        self.assertIsNone(text)
+        self.assertIsNone(err)
+
+    def test_git_show_blob_invalid_revision_returns_error(self) -> None:
+        """An invalid revision returns an error rather than swallowing it."""
+        text, err = checker._git_show_blob(
+            self.root,
+            "invalid-revision:docs/decisions/0001-example.md",
+        )
+        self.assertIsNone(text)
+        self.assertIsNotNone(err)
+
     def test_committed_amendment_on_feature_branch_passes(self) -> None:
         """Appending and committing an amendment on a feature branch passes."""
         _git(self.root, "checkout", "-b", "feature")

@@ -98,25 +98,56 @@ def _relative_to_repo(path: Path, repo_root: Path) -> Path | None:
 def resolve_baseline_ref(
     repo_root: Path,
     explicit_ref: str | None = None,
-) -> str:
+) -> str | None:
     """Resolve the git ref or commit SHA to baseline historical text against.
 
     Priority:
     1. *explicit_ref* if provided.
     2. ``PRE_COMMIT_FROM_REF`` environment variable if set.
-    3. Merge-base with the default branch (probing candidate refs:
+    3. ``GITHUB_BASE_SHA`` environment variable if set.
+    4. ``GITHUB_BASE_REF`` environment variable if set (probing ``origin/<ref>``,
+       ``<ref>``, and ``refs/remotes/origin/<ref>``).
+    5. Merge-base with the default branch (probing candidate refs:
        ``origin/main``, ``main``, ``origin/master``, ``master``,
        ``refs/remotes/origin/HEAD``).
-    4. Fallback to ``HEAD``.
+
+    Returns ``None`` when no baseline ref can be resolved (fail closed).
     """
-    candidate_ref = explicit_ref or os.environ.get("PRE_COMMIT_FROM_REF")
-    if candidate_ref:
-        mb = _git(repo_root, "merge-base", "HEAD", candidate_ref)
-        if mb.returncode == 0 and mb.stdout.strip():
-            return mb.stdout.strip()
-        rev = _git(repo_root, "rev-parse", "--verify", f"{candidate_ref}^{{commit}}")
+
+    def _resolve_commit(target: str) -> str | None:
+        rev = _git(repo_root, "rev-parse", "--verify", f"{target}^{{commit}}")
         if rev.returncode == 0 and rev.stdout.strip():
+            mb = _git(repo_root, "merge-base", "HEAD", target)
+            if mb.returncode == 0 and mb.stdout.strip():
+                return mb.stdout.strip()
             return rev.stdout.strip()
+        return None
+
+    if explicit_ref:
+        return _resolve_commit(explicit_ref)
+
+    from_ref = os.environ.get("PRE_COMMIT_FROM_REF")
+    if from_ref:
+        resolved = _resolve_commit(from_ref)
+        if resolved:
+            return resolved
+
+    base_sha = os.environ.get("GITHUB_BASE_SHA")
+    if base_sha:
+        resolved = _resolve_commit(base_sha)
+        if resolved:
+            return resolved
+
+    base_ref = os.environ.get("GITHUB_BASE_REF")
+    if base_ref:
+        for candidate in [
+            f"origin/{base_ref}",
+            base_ref,
+            f"refs/remotes/origin/{base_ref}",
+        ]:
+            resolved = _resolve_commit(candidate)
+            if resolved:
+                return resolved
 
     candidates = [
         "origin/main",
@@ -126,14 +157,11 @@ def resolve_baseline_ref(
         "refs/remotes/origin/HEAD",
     ]
     for target in candidates:
-        rev = _git(repo_root, "rev-parse", "--verify", f"{target}^{{commit}}")
-        if rev.returncode == 0:
-            mb = _git(repo_root, "merge-base", "HEAD", target)
-            if mb.returncode == 0 and mb.stdout.strip():
-                return mb.stdout.strip()
-            return target
+        resolved = _resolve_commit(target)
+        if resolved:
+            return resolved
 
-    return "HEAD"
+    return None
 
 
 def _git_show_blob(
@@ -147,10 +175,10 @@ def _git_show_blob(
         return None, "git not found on PATH"
     if exists.returncode != 0:
         stderr = exists.stderr.lower()
-        if "not a git repository" in stderr or "bad revision" in stderr:
-            detail = exists.stderr.strip() or "git cat-file failed"
-            return None, detail
-        return None, None
+        if "does not exist in" in stderr or "but not in" in stderr:
+            return None, None
+        detail = exists.stderr.strip() or "git cat-file failed"
+        return None, detail
     try:
         shown = _git(repo_root, "show", ref_and_path)
     except FileNotFoundError:
@@ -275,6 +303,13 @@ def check(
     """Return 0 when every given or enumerated accepted ADR preserves historical lines."""
     failed = False
     resolved_baseline = resolve_baseline_ref(repo_root, baseline_ref)
+    if resolved_baseline is None:
+        print(
+            "ERROR: cannot resolve default-branch baseline ref to check against",
+            file=sys.stderr,
+        )
+        return 1
+
     renames = get_renames(repo_root, resolved_baseline)
     handled_renames: set[str] = set()
 
@@ -376,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=(
             "Baseline git ref or commit SHA (default: merge-base with default branch, "
-            "or PRE_COMMIT_FROM_REF env var)"
+            "or PRE_COMMIT_FROM_REF / GITHUB_BASE_SHA / GITHUB_BASE_REF env vars)"
         ),
     )
     parser.add_argument(
