@@ -172,6 +172,19 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "null\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+}
+
 func TestRunIsDeterministic(t *testing.T) {
 	target := t.TempDir()
 	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")

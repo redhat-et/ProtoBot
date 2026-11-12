@@ -194,6 +194,14 @@ func TestReadMalformedYAML(t *testing.T) {
 	writeFile(t, target, "spec/requirements/bad.yaml", "id: [\n")
 	writeFile(t, target, "spec/interfaces/empty.yaml", "")
 	writeFile(t, target, "spec/interfaces/multi.yaml", "name: one\n---\nname: two\n")
+	writeFile(t, target, "spec/requirements/dup.yaml", "id: REQ-API-00001\nid: REQ-API-00002\n")
+	writeFile(t, target, "spec/requirements/merge.yaml", "defaults: &defaults\n  status: active\n<<: *defaults\nid: REQ-API-00003\n")
+	writeFile(t, target, "spec/requirements/alias.yaml", "id: &id REQ-API-00004\ntext: *id\n")
+	writeFile(t, target, "spec/requirements/null.yaml", "null\n")
+	writeFile(t, target, "spec/interfaces/null.yaml", "~\n")
+	writeFile(t, target, "spec/requirements/scalar.yaml", "scalar\n")
+	writeFile(t, target, "spec/interfaces/seq.yaml", "- item\n")
+	writeFile(t, target, "spec/requirements/null-field.yaml", "id: REQ-API-00005\nstatus: null\n")
 
 	snapshot, diagnostics := Read(target)
 	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/bad.yaml") {
@@ -205,8 +213,95 @@ func TestReadMalformedYAML(t *testing.T) {
 	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/interfaces/multi.yaml") {
 		t.Fatalf("missing multi-document diagnostic: %v", diagnostics)
 	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/dup.yaml") {
+		t.Fatalf("missing duplicate key diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/merge.yaml") {
+		t.Fatalf("missing merge key diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/alias.yaml") {
+		t.Fatalf("missing alias diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/null.yaml") {
+		t.Fatalf("missing null document diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/interfaces/null.yaml") {
+		t.Fatalf("missing null interface diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/scalar.yaml") {
+		t.Fatalf("missing scalar diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/interfaces/seq.yaml") {
+		t.Fatalf("missing sequence diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/null-field.yaml") {
+		t.Fatalf("missing null field diagnostic: %v", diagnostics)
+	}
 	if len(snapshot.Requirements) != 1 {
 		t.Fatalf("valid requirement was dropped: %+v", snapshot.Requirements)
+	}
+}
+
+func TestReadFieldsMatchDecodedRecord(t *testing.T) {
+	target := t.TempDir()
+	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", validRequirement)
+	writeFile(t, target, "spec/interfaces/health-api.yaml", validInterface)
+
+	snapshot, diagnostics := Read(target)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v", diagnostics)
+	}
+	if len(snapshot.Requirements) != 1 || len(snapshot.Interfaces) != 1 {
+		t.Fatalf("unexpected snapshot size: %+v", snapshot)
+	}
+
+	req := snapshot.Requirements[0]
+	expectedReqFields := map[string]bool{
+		"id":                       true,
+		"type":                     true,
+		"text":                     true,
+		"applies_to":               true,
+		"applies_to.interfaces":    true,
+		"applies_to.interfaces[0]": true,
+		"applies_to.scopes":        true,
+		"applies_to.scopes[0]":     true,
+		"relationships":            true,
+		"relationships[0]":         true,
+		"relationships[0].type":    true,
+		"relationships[0].target":  true,
+		"status":                   true,
+	}
+	if len(req.Fields) != len(expectedReqFields) {
+		t.Fatalf("fields count = %d, want %d: %v", len(req.Fields), len(expectedReqFields), req.Fields)
+	}
+	for f := range expectedReqFields {
+		if !req.Fields[f] {
+			t.Errorf("expected field %q not found in Fields", f)
+		}
+	}
+	if req.Record.ID != "REQ-API-00002" || !req.Fields["id"] {
+		t.Errorf("ID mismatch: record=%q fields=%v", req.Record.ID, req.Fields["id"])
+	}
+	if req.Record.Type != records.TypeEventDriven || !req.Fields["type"] {
+		t.Errorf("Type mismatch: record=%q fields=%v", req.Record.Type, req.Fields["type"])
+	}
+	if req.Record.Status != records.StatusActive || !req.Fields["status"] {
+		t.Errorf("Status mismatch: record=%q fields=%v", req.Record.Status, req.Fields["status"])
+	}
+
+	iface := snapshot.Interfaces[0]
+	expectedIfaceFields := map[string]bool{
+		"name":        true,
+		"kind":        true,
+		"description": true,
+	}
+	if len(iface.Fields) != len(expectedIfaceFields) {
+		t.Fatalf("iface fields count = %d, want %d: %v", len(iface.Fields), len(expectedIfaceFields), iface.Fields)
+	}
+	for f := range expectedIfaceFields {
+		if !iface.Fields[f] {
+			t.Errorf("expected interface field %q not found in Fields", f)
+		}
 	}
 }
 

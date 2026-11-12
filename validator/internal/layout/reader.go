@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/redhat-et/protobot/validator/internal/records"
 	"gopkg.in/yaml.v3"
@@ -172,6 +173,13 @@ func safeEntryName(name string) bool {
 
 func decodeRecord[T any](data []byte) (T, map[string]bool, error) {
 	var zero T
+	if !utf8.Valid(data) {
+		return zero, nil, fmt.Errorf("YAML input is not valid UTF-8")
+	}
+	if bytes.HasPrefix(data, []byte{0xef, 0xbb, 0xbf}) {
+		return zero, nil, fmt.Errorf("YAML input must not contain a UTF-8 BOM")
+	}
+
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	var document yaml.Node
 	if err := decoder.Decode(&document); err != nil {
@@ -183,6 +191,15 @@ func decodeRecord[T any](data []byte) (T, map[string]bool, error) {
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
 		return zero, nil, fmt.Errorf("YAML document is empty")
 	}
+
+	root := document.Content[0]
+	if err := inspectNode(root, "$"); err != nil {
+		return zero, nil, err
+	}
+	if root.Kind != yaml.MappingNode {
+		return zero, nil, fmt.Errorf("YAML record root must be a mapping")
+	}
+
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
@@ -192,12 +209,55 @@ func decodeRecord[T any](data []byte) (T, map[string]bool, error) {
 	}
 
 	var value T
-	if err := document.Content[0].Decode(&value); err != nil {
+	if err := root.Decode(&value); err != nil {
 		return zero, nil, fmt.Errorf("decode YAML record: %w", err)
 	}
 	fields := make(map[string]bool)
-	collectFields(document.Content[0], "", fields)
+	collectFields(root, "", fields)
 	return value, fields, nil
+}
+
+func inspectNode(node *yaml.Node, location string) error {
+	if node.Kind == yaml.AliasNode {
+		return fmt.Errorf("unsafe YAML alias at %s", location)
+	}
+	if node.Tag == "!!null" {
+		return fmt.Errorf("YAML null values are not allowed at %s", location)
+	}
+	if node.Style&yaml.TaggedStyle != 0 {
+		return fmt.Errorf("unsafe YAML tag at %s", location)
+	}
+	if strings.HasPrefix(node.Tag, "!") && !strings.HasPrefix(node.Tag, "!!") {
+		return fmt.Errorf("unsafe YAML tag %q at %s", node.Tag, location)
+	}
+
+	switch node.Kind {
+	case yaml.MappingNode:
+		keys := make(map[string]struct{}, len(node.Content)/2)
+		for i := 0; i < len(node.Content); i += 2 {
+			key := node.Content[i]
+			if key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
+				return fmt.Errorf("YAML mapping key at %s must be a string", location)
+			}
+			if key.Value == "<<" {
+				return fmt.Errorf("YAML merge key is not allowed at %s", location)
+			}
+			if _, exists := keys[key.Value]; exists {
+				return fmt.Errorf("duplicate YAML key %q at %s", key.Value, location)
+			}
+			keys[key.Value] = struct{}{}
+			if err := inspectNode(node.Content[i+1], location+"."+key.Value); err != nil {
+				return err
+			}
+		}
+	case yaml.SequenceNode:
+		for i, child := range node.Content {
+			if err := inspectNode(child, fmt.Sprintf("%s[%d]", location, i)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func collectFields(node *yaml.Node, location string, fields map[string]bool) {
