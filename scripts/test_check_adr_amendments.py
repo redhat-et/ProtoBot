@@ -305,6 +305,55 @@ class GitRepoCheckTests(unittest.TestCase):
         finally:
             os.environ.pop("GITHUB_BASE_SHA", None)
 
+    def test_github_base_sha_unreachable_fails_closed(self) -> None:
+        """When GITHUB_BASE_SHA points to an unreachable SHA, check fails closed."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        os.environ["GITHUB_BASE_SHA"] = "0" * 40
+        try:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc, _output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("cannot resolve default-branch baseline", stderr.getvalue())
+        finally:
+            os.environ.pop("GITHUB_BASE_SHA", None)
+
+    def test_github_base_ref_fetches_from_origin_when_missing_locally(self) -> None:
+        """GITHUB_BASE_REF fetches the baseline branch from origin when missing locally."""
+        with tempfile.TemporaryDirectory() as tmp_remote_dir:
+            remote_path = Path(tmp_remote_dir) / "remote"
+            _git(Path(tmp_remote_dir), "init", "--bare", "-b", "main", str(remote_path))
+            _git(self.root, "remote", "add", "origin", str(remote_path))
+            _git(self.root, "push", "origin", "main")
+            _git(self.root, "checkout", "-b", "feature")
+            path = self.root / self.adr_rel
+            path.write_text(
+                _ACCEPTED_ADR.replace(
+                    "Use one file per record.",
+                    "Use JSONL storage instead.",
+                ),
+                encoding="utf-8",
+            )
+            _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+            _git(self.root, "branch", "-D", "main")
+            os.environ["GITHUB_BASE_REF"] = "main"
+            try:
+                rc, output = self._check()
+                self.assertEqual(1, rc)
+                self.assertIn("rewritten or replaced in place", output)
+            finally:
+                os.environ.pop("GITHUB_BASE_REF", None)
+                _git(self.root, "remote", "remove", "origin")
+
     def test_missing_baseline_ref_fails_closed(self) -> None:
         """When no default-branch baseline can be resolved, check fails closed."""
         _git(self.root, "checkout", "-b", "feature")

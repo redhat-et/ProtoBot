@@ -95,6 +95,27 @@ def _relative_to_repo(path: Path, repo_root: Path) -> Path | None:
     return resolved.relative_to(root)
 
 
+def _fetch_target(repo_root: Path, target: str) -> None:
+    """Attempt to fetch *target* (SHA or ref name) from origin."""
+    if re.fullmatch(r"[0-9a-fA-F]{7,64}", target):
+        _git(repo_root, "fetch", "--depth=1", "origin", target)
+        return
+    clean_ref = target
+    for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
+        if clean_ref.startswith(prefix):
+            clean_ref = clean_ref[len(prefix) :]
+            break
+    res = _git(
+        repo_root,
+        "fetch",
+        "--depth=1",
+        "origin",
+        f"+refs/heads/{clean_ref}:refs/remotes/origin/{clean_ref}",
+    )
+    if res.returncode != 0:
+        _git(repo_root, "fetch", "--depth=1", "origin", target)
+
+
 def resolve_baseline_ref(
     repo_root: Path,
     explicit_ref: str | None = None,
@@ -111,6 +132,9 @@ def resolve_baseline_ref(
        ``origin/main``, ``main``, ``origin/master``, ``master``,
        ``refs/remotes/origin/HEAD``).
 
+    When a ref or commit SHA is not present locally, an attempt is made
+    to fetch it from ``origin`` with ``--depth=1``.
+
     Returns ``None`` when no baseline ref can be resolved (fail closed).
     """
 
@@ -124,19 +148,30 @@ def resolve_baseline_ref(
         return None
 
     if explicit_ref:
-        return _resolve_commit(explicit_ref)
+        resolved = _resolve_commit(explicit_ref)
+        if not resolved:
+            _fetch_target(repo_root, explicit_ref)
+            resolved = _resolve_commit(explicit_ref)
+        return resolved
 
     from_ref = os.environ.get("PRE_COMMIT_FROM_REF")
     if from_ref:
         resolved = _resolve_commit(from_ref)
+        if not resolved:
+            _fetch_target(repo_root, from_ref)
+            resolved = _resolve_commit(from_ref)
         if resolved:
             return resolved
 
     base_sha = os.environ.get("GITHUB_BASE_SHA")
     if base_sha:
         resolved = _resolve_commit(base_sha)
+        if not resolved:
+            _fetch_target(repo_root, base_sha)
+            resolved = _resolve_commit(base_sha)
         if resolved:
             return resolved
+        return None
 
     base_ref = os.environ.get("GITHUB_BASE_REF")
     if base_ref:
@@ -148,18 +183,43 @@ def resolve_baseline_ref(
             resolved = _resolve_commit(candidate)
             if resolved:
                 return resolved
+        _fetch_target(repo_root, base_ref)
+        for candidate in [
+            f"origin/{base_ref}",
+            base_ref,
+            f"refs/remotes/origin/{base_ref}",
+            "FETCH_HEAD",
+        ]:
+            resolved = _resolve_commit(candidate)
+            if resolved:
+                return resolved
+        return None
 
     candidates = [
         "origin/main",
         "main",
         "origin/master",
         "master",
-        "refs/remotes/origin/HEAD",
     ]
     for target in candidates:
         resolved = _resolve_commit(target)
         if resolved:
             return resolved
+
+    for default_branch in ["main", "master"]:
+        _fetch_target(repo_root, default_branch)
+        for target in [
+            f"origin/{default_branch}",
+            default_branch,
+            "FETCH_HEAD",
+        ]:
+            resolved = _resolve_commit(target)
+            if resolved:
+                return resolved
+
+    resolved = _resolve_commit("refs/remotes/origin/HEAD")
+    if resolved:
+        return resolved
 
     return None
 
