@@ -52,14 +52,17 @@ func TestRunHelp(t *testing.T) {
 
 func TestRunNoArgumentsShowsUsage(t *testing.T) {
 	code, stdout, stderr := runCLI()
-	if code != exitOK || stderr != "" {
+	if code != exitUsage || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "usage:") {
-		t.Fatalf("stdout %q omitted usage", stdout)
+	if !strings.Contains(stderr, "usage:") {
+		t.Fatalf("stderr %q omitted usage", stderr)
 	}
-	if !strings.Contains(stdout, "--target") || !strings.Contains(stdout, "--base") {
-		t.Fatalf("stdout %q omitted flag names", stdout)
+	if !strings.Contains(stderr, "--target") || !strings.Contains(stderr, "--base") {
+		t.Fatalf("stderr %q omitted flag names", stderr)
+	}
+	if !strings.Contains(stderr, "--target is required") {
+		t.Fatalf("stderr %q omitted --target requirement", stderr)
 	}
 }
 

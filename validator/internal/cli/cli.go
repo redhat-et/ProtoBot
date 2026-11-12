@@ -38,10 +38,6 @@ type options struct {
 
 // Run executes the validator command line and returns the exit status.
 func Run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		_, _ = io.WriteString(stdout, usage)
-		return exitOK
-	}
 	opts, err := parseArgs(args)
 	if err != nil {
 		return usageError(stderr, err.Error())
