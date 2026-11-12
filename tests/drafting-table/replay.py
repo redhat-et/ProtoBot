@@ -323,7 +323,9 @@ def copy_project_inputs(project: Path) -> None:
         )
     shutil.copytree(ROOT / ".opencode/agents", project / ".opencode/agents")
     shutil.copytree(ROOT / ".opencode/commands", project / ".opencode/commands")
-    shutil.copytree(ROOT / ".opencode/plugins", project / ".opencode/plugins")
+    plugins = ROOT / ".opencode/plugins"
+    if plugins.is_dir():
+        shutil.copytree(plugins, project / ".opencode/plugins")
     (project / "docs").mkdir()
     (project / "docs/vision.md").write_text(
         "# Fixture Vision\n\nLocal deterministic fixture.\n"
@@ -633,7 +635,6 @@ def skill_files() -> list[Path]:
         ROOT / "opencode.json",
         ROOT / ".opencode/agents/drafting-table.md",
         ROOT / ".opencode/commands/drafting-table.md",
-        ROOT / ".opencode/plugins/protobot-guard.js",
     ]
     for skill in ("drafting-specifications", "eliciting-requirements", "review-pr"):
         paths.extend(sorted((ROOT / ".agents/skills" / skill).rglob("*")))
