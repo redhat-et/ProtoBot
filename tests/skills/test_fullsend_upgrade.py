@@ -182,6 +182,34 @@ class FullsendPinUpdaterTests(unittest.TestCase):
         assert plan is not None
         self.assertEqual(expected, plan.updated.decode("utf-8"))
 
+    def test_comment_only_workflow_pin_is_not_counted_or_rewritten(self) -> None:
+        harness_original = (
+            'base: "https://raw.githubusercontent.com/fullsend-ai/agents/'
+            f'v0.9.0/harness/review.yaml#sha256={"a" * 64}"\n'
+        )
+        workflow_original = (
+            "# uses: fullsend-ai/fullsend/.github/workflows/reusable-ci.yml@"
+            f"{'b' * 40} # v0.9.0\n"
+        )
+        self.harness.write_text(harness_original, encoding="utf-8")
+        self.workflow.write_text(workflow_original, encoding="utf-8")
+
+        with (
+            patch.object(updater, "fetch_bytes", return_value=b"harness\n"),
+            patch.object(updater, "resolve_workflow_sha", return_value="c" * 40),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as error,
+        ):
+            result = updater.main(
+                ["--version", "v1.2.3", "--root", str(self.root), "--write"]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn(
+            "ERROR: no Fullsend reusable workflow pins found", error.getvalue()
+        )
+        self.assertEqual(workflow_original, self.workflow.read_text(encoding="utf-8"))
+
     def test_discover_targets_only_includes_yaml_extensions(self) -> None:
         for kind, directory in (
             ("harness", self.harness.parent),
@@ -368,6 +396,43 @@ class FullsendPinUpdaterTests(unittest.TestCase):
             f"v1.2.3/harness/review.yaml#sha256={harness_digest}",
             self.harness.read_text(encoding="utf-8"),
         )
+        self.assertEqual(workflow_original, self.workflow.read_text(encoding="utf-8"))
+
+    def test_write_preserves_file_changed_during_network_planning(self) -> None:
+        harness_original = (
+            'base: "https://raw.githubusercontent.com/fullsend-ai/agents/'
+            f'v0.9.0/harness/review.yaml#sha256={"a" * 64}"\n'
+        )
+        newer_harness = harness_original + "# changed during planning\n"
+        workflow_original = (
+            "uses: fullsend-ai/fullsend/.github/workflows/reusable-ci.yml@"
+            f"{'b' * 40} # v0.9.0\n"
+        )
+        self.harness.write_text(harness_original, encoding="utf-8")
+        self.workflow.write_text(workflow_original, encoding="utf-8")
+
+        def mutate_harness_during_fetch(url: str, timeout: float) -> bytes:
+            self.harness.write_text(newer_harness, encoding="utf-8")
+            return b"updated harness content\n"
+
+        with (
+            patch.object(
+                updater, "fetch_bytes", side_effect=mutate_harness_during_fetch
+            ),
+            patch.object(updater, "resolve_workflow_sha", return_value="c" * 40),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as error,
+        ):
+            result = updater.main(
+                ["--version", "v1.2.3", "--root", str(self.root), "--write"]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn(
+            ".fullsend/harness/review.yaml changed since planning", error.getvalue()
+        )
+        self.assertIn("re-run the updater to plan again", error.getvalue())
+        self.assertEqual(newer_harness, self.harness.read_text(encoding="utf-8"))
         self.assertEqual(workflow_original, self.workflow.read_text(encoding="utf-8"))
 
     def test_explicit_target_cannot_escape_repository_root(self) -> None:

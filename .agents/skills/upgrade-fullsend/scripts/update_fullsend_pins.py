@@ -31,6 +31,7 @@ HARNESS_PIN_PATTERN = re.compile(
     r"#sha256=(?P<sha>[0-9A-Fa-f]{64})"
 )
 WORKFLOW_PIN_PATTERN = re.compile(
+    r"(?m)^(?P<line_prefix>[ \t]*uses:[ \t]*)"
     r"(?P<quote>['\"]?)"
     r"(?P<prefix>fullsend-ai/fullsend/\.github/workflows/"
     r"reusable-[A-Za-z0-9_.-]+\.ya?ml@)"
@@ -332,7 +333,8 @@ def update_workflow_file(
     updated_text = text
     replacements: list[Replacement] = []
     for match in reversed(matches):
-        old_pin = match.group(0)
+        line_prefix = match.group("line_prefix")
+        old_pin = match.group(0)[len(line_prefix) :]
         if (
             match.group("sha").lower() == workflow_sha.lower()
             and match.group("tag") == version
@@ -344,7 +346,10 @@ def update_workflow_file(
             f"{quote}{match.group('prefix')}{workflow_sha}{quote}{separator}{version}"
         )
         updated_text = (
-            updated_text[: match.start()] + new_pin + updated_text[match.end() :]
+            updated_text[: match.start()]
+            + line_prefix
+            + new_pin
+            + updated_text[match.end() :]
         )
         replacements.append(Replacement(path, old_pin, new_pin))
 
@@ -495,6 +500,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     for plan in plans:
         try:
+            if plan.path.read_bytes() != plan.original:
+                print(
+                    f"ERROR: {relative_path(plan.path, root)} changed since planning; "
+                    "re-run the updater to plan again",
+                    file=sys.stderr,
+                )
+                return 2
             atomic_write(plan.path, plan.updated)
         except OSError as exc:
             print(
