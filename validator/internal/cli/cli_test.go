@@ -1,0 +1,184 @@
+package cli
+
+import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func TestRunValidTargetAndBase(t *testing.T) {
+	target := t.TempDir()
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+	if !strings.Contains(stdout, "target: "+target) {
+		t.Fatalf("stdout %q does not include target", stdout)
+	}
+	if !strings.Contains(stdout, "base: main") {
+		t.Fatalf("stdout %q does not include base", stdout)
+	}
+}
+
+func TestRunEqualsForm(t *testing.T) {
+	target := t.TempDir()
+	code, stdout, stderr := runCLI("--target="+target, "--base=origin/main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "base: origin/main") {
+		t.Fatalf("stdout %q does not include equals-form base", stdout)
+	}
+}
+
+func TestRunHelp(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"--help", "--bogus"}} {
+		code, stdout, stderr := runCLI(args...)
+		if code != exitOK || stderr != "" {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "--target") || !strings.Contains(stdout, "--base") {
+			t.Fatalf("help stdout %q omitted flag names", stdout)
+		}
+	}
+}
+
+func TestRunNoArgumentsShowsUsage(t *testing.T) {
+	code, stdout, stderr := runCLI()
+	if code != exitUsage || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "usage:") {
+		t.Fatalf("stderr %q omitted usage", stderr)
+	}
+	if !strings.Contains(stderr, "--target") || !strings.Contains(stderr, "--base") {
+		t.Fatalf("stderr %q omitted flag names", stderr)
+	}
+	if !strings.Contains(stderr, "--target is required") {
+		t.Fatalf("stderr %q omitted --target requirement", stderr)
+	}
+}
+
+func TestCommandBuilds(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "validator")
+	cmd := exec.Command("go", "build", "-o", out, "./cmd/validator")
+	cmd.Dir = moduleRoot(t)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build ./cmd/validator failed: %v\n%s", err, output)
+	}
+}
+
+func TestRunMissingBase(t *testing.T) {
+	code, _, stderr := runCLI("--target", t.TempDir())
+	if code != exitUsage {
+		t.Fatalf("code=%d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr, "--base is required") {
+		t.Fatalf("stderr %q omitted --base requirement", stderr)
+	}
+}
+
+func TestRunMalformedFlags(t *testing.T) {
+	target := t.TempDir()
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "unknown option", args: []string{"--unknown"}, want: "unexpected argument"},
+		{name: "positional", args: []string{target, "main"}, want: "unexpected argument"},
+		{name: "target without value", args: []string{"--target"}, want: "--target takes a directory path"},
+		{name: "base without value", args: []string{"--target", target, "--base"}, want: "--base takes a comparison-base argument"},
+		{name: "empty target", args: []string{"--target=", "--base", "main"}, want: "--target takes a directory path"},
+		{name: "empty base", args: []string{"--target", target, "--base="}, want: "--base takes a comparison-base argument"},
+		{name: "duplicate target", args: []string{"--target", target, "--target", target, "--base", "main"}, want: "--target may be specified once"},
+		{name: "duplicate base", args: []string{"--target", target, "--base", "main", "--base", "other"}, want: "--base may be specified once"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(tc.args...)
+			if code != exitUsage || stdout != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Fatalf("stderr %q does not contain %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunMissingTarget(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	code, stdout, stderr := runCLI("--target", missing, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "does not exist") {
+		t.Fatalf("stderr %q omitted missing-path message", stderr)
+	}
+}
+
+func TestRunTargetIsFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file")
+	if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI("--target", path, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "is not a directory") {
+		t.Fatalf("stderr %q omitted directory message", stderr)
+	}
+}
+
+func TestRunIsDeterministic(t *testing.T) {
+	target := t.TempDir()
+	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")
+	code2, stdout2, stderr2 := runCLI("--target", target, "--base", "main")
+	if code1 != code2 || stdout1 != stdout2 || stderr1 != stderr2 {
+		t.Fatalf("repeated invocation differed: (%d, %q, %q) vs (%d, %q, %q)", code1, stdout1, stderr1, code2, stdout2, stderr2)
+	}
+}
+
+func TestModuleDoesNotDependOnNetworkPackages(t *testing.T) {
+	cmd := exec.Command("go", "list", "-deps", "./...")
+	cmd.Dir = moduleRoot(t)
+	out, err := cmd.Output()
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("go list -deps failed: %v\n%s", err, exit.Stderr)
+		}
+		t.Fatalf("go list -deps failed: %v", err)
+	}
+	for _, pkg := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "net" || strings.HasPrefix(pkg, "net/") {
+			t.Errorf("validator depends on network package %s", pkg)
+		}
+	}
+}
+
+func runCLI(args ...string) (int, string, string) {
+	var stdout, stderr bytes.Buffer
+	code := Run(args, &stdout, &stderr)
+	return code, stdout.String(), stderr.String()
+}
+
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..")
+}
