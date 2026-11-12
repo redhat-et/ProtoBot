@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import http.client
 import io
 import json
 import os
@@ -346,6 +347,27 @@ class GitHubSourceTests(unittest.TestCase):
             mock_opener.open.side_effect = checker._UnexpectedRedirectError("redirect")
             self.assertIsNone(checker.fetch_baseline_http("redhat-et/ProtoBot", "main"))
 
+    def test_fetch_baseline_http_returns_none_on_http_exception(self) -> None:
+        """Treat http.client.HTTPException as a fetch failure rather than a traceback."""
+        with patch.object(
+            checker.urllib.request,
+            "build_opener",
+        ) as mock_build_opener:
+            mock_opener = mock_build_opener.return_value
+            mock_opener.open.side_effect = http.client.BadStatusLine("corrupt")
+            self.assertIsNone(checker.fetch_baseline_http("redhat-et/ProtoBot", "main"))
+
+    def test_fetch_baseline_http_returns_none_on_incomplete_read(self) -> None:
+        """Treat http.client.IncompleteRead as a fetch failure rather than a traceback."""
+        with patch.object(
+            checker.urllib.request,
+            "build_opener",
+        ) as mock_build_opener:
+            mock_opener = mock_build_opener.return_value
+            mock_response = mock_opener.open.return_value.__enter__.return_value
+            mock_response.read.side_effect = http.client.IncompleteRead(b"partial")
+            self.assertIsNone(checker.fetch_baseline_http("redhat-et/ProtoBot", "main"))
+
 
 class NoRedirectHandlerTests(unittest.TestCase):
     def test_redirect_request_raises_unexpected_redirect(self) -> None:
@@ -430,6 +452,42 @@ class CandidateRefTests(unittest.TestCase):
         with patch.object(checker, "git_commit_sha", side_effect=fake_commit_sha):
             resolved = checker.resolve_base_ref(Path("/tmp"))
             self.assertEqual("main", resolved)
+
+    def test_stale_first_candidate_without_baseline_is_skipped(self) -> None:
+        """Skip candidate refs that lack a baseline file when a later candidate has it."""
+
+        def fake_git_ref_exists(repo_root: Path, ref: str) -> bool:
+            return ref in ("upstream/main", "origin/main")
+
+        def fake_git_show_file(repo_root: Path, ref: str, path: str) -> str | None:
+            if ref == "upstream/main":
+                return None
+            if ref == "origin/main":
+                return '{"violations": []}'
+            return None
+
+        with (
+            patch.object(checker, "git_ref_exists", side_effect=fake_git_ref_exists),
+            patch.object(checker, "git_show_file", side_effect=fake_git_show_file),
+        ):
+            resolved = checker.resolve_base_ref(Path("/tmp"))
+            self.assertEqual("origin/main", resolved)
+
+    def test_all_candidates_lacking_baseline_falls_back_to_first_existing(self) -> None:
+        """Fall back to the first existing candidate when none have the baseline file."""
+
+        def fake_git_ref_exists(repo_root: Path, ref: str) -> bool:
+            return ref in ("upstream/main", "origin/main")
+
+        def fake_git_show_file(repo_root: Path, ref: str, path: str) -> str | None:
+            return None
+
+        with (
+            patch.object(checker, "git_ref_exists", side_effect=fake_git_ref_exists),
+            patch.object(checker, "git_show_file", side_effect=fake_git_show_file),
+        ):
+            resolved = checker.resolve_base_ref(Path("/tmp"))
+            self.assertEqual("upstream/main", resolved)
 
 
 class CheckRepoTests(unittest.TestCase):
@@ -723,6 +781,41 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(1, out.count("\n"))
         self.assertNotIn("::", out)
         self.assertIn("AGENTS.mdwarninginjected", out)
+
+    def test_merge_base_used_when_base_branch_lowered_ceiling(self) -> None:
+        """Use merge-base so stale branches do not fail when base branch lowered a ceiling."""
+        self._git("checkout", "-b", "feature")
+
+        self._git("checkout", "main")
+        self._write_baseline(_baseline(_ceiling(value=3800)))
+        self._git("add", checker.BASELINE_RELATIVE_PATH)
+        self._git("commit", "-m", "main lowers ceiling to 3800")
+
+        self._git("checkout", "feature")
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+        self.assertEqual(0, exit_code)
+        self.assertTrue(messages)
+        self.assertIn("none increased", messages[0])
+
+        self._write_baseline(_baseline(_ceiling(value=4100)))
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+        self.assertEqual(1, exit_code)
+        self.assertIn("increased from 4000 to 4100", messages[0])
+
+    def test_shallow_push_checkout_skips_in_ci(self) -> None:
+        """Skip baseline ratchet in CI on shallow push checkouts lacking base history."""
+        env = {
+            "CI": "true",
+            "GITHUB_EVENT_NAME": "push",
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(checker, "is_shallow_repository", return_value=True),
+        ):
+            exit_code, messages = checker.check_repo(self.root)
+            self.assertEqual(0, exit_code)
+            self.assertIn("shallow push checkout lacks base history", messages[0])
 
 
 if __name__ == "__main__":

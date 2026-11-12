@@ -523,6 +523,12 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "pass_filenames": False,
                 "default_files": r"^\.skillsaw-baseline\.json$",
             },
+            "test-baseline-ratchet": {
+                "cmd": "python3",
+                "fixed_args": ["scripts/test_check_baseline_ratchet.py"],
+                "pass_filenames": False,
+                "default_files": r"^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$",
+            },
         },
     },
 }

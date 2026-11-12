@@ -475,20 +475,27 @@ fi
 echo ""
 echo "── Baseline ceiling ratchet ────────────────────────────"
 
-# Resolve a local base ref. Prefer origin/main, then main, then HEAD~1.
-# If falling back to HEAD~1, resolve it to its 40-character commit SHA.
-ratchet_base_ref=""
-for ref_candidate in "origin/main" "main" "HEAD~1"; do
-    cand_commit="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet "${ref_candidate}^{commit}" 2>/dev/null || true)"
+# Resolve a local base ref using the hook's own candidate order and logic.
+ratchet_base_ref="$(python3 - "${REPO_ROOT}" <<'PY'
+import sys
+from pathlib import Path
+repo_root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repo_root / "scripts"))
+import check_baseline_ratchet
+
+ref = check_baseline_ratchet.resolve_base_ref(repo_root)
+if ref is not None:
+    print(ref)
+PY
+)"
+if [[ -z "${ratchet_base_ref}" ]]; then
+    cand_commit="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet "HEAD~1^{commit}" 2>/dev/null || true)"
     if [[ -n "${cand_commit}" ]]; then
-        if [[ "${ref_candidate}" == "HEAD~1" ]]; then
+        if git -C "${REPO_ROOT}" show "${cand_commit}:.skillsaw-baseline.json" >/dev/null 2>&1; then
             ratchet_base_ref="${cand_commit}"
-        else
-            ratchet_base_ref="${ref_candidate}"
         fi
-        break
     fi
-done
+fi
 
 baseline_adjust_ceiling() {
     local new_value="$1"

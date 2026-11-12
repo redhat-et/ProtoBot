@@ -156,3 +156,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^\.skillsaw-baseline\.json$
+      - id: test-baseline-ratchet
+        name: test-baseline-ratchet
+        entry: python3 scripts/test_check_baseline_ratchet.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$

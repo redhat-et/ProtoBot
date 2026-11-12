@@ -20,6 +20,7 @@ runs skip with a warning so the rest of ``pre-commit run -a`` can finish.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -121,6 +122,40 @@ def git_show_file(repo_root: Path, ref: str, path: str) -> str | None:
     return result.stdout
 
 
+def git_merge_base(repo_root: Path, ref: str, head_ref: str = "HEAD") -> str | None:
+    """Return the merge base commit between *ref* and *head_ref*, or ``None``."""
+    if not is_safe_ref(ref) or not is_safe_ref(head_ref):
+        return None
+    result = _git(repo_root, "merge-base", ref, head_ref)
+    if result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha if sha else None
+
+
+def is_ci_environment() -> bool:
+    """Return True when running in a CI or automation environment."""
+    return any(
+        os.environ.get(var, "").strip()
+        for var in ("CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF", "GITHUB_REPOSITORY")
+    )
+
+
+def is_shallow_repository(repo_root: Path) -> bool:
+    """Return True when *repo_root* is a shallow git repository."""
+    result = _git(repo_root, "rev-parse", "--is-shallow-repository")
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def is_shallow_push_checkout(repo_root: Path) -> bool:
+    """Return True when running in CI on a shallow push checkout."""
+    if not is_ci_environment():
+        return False
+    if not is_shallow_repository(repo_root):
+        return False
+    return os.environ.get("GITHUB_EVENT_NAME", "").strip() == "push"
+
+
 def _candidate_base_refs(explicit: str | None = None) -> list[str]:
     """Return de-duplicated base-ref candidates in resolution order."""
     candidates: list[str] = []
@@ -141,11 +176,25 @@ def _candidate_base_refs(explicit: str | None = None) -> list[str]:
 
 
 def resolve_base_ref(repo_root: Path, explicit: str | None = None) -> str | None:
-    """Return the first existing candidate ref, or ``None`` if none exist."""
-    for ref in _candidate_base_refs(explicit):
-        if git_ref_exists(repo_root, ref):
+    """Return the candidate ref to use as the base branch.
+
+    If an explicit ref is given and exists, return it. Otherwise, walk candidate
+    refs in priority order and return the first one whose
+    ``.skillsaw-baseline.json`` exists. If none has the file, return the first
+    candidate that names an existing commit (or ``None`` if none exist).
+    """
+    if explicit is not None:
+        return explicit if git_ref_exists(repo_root, explicit) else None
+
+    fallback: str | None = None
+    for ref in _candidate_base_refs():
+        if not git_ref_exists(repo_root, ref):
+            continue
+        if fallback is None:
+            fallback = ref
+        if git_show_file(repo_root, ref, BASELINE_RELATIVE_PATH) is not None:
             return ref
-    return None
+    return fallback
 
 
 def github_repository(repo_root: Path) -> str | None:
@@ -193,7 +242,13 @@ def fetch_baseline_http(repository: str, branch: str) -> str | None:
         opener = urllib.request.build_opener(_NoRedirectHandler())
         with opener.open(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
             content = response.read(MAX_RESPONSE_BYTES + 1)
-    except (urllib.error.URLError, TimeoutError, OSError, _UnexpectedRedirectError):
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        http.client.HTTPException,
+        _UnexpectedRedirectError,
+    ):
         return None
     if len(content) > MAX_RESPONSE_BYTES:
         return None
@@ -328,7 +383,9 @@ def load_base_baseline(
             raise BaselineRatchetError(
                 f"ERROR: --base-ref {sanitize_log_string(explicit_ref)} not found"
             )
-        raw = git_show_file(repo_root, explicit_ref, BASELINE_RELATIVE_PATH)
+        mb = git_merge_base(repo_root, explicit_ref, "HEAD")
+        target_ref = mb if mb is not None else explicit_ref
+        raw = git_show_file(repo_root, target_ref, BASELINE_RELATIVE_PATH)
         source = f"{explicit_ref}:{BASELINE_RELATIVE_PATH}"
         if raw is None:
             return source, {"violations": []}
@@ -336,7 +393,9 @@ def load_base_baseline(
 
     resolved = resolve_base_ref(repo_root)
     if resolved is not None:
-        raw = git_show_file(repo_root, resolved, BASELINE_RELATIVE_PATH)
+        mb = git_merge_base(repo_root, resolved, "HEAD")
+        target_ref = mb if mb is not None else resolved
+        raw = git_show_file(repo_root, target_ref, BASELINE_RELATIVE_PATH)
         source = f"{resolved}:{BASELINE_RELATIVE_PATH}"
         if raw is None:
             return source, {"violations": []}
@@ -353,14 +412,6 @@ def load_base_baseline(
     return source, parse_baseline(raw, source)
 
 
-def is_ci_environment() -> bool:
-    """Return True when running in a CI or automation environment."""
-    return any(
-        os.environ.get(var, "").strip()
-        for var in ("CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF", "GITHUB_REPOSITORY")
-    )
-
-
 def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[str]]:
     """Compare the working-tree baseline against the resolved base.
 
@@ -374,6 +425,10 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
         head = load_working_tree_baseline(repo_root)
         if head is None:
             return 0, [f"No {BASELINE_RELATIVE_PATH} in the working tree."]
+        if base_ref is None and is_shallow_push_checkout(repo_root):
+            return 0, [
+                "WARNING: baseline ratchet skipped: shallow push checkout lacks base history."
+            ]
         loaded = load_base_baseline(repo_root, explicit_ref=base_ref)
     except BaselineRatchetError as error:
         return 1, [str(error)]
