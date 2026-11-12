@@ -55,9 +55,6 @@ def sanitize_log_string(value: str) -> str:
     return sanitized
 
 
-_sanitize_log_string = sanitize_log_string
-
-
 class BaselineRatchetError(ValueError):
     """The working-tree or base baseline cannot be compared."""
 
