@@ -386,7 +386,7 @@ def load_base_baseline(
         mb = git_merge_base(repo_root, explicit_ref, "HEAD")
         target_ref = mb if mb is not None else explicit_ref
         raw = git_show_file(repo_root, target_ref, BASELINE_RELATIVE_PATH)
-        source = f"{explicit_ref}:{BASELINE_RELATIVE_PATH}"
+        source = f"{target_ref}:{BASELINE_RELATIVE_PATH}"
         if raw is None:
             return source, {"violations": []}
         return source, parse_baseline(raw, source)
@@ -396,7 +396,7 @@ def load_base_baseline(
         mb = git_merge_base(repo_root, resolved, "HEAD")
         target_ref = mb if mb is not None else resolved
         raw = git_show_file(repo_root, target_ref, BASELINE_RELATIVE_PATH)
-        source = f"{resolved}:{BASELINE_RELATIVE_PATH}"
+        source = f"{target_ref}:{BASELINE_RELATIVE_PATH}"
         if raw is None:
             return source, {"violations": []}
         return source, parse_baseline(raw, source)

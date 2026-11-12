@@ -408,6 +408,14 @@ class SafeRefTests(unittest.TestCase):
 
 
 class CandidateRefTests(unittest.TestCase):
+    def setUp(self) -> None:
+        patcher = patch.dict(
+            os.environ,
+            {"GITHUB_BASE_REF": "", "BASELINE_RATCHET_BASE_REF": ""},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_resolution_order_prefers_explicit_then_env(self) -> None:
         """Prefer --base-ref, then the env override, then GITHUB_BASE_REF, then defaults."""
         environ = {
@@ -489,6 +497,23 @@ class CandidateRefTests(unittest.TestCase):
             resolved = checker.resolve_base_ref(Path("/tmp"))
             self.assertEqual("upstream/main", resolved)
 
+    def test_all_candidates_lacking_baseline_with_github_base_ref(self) -> None:
+        """With GITHUB_BASE_REF set, fall back to the first existing candidate (origin/<base>)."""
+
+        def fake_git_ref_exists(repo_root: Path, ref: str) -> bool:
+            return ref in ("upstream/main", "origin/main")
+
+        def fake_git_show_file(repo_root: Path, ref: str, path: str) -> str | None:
+            return None
+
+        with (
+            patch.dict(os.environ, {"GITHUB_BASE_REF": "main"}),
+            patch.object(checker, "git_ref_exists", side_effect=fake_git_ref_exists),
+            patch.object(checker, "git_show_file", side_effect=fake_git_show_file),
+        ):
+            resolved = checker.resolve_base_ref(Path("/tmp"))
+            self.assertEqual("origin/main", resolved)
+
 
 class CheckRepoTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -545,7 +570,22 @@ class CheckRepoTests(unittest.TestCase):
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
 
         self.assertEqual(0, exit_code)
-        self.assertIn("Validated 1 ceiling(s) against main:", messages[0])
+        head_sha = checker.git_commit_sha(self.root, "HEAD")
+        self.assertIn(
+            f"Validated 1 ceiling(s) against {head_sha}:{checker.BASELINE_RELATIVE_PATH}",
+            messages[0],
+        )
+
+    def test_merge_base_missing_uses_named_ref_in_source_label(self) -> None:
+        """Use the named ref as the source label when merge-base returns None."""
+        with patch.object(checker, "git_merge_base", return_value=None):
+            exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn(
+            f"Validated 1 ceiling(s) against main:{checker.BASELINE_RELATIVE_PATH}",
+            messages[0],
+        )
 
     def test_missing_working_tree_baseline_skips(self) -> None:
         """Skip when the working tree has no baseline file."""
