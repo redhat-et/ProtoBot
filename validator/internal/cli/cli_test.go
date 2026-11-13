@@ -311,6 +311,74 @@ status: active
 	}
 }
 
+func TestRunEARSShapeDiagnostics(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "zero shall",
+			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service must return HTTP 200.\nstatus: active\n",
+			want:    "shall",
+		},
+		{
+			name:    "multiple shall",
+			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service shall start and shall stop.\nstatus: active\n",
+			want:    "shall",
+		},
+		{
+			name:    "type mismatch",
+			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n",
+			want:    "ubiquitous",
+		},
+		{
+			name:    "state-driven During alias",
+			content: "id: REQ-API-00002\ntype: state-driven\ntext: During maintenance, the service shall reject writes.\nstatus: active\n",
+			want:    "state-driven",
+		},
+		{
+			name:    "unrecognized type",
+			content: "id: REQ-API-00002\ntype: feature\ntext: The service shall return HTTP 200.\nstatus: active\n",
+			want:    "feature",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := t.TempDir()
+			writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", tc.content)
+			code, stdout, stderr := runCLI("--target", target, "--base", "main")
+			if code != exitFailure || stdout != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+				t.Fatalf("stderr %q omitted offending path", stderr)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Fatalf("stderr %q does not contain %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunValidEARSTypes(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-UBI-00001.yaml", "id: REQ-UBI-00001\ntype: ubiquitous\ntext: The service shall exist.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-EVT-00001.yaml", "id: REQ-EVT-00001\ntype: event-driven\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-STA-00001.yaml", "id: REQ-STA-00001\ntype: state-driven\ntext: While maintenance mode is active, the service shall reject writes.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-UNW-00001.yaml", "id: REQ-UNW-00001\ntype: unwanted-behavior\ntext: If a token expires, then the service shall reject the request.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-OPT-00001.yaml", "id: REQ-OPT-00001\ntype: optional-feature\ntext: Where caching is enabled, the service shall use a cache.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-CPX-00001.yaml", "id: REQ-CPX-00001\ntype: complex\ntext: While maintenance mode is active, when a user writes, the service shall reject the request.\nstatus: active\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
@@ -340,6 +408,23 @@ status: active
 	}
 	if !strings.Contains(stderr, "blocks") {
 		t.Fatalf("stderr %q omitted undeclared type", stderr)
+	}
+}
+
+func TestRunLayoutAndEARSDiagnosticsTogether(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "id: REQ-API-00002\ntype: ubiquitous\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted EARS path", stderr)
 	}
 }
 
@@ -441,6 +526,23 @@ func TestRunIsDeterministic(t *testing.T) {
 	code2, stdout2, stderr2 := runCLI("--target", target, "--base", "main")
 	if code1 != code2 || stdout1 != stdout2 || stderr1 != stderr2 {
 		t.Fatalf("repeated invocation differed: (%d, %q, %q) vs (%d, %q, %q)", code1, stdout1, stderr1, code2, stdout2, stderr2)
+	}
+}
+
+func TestRunEARSDiagnosticsAreDeterministic(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-Z-00001.yaml", "id: REQ-Z-00001\ntype: ubiquitous\ntext: When a client acts, the service shall respond.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-A-00001.yaml", "id: REQ-A-00001\ntype: feature\ntext: no obligation\nstatus: active\n")
+
+	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")
+	code2, stdout2, stderr2 := runCLI("--target", target, "--base", "main")
+	if code1 != exitFailure || code1 != code2 || stdout1 != stdout2 || stderr1 != stderr2 {
+		t.Fatalf("repeated invocation differed: (%d, %q, %q) vs (%d, %q, %q)", code1, stdout1, stderr1, code2, stdout2, stderr2)
+	}
+	aIndex := strings.Index(stderr1, "REQ-A-00001.yaml")
+	zIndex := strings.Index(stderr1, "REQ-Z-00001.yaml")
+	if aIndex < 0 || zIndex < 0 || aIndex > zIndex {
+		t.Fatalf("stderr %q is not sorted by path", stderr1)
 	}
 }
 
