@@ -28,6 +28,14 @@
       "severity": "info"
     },
     {
+      "fingerprint": "61d209a528ee226a",
+      "rule_id": "content-inconsistent-terminology",
+      "file_path": "docs/vision.md",
+      "line": 52,
+      "message": "Inconsistent terminology: PR/pull request/merge request \u2014 multiple variants used across files. Pick one and use it consistently.",
+      "severity": "info"
+    },
+    {
       "fingerprint": "bf6aff1c1a975087",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
@@ -249,14 +257,6 @@
       "file_path": "AGENTS.md",
       "line": 186,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
-      "severity": "info"
-    },
-    {
-      "fingerprint": "c7c574a4623b9f21",
-      "rule_id": "content-weak-language",
-      "file_path": "docs/vision.md",
-      "line": 260,
-      "message": "Weak language (vagueness): 'correctly' \u2014 Remove 'correctly' \u2014 describe what correct behavior looks like",
       "severity": "info"
     },
     {

@@ -1,0 +1,13 @@
+# managed by ears-manager; do not edit by hand
+id: CS-00005
+base_commit: fc9a7e9a034b9f93ef54c8970d0f2a7213a7a454
+intent: Rewrite Vision for ProtoBot V2
+operations: []
+artifact_operations:
+    - action: revise
+      artifact_id: vision
+affected_interfaces: []
+implementation_required: false
+implementation_rationale: This change rewrites the registered Vision explanation only and does not change required behavior.
+impact_assessment_base_commit: fc9a7e9a034b9f93ef54c8970d0f2a7213a7a454
+created: "2026-11-12T21:21:23Z"

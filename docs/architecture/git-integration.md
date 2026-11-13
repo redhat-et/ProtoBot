@@ -990,9 +990,9 @@ current contract requires
 
 IdeaBot research artifacts seed the first Sketching session. The
 handoff is manual: the user pastes or references IdeaBot output in
-the conversation
-([Q4](open-questions.md#q4-ideabot-handoff-format), and non-goal 3
-in the [Vision](../vision.md#non-goals)).
+the conversation ([Q4](open-questions.md#q4-ideabot-handoff-format),
+and the IdeaBot handoff deferred from the MVP in the
+[Vision](../vision.md#deferred-from-the-mvp)).
 
 For this contract, that means three things:
 

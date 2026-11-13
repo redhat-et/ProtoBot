@@ -17,7 +17,7 @@ stores:
 store_digests:
     requirements: sha256:9a358a00bdabb03a3cff5cdce0fac181510eb977b166d476c0d67801beecef22
     interfaces: sha256:8e787702f4ccb37bac8f5e209d3d1da0f2e75d5fe42c32e71d46e179a5102b60
-    change_sets: sha256:f009316d98452d0ae93cb9baebe7dcdb11cba2599b615fddde47b1fd554aa6fb
+    change_sets: sha256:86a262d8d7622d96c62918fa8690b631e3ebd07e206489ad4efbb12249210a91
 artifacts:
     - id: architecture
       kind: architecture
@@ -27,5 +27,5 @@ artifacts:
     - id: vision
       kind: vision
       path: docs/vision.md
-      digest: sha256:27092cae4b2d03df4f31f25b7f74f87207ad8eb6d21072076af0992f306c4a8c
+      digest: sha256:3eb5b52f1aaec6f2aad96b7b9459bc925925b41a84ca97488c8135ee54ba4453
       owner: user

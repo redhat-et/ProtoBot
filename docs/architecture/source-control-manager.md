@@ -1384,9 +1384,9 @@ credential helper and `gh`'s store give the token to those programs
 only, so on guard-checked calls the model never sees it; a fail-open
 call can expose it, as #33's per-binding fail-open rows record
 ([Credentials][credentials]). No Gate stands between the SCM and the
-token. The Web Drafting Table is a non-goal of the first project
-([Vision — Non-goals][vision-nongoals]), so the hosted face is defined
-here and built later.
+token. The Web Drafting Table is deferred from the MVP
+([Vision — Deferred from the MVP][vision-mvp-deferrals]), so the hosted
+face is defined here and built later.
 
 ### Hosted isolation
 
@@ -2043,7 +2043,7 @@ these checks, and the transcript has no record for them.
 [ux-invariants]: drafting-table-ux.md#protocol-invariants
 [ux-resume]: drafting-table-ux.md#resuming-an-existing-session
 [ux-stale]: drafting-table-ux.md#stale-git-or-wms-state
-[vision-nongoals]: ../vision.md#non-goals
+[vision-mvp-deferrals]: ../vision.md#deferred-from-the-mvp
 [web-dt]: ../architecture.md#user-facing-interfaces
 [what-committed]: git-integration.md#what-is-committed
 [wms-fixture]: drafting-table-wms.md#fake-adapter-fixture
