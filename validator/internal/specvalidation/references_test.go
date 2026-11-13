@@ -503,10 +503,18 @@ func TestValidateRejectsAmbiguousRelationshipTarget(t *testing.T) {
 	}
 
 	diagnostics := Validate(snapshot)
-	if len(diagnostics) != 1 {
-		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	var got Diagnostic
+	var found bool
+	for _, d := range diagnostics {
+		if d.Code == CodeReferenceAmbiguous {
+			got = d
+			found = true
+			break
+		}
 	}
-	got := diagnostics[0]
+	if !found {
+		t.Fatalf("diagnostics=%v, want CodeReferenceAmbiguous", diagnostics)
+	}
 	if got.Code != CodeReferenceAmbiguous {
 		t.Errorf("code=%q, want %q", got.Code, CodeReferenceAmbiguous)
 	}

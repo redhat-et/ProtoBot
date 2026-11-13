@@ -2,14 +2,14 @@
 
 `validator` is the ProtoBot V2 specification validator. It is a
 deterministic, network-free Go command. It reads the checkout at
-`--target` and records `--base` as the comparison argument; it does
-not contact a tracker, a network service, or an external daemon.
+`--target` and compares requirement identifiers against `--base`; it
+does not contact a tracker, a network service, or an external daemon.
 
 The design is the [ProtoBot V2 validator][design]. This module
 implements the command line, spec directory reader, record schema
-checks, relationship-type allowlist, relationship acyclicity, and
-reference resolution (issues #381, #383, #385, #387, #388, #390,
-and #402). The command line accepts the checkout path and comparison
+checks, relationship-type allowlist, relationship acyclicity,
+reference resolution, and requirement identifier checks (issues #381, #383, #385, #387, #388, #390,
+#395, and #402). The command line accepts the checkout path and comparison
 base. It reads requirement and interface YAML records from
 `spec/requirements/` and `spec/interfaces/` in the target checkout.
 Missing directories are treated as empty. Unreadable files, non-YAML
@@ -23,7 +23,9 @@ including legacy `conflicts-with`, fail validation. Directed
 `related-to` associations are exempt. Each `applies_to.interfaces` entry
 must equal an interface record's `name` (matching is case-sensitive),
 and requirement IDs in `relationships[].target` must resolve to declared
-records; retired requirement targets satisfy resolution. It also scans
+records; retired requirement targets satisfy resolution. Requirement IDs must
+match `REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must not be
+deleted or reused relative to the comparison base. It also scans
 Gherkin `.feature` files under `tests/` for `@req:<ID>` tags and fails
 when a tag does not resolve to a known requirement record. Active and
 retired IDs both count as known; unknown or misspelled IDs fail with
@@ -36,8 +38,7 @@ values are `active` or `retired`. Legacy metadata (`verification`,
 Requirement text is checked for exactly one `shall` and for a match
 against the declared EARS type (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
-State-driven statements require the keyword `While`. Identifier checks
-land in follow-on work.
+State-driven statements require the keyword `While`.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the

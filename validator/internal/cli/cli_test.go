@@ -8,10 +8,12 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/redhat-et/protobot/validator/internal/gitcmd"
 )
 
 func TestRunValidTargetAndBase(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -28,12 +30,12 @@ func TestRunValidTargetAndBase(t *testing.T) {
 }
 
 func TestRunEqualsForm(t *testing.T) {
-	target := t.TempDir()
-	code, stdout, stderr := runCLI("--target="+target, "--base=origin/main")
+	target := gitRepo(t)
+	code, stdout, stderr := runCLI("--target="+target, "--base=main")
 	if code != exitOK || stderr != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "base: origin/main") {
+	if !strings.Contains(stdout, "base: main") {
 		t.Fatalf("stdout %q does not include equals-form base", stdout)
 	}
 }
@@ -154,7 +156,7 @@ func TestRunFlagLikeValuesRejected(t *testing.T) {
 }
 
 func TestRunAcceptedTargetForms(t *testing.T) {
-	dir := t.TempDir()
+	dir := gitRepo(t)
 	slash := dir + string(os.PathSeparator)
 	link := filepath.Join(t.TempDir(), "checkout")
 	symlinkErr := os.Symlink(dir, link)
@@ -163,6 +165,7 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(relParent, relName), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	initGitRepo(t, filepath.Join(relParent, relName))
 
 	cases := []struct {
 		name   string
@@ -271,7 +274,7 @@ func TestRunTargetIsFile(t *testing.T) {
 }
 
 func TestRunValidSpecRecords(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", completeRequirementYAML())
 	writeSpecFile(t, target, "spec/interfaces/cli.yaml", completeInterfaceYAML())
 
@@ -285,7 +288,7 @@ func TestRunValidSpecRecords(t *testing.T) {
 }
 
 func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00000.yaml", `id: REQ-API-00000
 type: ubiquitous
 text: The service shall exist.
@@ -339,7 +342,7 @@ status: active
 }
 
 func TestRunAcceptsResolvedReferences(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\nkind: http\ndescription: Health check HTTP API.\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
@@ -372,7 +375,7 @@ status: active
 }
 
 func TestRunRejectsDanglingReferences(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -401,7 +404,7 @@ status: active
 }
 
 func TestRunSuppressesReferenceDiagnosticWhenTargetFailsToParse(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
@@ -425,7 +428,7 @@ status: active
 }
 
 func TestRunCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/health-api.yaml", "id: [\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
@@ -459,7 +462,7 @@ status: active
 }
 
 func TestRunRejectsAmbiguousInterfaceReference(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/interfaces/api-a.yaml", "name: health-api\nkind: http\ndescription: Health check.\n")
 	writeSpecFile(t, target, "spec/interfaces/api-b.yaml", "name: health-api\nkind: http\ndescription: Duplicate health check.\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
@@ -624,7 +627,7 @@ status: retired
 }
 
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
 text: The service shall log requests.
@@ -700,7 +703,7 @@ func TestRunLayoutAndEARSDiagnosticsTogether(t *testing.T) {
 }
 
 func TestRunTestTagReferenceResolution(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "active"))
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", requirementYAML("REQ-API-00002", "retired"))
 	writeSpecFile(t, target, "tests/active.feature", "@req:REQ-API-00001\nFeature: Active obligation\n")
@@ -773,7 +776,7 @@ status: active
 }
 
 func TestRunLayoutDiagnostics(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
@@ -793,7 +796,7 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 }
 
 func TestRunReportsBothLayoutAndRelationshipDiagnostics(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", `id: REQ-API-00004
 type: ubiquitous
@@ -859,7 +862,7 @@ status: active
 }
 
 func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "null\n")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
@@ -873,7 +876,7 @@ func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 }
 
 func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [1]\n")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
@@ -891,7 +894,7 @@ func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
 }
 
 func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	reqDir := filepath.Join(target, "spec", "requirements")
 	if err := os.MkdirAll(reqDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -913,7 +916,7 @@ func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
 }
 
 func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	testsDir := filepath.Join(target, "tests")
 	if err := os.MkdirAll(testsDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -952,7 +955,7 @@ func TestPrintDiagnosticSanitizesLineBreaks(t *testing.T) {
 // command reads no clock, environment, random source, or shared
 // mutable state. It is not a cross-process isolation check.
 func TestRunIsDeterministic(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")
 	code2, stdout2, stderr2 := runCLI("--target", target, "--base", "main")
 	if code1 != code2 || stdout1 != stdout2 || stderr1 != stderr2 {
@@ -1011,7 +1014,7 @@ func moduleRoot(t *testing.T) string {
 }
 
 func TestRunRejectsMissingRequiredFields(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "id: REQ-API-00002\n")
 	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\n")
 
@@ -1027,7 +1030,7 @@ func TestRunRejectsMissingRequiredFields(t *testing.T) {
 }
 
 func TestRunRejectsInvalidStatus(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -1051,7 +1054,7 @@ status: implemented
 }
 
 func TestRunRejectsLegacyMetadata(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", completeRequirementYAML()+`verification:
   mode: isolated-interface
 provenance: user-authored
@@ -1070,12 +1073,16 @@ created: "2026-01-01T00:00:00Z"
 }
 
 func TestRunReportsBothLayoutAndSchemaDiagnostics(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
 status: draft
+applies_to:
+  scopes:
+    - api
+relationships: []
 `)
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
@@ -1090,6 +1097,130 @@ status: draft
 	}
 	if !strings.Contains(stderr, "draft") {
 		t.Fatalf("stderr %q omitted invalid status", stderr)
+	}
+}
+
+func TestRunRejectsMalformedRequirementID(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/bad.yaml", `id: REQ-api-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "bad.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-api-00001") {
+		t.Fatalf("stderr %q omitted malformed id", stderr)
+	}
+}
+
+func TestRunRejectsDuplicateRequirementIDs(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	writeSpecFile(t, target, "spec/requirements/copy.yaml", requirementYAML("REQ-API-00001"))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") || !strings.Contains(stderr, "copy.yaml") {
+		t.Fatalf("stderr %q omitted conflicting paths", stderr)
+	}
+}
+
+func TestRunRejectsDeletedRequirementID(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "REQ-API-00001.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001") {
+		t.Fatalf("stderr %q omitted deleted id", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "deleted") && !strings.Contains(stderr, "Retire") {
+		t.Fatalf("stderr %q omitted deletion guidance", stderr)
+	}
+}
+
+func TestRunAllowsRetiredRequirementID(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: retired
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestRunRejectsReusedRequirementID(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "REQ-API-00001.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	writeSpecFile(t, target, "spec/requirements/other.yaml", requirementYAML("REQ-API-00001"))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "other.yaml") {
+		t.Fatalf("stderr %q omitted reused path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001") {
+		t.Fatalf("stderr %q omitted reused id", stderr)
+	}
+}
+
+func TestRunUnknownBaseFails(t *testing.T) {
+	target := gitRepo(t)
+	code, stdout, stderr := runCLI("--target", target, "--base", "not-a-ref")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "not-a-ref") {
+		t.Fatalf("stderr %q omitted unknown base", stderr)
+	}
+}
+
+func TestRunNonGitCheckoutFails(t *testing.T) {
+	target := t.TempDir()
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "git checkout") {
+		t.Fatalf("stderr %q omitted git checkout diagnostic", stderr)
 	}
 }
 
@@ -1108,7 +1239,6 @@ status: active
 func completeInterfaceYAML() string {
 	return "name: cli\nkind: cli\ndescription: Validator command line.\n"
 }
-
 func writeSpecFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
@@ -1120,6 +1250,36 @@ func writeSpecFile(t *testing.T, root, rel, content string) {
 	}
 }
 
-func requirementYAML(id, status string) string {
-	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\nstatus: " + status + "\napplies_to:\n  scopes:\n    - api\nrelationships: []\n"
+func gitRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	initGitRepo(t, root)
+	return root
+}
+
+func initGitRepo(t *testing.T, root string) {
+	t.Helper()
+	git(t, root, "init", "-b", "main")
+	git(t, root, "config", "user.email", "test@example.invalid")
+	git(t, root, "config", "user.name", "Test User")
+	git(t, root, "config", "commit.gpgsign", "false")
+	git(t, root, "commit", "--allow-empty", "-m", "init")
+}
+
+func git(t *testing.T, root string, args ...string) {
+	t.Helper()
+	command := gitcmd.Command(append([]string{"-C", root}, args...)...)
+	command.Env = append(command.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+}
+
+func requirementYAML(id string, status ...string) string {
+	st := "active"
+	if len(status) > 0 && status[0] != "" {
+		st = status[0]
+	}
+	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\napplies_to:\n  scopes:\n    - api\nrelationships: []\nstatus: " + st + "\n"
+}
 }

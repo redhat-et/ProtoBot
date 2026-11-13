@@ -5,8 +5,8 @@
 //	validator -h
 //
 // The process is deterministic and network-free. It reads the checkout at
-// --target and records --base as the comparison argument. It does not
-// contact a tracker, open a network connection, or start a daemon.
+// --target and compares requirement identifiers against --base. It does
+// not contact a tracker, open a network connection, or start a daemon.
 package cli
 
 import (
@@ -17,6 +17,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/ears"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 	"github.com/redhat-et/protobot/validator/internal/testtags"
 )
@@ -77,11 +78,27 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	snapshot, diagnostics := layout.Read(opts.target)
 	failed := len(diagnostics) > 0
 	for _, diagnostic := range diagnostics {
-		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+		reportLayout(stderr, diagnostic)
 	}
 	for _, diagnostic := range specvalidation.Validate(snapshot, diagnostics...) {
 		failed = true
-		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+		reportSpec(stderr, diagnostic)
+	}
+
+	baseSnapshot, baseDiagnostics := revision.Read(opts.target, opts.base)
+	revisionFailed := false
+	for _, diagnostic := range baseDiagnostics {
+		failed = true
+		if diagnostic.Code == revision.CodeNotFound || diagnostic.Code == revision.CodeReadFailed {
+			revisionFailed = true
+		}
+		reportLayout(stderr, diagnostic)
+	}
+	if !revisionFailed {
+		for _, diagnostic := range specvalidation.CompareBase(snapshot, baseSnapshot) {
+			failed = true
+			reportSpec(stderr, diagnostic)
+		}
 	}
 	for _, diagnostic := range ears.CheckAll(requirementStatements(snapshot)) {
 		failed = true
@@ -101,6 +118,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 	_, _ = fmt.Fprintf(stdout, "validator: ok\ntarget: %s\nbase: %s\n", opts.target, opts.base)
 	return exitOK
+}
+
+func reportLayout(stderr io.Writer, diagnostic layout.Diagnostic) {
+	printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+}
+
+func reportSpec(stderr io.Writer, diagnostic specvalidation.Diagnostic) {
+	printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 }
 
 func parseArgs(args []string) (options, error) {
@@ -165,6 +190,10 @@ func sanitizeDiagnosticField(s string) string {
 }
 
 func printDiagnostic(w io.Writer, code, path, message string) {
+	if path == "" {
+		_, _ = fmt.Fprintf(w, "validator: %s: %s\n", code, sanitizeDiagnosticField(message))
+		return
+	}
 	_, _ = fmt.Fprintf(w, "validator: %s: %s: %s\n", code, sanitizeDiagnosticField(path), sanitizeDiagnosticField(message))
 }
 
