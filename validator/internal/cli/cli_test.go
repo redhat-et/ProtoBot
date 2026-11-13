@@ -47,6 +47,9 @@ func TestRunHelp(t *testing.T) {
 		if !strings.Contains(stdout, "--target") || !strings.Contains(stdout, "--base") {
 			t.Fatalf("help stdout %q omitted flag names", stdout)
 		}
+		if !strings.Contains(stdout, "validator -h") {
+			t.Fatalf("help stdout %q omitted -h alias", stdout)
+		}
 	}
 }
 
@@ -112,6 +115,131 @@ func TestRunMalformedFlags(t *testing.T) {
 				t.Fatalf("stderr %q does not contain %q", stderr, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunFlagLikeValuesRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "flag consumed as target value",
+			args: []string{"--target", "--base", "main"},
+			want: "--target takes a directory path",
+		},
+		{
+			name: "double-dash consumed as target value",
+			args: []string{"--target", "--", "--base", "main"},
+			want: "--target takes a directory path",
+		},
+		{
+			name: "flag consumed as base value",
+			args: []string{"--target", t.TempDir(), "--base", "--target"},
+			want: "--base takes a comparison-base argument",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(tc.args...)
+			if code != exitUsage || stdout != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q; want exitUsage", code, stdout, stderr)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Fatalf("stderr %q does not contain %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunAcceptedTargetForms(t *testing.T) {
+	dir := t.TempDir()
+	slash := dir + string(os.PathSeparator)
+	link := filepath.Join(t.TempDir(), "checkout")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	relParent := t.TempDir()
+	relName := "rel-target"
+	if err := os.Mkdir(filepath.Join(relParent, relName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name   string
+		chdir  string
+		args   []string
+		target string
+	}{
+		{
+			name:   "base before target",
+			args:   []string{"--base", "main", "--target", dir},
+			target: dir,
+		},
+		{
+			name:   "trailing slash",
+			args:   []string{"--target", slash, "--base", "main"},
+			target: slash,
+		},
+		{
+			name:   "directory symlink",
+			args:   []string{"--target", link, "--base", "main"},
+			target: link,
+		},
+		{
+			name:   "relative path",
+			chdir:  relParent,
+			args:   []string{"--target", relName, "--base", "main"},
+			target: relName,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.chdir != "" {
+				t.Chdir(tc.chdir)
+			}
+			code, stdout, stderr := runCLI(tc.args...)
+			if code != exitOK || stderr != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if !strings.Contains(stdout, "target: "+tc.target) {
+				t.Fatalf("stdout %q does not include target %q", stdout, tc.target)
+			}
+			if !strings.Contains(stdout, "base: main") {
+				t.Fatalf("stdout %q does not include base", stdout)
+			}
+		})
+	}
+}
+
+func TestRunStatError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits are not portable")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can stat mode 000 directories")
+	}
+	parent := t.TempDir()
+	blocked := filepath.Join(parent, "blocked")
+	target := filepath.Join(blocked, "checkout")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blocked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+	if _, err := os.Stat(target); err == nil {
+		t.Skip("filesystem allows stating through mode 000 directories")
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "cannot stat target path") {
+		t.Fatalf("stderr %q omitted stat-error message", stderr)
 	}
 }
 
@@ -185,6 +313,9 @@ func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 	}
 }
 
+// TestRunIsDeterministic pins in-process repeatability of Run: the
+// command reads no clock, environment, random source, or shared
+// mutable state. It is not a cross-process isolation check.
 func TestRunIsDeterministic(t *testing.T) {
 	target := t.TempDir()
 	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")
