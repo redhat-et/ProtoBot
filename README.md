@@ -83,6 +83,7 @@ validator/
   go.mod
   cmd/validator/            # V2 specification validator CLI
   internal/cli/             # checkout path and comparison-base arguments
+  internal/ears/            # EARS shape and single-shall validation
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
   internal/specvalidation/  # relationship type allowlist and later checks
