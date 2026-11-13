@@ -16,7 +16,10 @@ func TestReadLoadsCommittedRequirements(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	snapshot, diagnostics := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
@@ -32,7 +35,10 @@ func TestReadIgnoresWorkingTreeEdits(t *testing.T) {
 	git(t, root, "commit", "-m", "base")
 	writeFile(t, root, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00002"))
 
-	snapshot, diagnostics := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
@@ -50,7 +56,10 @@ func TestReadMissingRequirementsIsEmpty(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	snapshot, diagnostics := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
@@ -61,16 +70,24 @@ func TestReadMissingRequirementsIsEmpty(t *testing.T) {
 
 func TestReadUnknownRef(t *testing.T) {
 	root := gitRepo(t)
-	_, diagnostics := Read(root, "not-a-ref")
-	if !hasCode(diagnostics, CodeNotFound) {
-		t.Fatalf("diagnostics=%v", diagnostics)
+	_, _, err := Read(root, "not-a-ref")
+	if err == nil {
+		t.Fatal("expected error for unknown ref")
+	}
+	revErr, ok := err.(*Error)
+	if !ok || revErr.Code != CodeNotFound {
+		t.Fatalf("err=%v, want CodeNotFound", err)
 	}
 }
 
 func TestReadNonGitTarget(t *testing.T) {
-	_, diagnostics := Read(t.TempDir(), "HEAD")
-	if !hasCode(diagnostics, CodeReadFailed) {
-		t.Fatalf("diagnostics=%v", diagnostics)
+	_, _, err := Read(t.TempDir(), "HEAD")
+	if err == nil {
+		t.Fatal("expected error for non-git target")
+	}
+	revErr, ok := err.(*Error)
+	if !ok || revErr.Code != CodeReadFailed {
+		t.Fatalf("err=%v, want CodeReadFailed", err)
 	}
 }
 
@@ -81,7 +98,10 @@ func TestReadSkipsNonYAMLEntriesInBase(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	snapshot, diagnostics := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
@@ -96,7 +116,10 @@ func TestReadLayoutDiagnosticsForMalformedBase(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	_, diagnostics := Read(root, "HEAD")
+	_, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !hasPath(diagnostics, "spec/requirements/bad.yaml") {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}

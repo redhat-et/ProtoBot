@@ -14,7 +14,7 @@ const (
 	CodeInvalidID   = "requirement.invalid_id"
 	CodeDuplicateID = "requirement.duplicate_id"
 	CodeDeleted     = "requirement.deleted"
-	CodeReused      = "requirement.id_reused"
+	CodeReusedID    = "requirement.reused_id"
 )
 
 func validateRequirementIDs(requirements []layout.Document[records.Requirement]) []Diagnostic {
@@ -59,13 +59,11 @@ func validateRequirementIDs(requirements []layout.Document[records.Requirement])
 	return diagnostics
 }
 
-// CompareBase checks identifier format and uniqueness on the comparison
-// base, then rejects deletion or reuse of requirement IDs that already
-// exist there. Format and uniqueness of the target snapshot are the
-// caller's responsibility via Validate.
+// CompareBase rejects deletion or reuse of requirement IDs that already
+// exist in the comparison base. Format and uniqueness of the target
+// snapshot are the caller's responsibility via Validate.
 func CompareBase(target, base layout.Snapshot) []Diagnostic {
-	diagnostics := validateRequirementIDs(base.Requirements)
-	diagnostics = append(diagnostics, validateDeletionAndReuse(target.Requirements, base.Requirements)...)
+	diagnostics := validateDeletionAndReuse(target.Requirements, base.Requirements)
 	sortDiagnostics(diagnostics)
 	return diagnostics
 }
@@ -102,7 +100,7 @@ func validateDeletionAndReuse(target, base []layout.Document[records.Requirement
 				continue
 			}
 			diagnostics = append(diagnostics, Diagnostic{
-				Code:  CodeReused,
+				Code:  CodeReusedID,
 				Path:  path,
 				Field: "id",
 				Message: fmt.Sprintf(

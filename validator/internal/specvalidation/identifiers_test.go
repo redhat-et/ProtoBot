@@ -154,8 +154,8 @@ func TestCompareBaseRejectsReuse(t *testing.T) {
 		t.Fatalf("diagnostics=%v, want 1", diagnostics)
 	}
 	got := diagnostics[0]
-	if got.Code != CodeReused {
-		t.Errorf("code=%q, want %q", got.Code, CodeReused)
+	if got.Code != CodeReusedID {
+		t.Errorf("code=%q, want %q", got.Code, CodeReusedID)
 	}
 	if got.Path != "spec/requirements/other.yaml" {
 		t.Errorf("path=%q", got.Path)
@@ -182,13 +182,42 @@ func TestCompareBaseAllowsNewIDs(t *testing.T) {
 }
 
 func TestCompareBaseValidatesBaseIDs(t *testing.T) {
+	// A working-tree fix of historically invalid or duplicate base IDs must pass
+	// CompareBase, while still failing deletion of valid base IDs and reuse.
 	base := snapshotFromIDs([]idPath{
 		{path: "spec/requirements/bad.yaml", id: "not-an-id"},
+		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
+		{path: "spec/requirements/dup2.yaml", id: "REQ-DUP-00001"},
+		{path: "spec/requirements/valid.yaml", id: "REQ-VAL-00001"},
 	})
-	target := snapshotFromIDs(nil)
-	diagnostics := CompareBase(target, base)
-	if len(diagnostics) != 1 || diagnostics[0].Code != CodeInvalidID {
-		t.Fatalf("diagnostics=%v, want invalid_id", diagnostics)
+	// Target fixed the invalid ID, resolved duplicate to one valid ID, and kept valid.yaml
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "REQ-FIX-00001"},
+		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
+		{path: "spec/requirements/valid.yaml", id: "REQ-VAL-00001"},
+	})
+	if diagnostics := CompareBase(target, base); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v, want none (working-tree fixes should pass CompareBase)", diagnostics)
+	}
+
+	// Deletion of a valid base ID must still fail
+	targetDeleted := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "REQ-FIX-00001"},
+		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
+	})
+	delDiags := CompareBase(targetDeleted, base)
+	if len(delDiags) != 1 || delDiags[0].Code != CodeDeleted || delDiags[0].Path != "spec/requirements/valid.yaml" {
+		t.Fatalf("delDiags=%v, want CodeDeleted for valid.yaml", delDiags)
+	}
+
+	// Reuse of a valid base ID at a different path must still fail
+	targetReused := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/other.yaml", id: "REQ-VAL-00001"},
+		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
+	})
+	reuseDiags := CompareBase(targetReused, base)
+	if len(reuseDiags) != 1 || reuseDiags[0].Code != CodeReusedID || reuseDiags[0].Path != "spec/requirements/other.yaml" {
+		t.Fatalf("reuseDiags=%v, want CodeReusedID for other.yaml", reuseDiags)
 	}
 }
 
@@ -232,7 +261,7 @@ func identifierDiagnostics(diagnostics []Diagnostic) []Diagnostic {
 	var out []Diagnostic
 	for _, diagnostic := range diagnostics {
 		switch diagnostic.Code {
-		case CodeInvalidID, CodeDuplicateID, CodeDeleted, CodeReused:
+		case CodeInvalidID, CodeDuplicateID, CodeDeleted, CodeReusedID:
 			out = append(out, diagnostic)
 		}
 	}

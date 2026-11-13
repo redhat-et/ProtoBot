@@ -20,6 +20,16 @@ const (
 	CodeReadFailed = "revision.read_failed"
 )
 
+// Error represents a revision-level failure preventing reading the base tree.
+type Error struct {
+	Code    string
+	Message string
+}
+
+func (e *Error) Error() string {
+	return e.Message
+}
+
 type treeEntry struct {
 	mode   string
 	object string
@@ -34,35 +44,40 @@ const (
 // Read loads requirement records from the Git tree of ref as resolved in
 // the checkout at target. The working tree is not read. Missing
 // spec/requirements in that revision is treated as empty.
-func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic) {
+//
+// Revision-level failures (such as missing ref or unreadable checkout)
+// are returned as error (with type *Error). Per-file parse problems
+// within the materialized base tree are returned as layout diagnostics.
+func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic, error) {
 	absolute, err := filepath.Abs(target)
 	if err != nil {
-		return layout.Snapshot{}, []layout.Diagnostic{diagnostic(CodeReadFailed, "", fmt.Sprintf("cannot resolve checkout path: %s", err))}
+		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot resolve checkout path: %s", err)}
 	}
 	if err := requireCheckoutRoot(absolute); err != nil {
-		return layout.Snapshot{}, []layout.Diagnostic{diagnostic(CodeReadFailed, "", err.Error())}
+		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: err.Error()}
 	}
 
 	commit, err := resolveCommit(absolute, ref)
 	if err != nil {
-		return layout.Snapshot{}, []layout.Diagnostic{diagnostic(CodeNotFound, "", fmt.Sprintf("comparison base %q is not a commit in the checkout", ref))}
+		return layout.Snapshot{}, nil, &Error{Code: CodeNotFound, Message: fmt.Sprintf("comparison base %q is not a commit in the checkout", ref)}
 	}
 
 	entries, err := listRequirements(absolute, commit)
 	if err != nil {
-		return layout.Snapshot{}, []layout.Diagnostic{diagnostic(CodeReadFailed, "", fmt.Sprintf("cannot read comparison base %q", ref))}
+		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q", ref)}
 	}
 
 	tmp, err := os.MkdirTemp("", "validator-base-")
 	if err != nil {
-		return layout.Snapshot{}, []layout.Diagnostic{diagnostic(CodeReadFailed, "", "cannot create a private copy of the comparison base")}
+		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: "cannot create a private copy of the comparison base"}
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 
 	if err := materialize(absolute, tmp, entries); err != nil {
-		return layout.Snapshot{}, []layout.Diagnostic{diagnostic(CodeReadFailed, "", fmt.Sprintf("cannot read comparison base %q", ref))}
+		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q", ref)}
 	}
-	return layout.Read(tmp)
+	snapshot, parseDiagnostics := layout.Read(tmp)
+	return snapshot, parseDiagnostics, nil
 }
 
 func requireCheckoutRoot(target string) error {

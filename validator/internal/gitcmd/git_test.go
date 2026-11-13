@@ -19,6 +19,8 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_DIR=/other",
 		"GIT_WORK_TREE=/other",
 		"GIT_NO_REPLACE_OBJECTS=0",
+		"GIT_SSH=/custom/ssh",
+		"GIT_SSH_COMMAND=ssh -i id_rsa",
 		"LC_ALL=en_US.UTF-8",
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
@@ -31,6 +33,8 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_DIR=/other",
 		"GIT_WORK_TREE=/other",
 		"GIT_NO_REPLACE_OBJECTS=0",
+		"GIT_SSH=/custom/ssh",
+		"GIT_SSH_COMMAND=ssh -i id_rsa",
 		"LC_ALL=en_US.UTF-8",
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
@@ -40,7 +44,15 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 			t.Fatalf("env still has %s: %q", banned, env)
 		}
 	}
-	for _, fixed := range []string{"LC_ALL=C", "LANGUAGE=", "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1"} {
+	for _, fixed := range []string{
+		"LC_ALL=C",
+		"LANGUAGE=",
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_NO_REPLACE_OBJECTS=1",
+		"GIT_NO_LAZY_FETCH=1",
+		"GIT_TERMINAL_PROMPT=0",
+		"SSH_ASKPASS_REQUIRE=never",
+	} {
 		if !slices.Contains(env, fixed) {
 			t.Fatalf("env missing %s: %q", fixed, env)
 		}
