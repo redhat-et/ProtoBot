@@ -1,6 +1,8 @@
 package specvalidation
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -210,14 +212,92 @@ func TestCompareBaseValidatesBaseIDs(t *testing.T) {
 		t.Fatalf("delDiags=%v, want CodeDeleted for valid.yaml", delDiags)
 	}
 
+	// Deletion of an invalid base ID must also fail
+	targetDeletedBad := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
+		{path: "spec/requirements/valid.yaml", id: "REQ-VAL-00001"},
+	})
+	delBadDiags := CompareBase(targetDeletedBad, base)
+	if len(delBadDiags) != 1 || delBadDiags[0].Code != CodeDeleted || delBadDiags[0].Path != "spec/requirements/bad.yaml" {
+		t.Fatalf("delBadDiags=%v, want CodeDeleted for bad.yaml", delBadDiags)
+	}
+	if !identifiesID(delBadDiags[0].Message, "not-an-id") {
+		t.Fatalf("delBadDiags[0].Message %q omitted invalid id", delBadDiags[0].Message)
+	}
+
 	// Reuse of a valid base ID at a different path must still fail
 	targetReused := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "REQ-FIX-00001"},
 		{path: "spec/requirements/other.yaml", id: "REQ-VAL-00001"},
 		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
 	})
 	reuseDiags := CompareBase(targetReused, base)
 	if len(reuseDiags) != 1 || reuseDiags[0].Code != CodeReusedID || reuseDiags[0].Path != "spec/requirements/other.yaml" {
 		t.Fatalf("reuseDiags=%v, want CodeReusedID for other.yaml", reuseDiags)
+	}
+}
+
+func TestCompareBaseRejectsDeletedInvalidBaseID(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "REQ-api-00001"},
+	})
+	target := snapshotFromIDs(nil)
+	diagnostics := CompareBase(target, base)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeDeleted {
+		t.Errorf("code=%q, want %q", got.Code, CodeDeleted)
+	}
+	if got.Path != "spec/requirements/bad.yaml" {
+		t.Errorf("path=%q", got.Path)
+	}
+	if !identifiesID(got.Message, "REQ-api-00001") {
+		t.Errorf("message %q omitted id", got.Message)
+	}
+}
+
+func TestCompareBaseRejectsInPlaceIDEdit(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00002"},
+	})
+	diagnostics := CompareBase(target, base)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeDeleted {
+		t.Errorf("code=%q, want %q", got.Code, CodeDeleted)
+	}
+	if got.Path != "spec/requirements/REQ-API-00001.yaml" {
+		t.Errorf("path=%q", got.Path)
+	}
+	if !identifiesID(got.Message, "REQ-API-00001") {
+		t.Errorf("message %q omitted id", got.Message)
+	}
+}
+
+func TestCompareBaseSuppressesDeletionWhenFileStillPresentOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	reqPath := filepath.Join(dir, "spec", "requirements", "REQ-API-00001.yaml")
+	if err := os.MkdirAll(filepath.Dir(reqPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reqPath, []byte("id: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
+	})
+	target := layout.Snapshot{Root: dir}
+	diagnostics := CompareBase(target, base)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v, want none (file still present on disk)", diagnostics)
 	}
 }
 

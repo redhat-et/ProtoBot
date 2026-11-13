@@ -677,6 +677,74 @@ func TestRunRepairedBaseInvalidAndDuplicateIDsExitsZero(t *testing.T) {
 	}
 }
 
+func TestRunDeletedBaseInvalidIDFails(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/bad.yaml", requirementYAML("REQ-api-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "commit with invalid base id")
+
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "bad.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "bad.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-api-00001") {
+		t.Fatalf("stderr %q omitted deleted invalid id", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "deleted") && !strings.Contains(stderr, "Retire") {
+		t.Fatalf("stderr %q omitted deletion guidance", stderr)
+	}
+}
+
+func TestRunMalformedTargetFileDoesNotEmitRequirementDeleted(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "commit valid requirement")
+
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") {
+		t.Fatalf("stderr %q omitted parse failure path", stderr)
+	}
+	if strings.Contains(stderr, "was deleted") || strings.Contains(stderr, "Retire the record") {
+		t.Fatalf("stderr %q emitted false-positive deletion diagnostic for malformed file", stderr)
+	}
+}
+
+func TestRunInPlaceIDEditRejectsDeletion(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "commit valid requirement")
+
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00002"))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001") {
+		t.Fatalf("stderr %q omitted deleted id", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "deleted") && !strings.Contains(stderr, "Retire") {
+		t.Fatalf("stderr %q omitted deletion guidance", stderr)
+	}
+}
+
 func TestRunNonGitCheckoutFails(t *testing.T) {
 	target := t.TempDir()
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
