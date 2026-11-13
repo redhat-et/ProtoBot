@@ -11,9 +11,11 @@ and #383). The command line accepts the checkout path and comparison
 base. It reads requirement and interface YAML records from
 `spec/requirements/` and `spec/interfaces/` in the target checkout.
 Missing directories are treated as empty. Unreadable files, non-YAML
-entries, and malformed YAML produce diagnostics. Schema, EARS,
-identifier, and reference checks remain in follow-on issues
-(#385–#402).
+entries, and malformed YAML produce diagnostics. Requirement
+relationship types are restricted to `depends-on`, `supersedes`, and
+`related-to`; unsupported types, including legacy `conflicts-with`, fail
+validation. Schema, EARS, identifier, and reference checks remain in
+follow-on issues (#385–#402).
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the

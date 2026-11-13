@@ -287,6 +287,62 @@ status: active
 	}
 }
 
+func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+  - type: supersedes
+    target: REQ-API-00000
+  - type: related-to
+    target: REQ-API-00003
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+  - type: conflicts-with
+    target: REQ-API-00004
+  - type: related-to
+    target: REQ-API-00003
+  - type: blocks
+    target: REQ-API-00005
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "conflicts-with") {
+		t.Fatalf("stderr %q omitted legacy type", stderr)
+	}
+	if !strings.Contains(stderr, "blocks") {
+		t.Fatalf("stderr %q omitted undeclared type", stderr)
+	}
+}
+
 func TestRunLayoutDiagnostics(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
@@ -297,6 +353,33 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "notes.txt") {
 		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+}
+
+func TestRunReportsBothLayoutAndRelationshipDiagnostics(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: conflicts-with
+    target: REQ-API-00004
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted relationship diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "conflicts-with") {
+		t.Fatalf("stderr %q omitted legacy type", stderr)
 	}
 }
 
