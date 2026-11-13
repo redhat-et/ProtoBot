@@ -19,11 +19,20 @@ var removedEnv = []string{
 	"GIT_PREFIX", "GIT_QUARANTINE_PATH", "GIT_REFLOG_ACTION",
 	"GIT_ATTR_SOURCE", "GIT_EXEC_PATH", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
 	"GIT_ICASE_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_LITERAL_PATHSPECS",
+	"GIT_SSH", "GIT_SSH_COMMAND", "GIT_PROXY_COMMAND", "GIT_ALLOW_PROTOCOL", "GIT_ASKPASS",
 }
 
 var removedEnvPrefixes = []string{"GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"}
 
-var fixedEnv = []string{"LC_ALL=C", "LANGUAGE=", "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1"}
+var fixedEnv = []string{
+	"LC_ALL=C",
+	"LANGUAGE=",
+	"GIT_OPTIONAL_LOCKS=0",
+	"GIT_NO_REPLACE_OBJECTS=1",
+	"GIT_NO_LAZY_FETCH=1",
+	"GIT_TERMINAL_PROMPT=0",
+	"SSH_ASKPASS_REQUIRE=never",
+}
 
 func isolationArgs() []string {
 	return []string{
@@ -31,6 +40,7 @@ func isolationArgs() []string {
 		"-c", "core.hooksPath=" + os.DevNull,
 		"-c", "core.fsmonitor=false",
 		"-c", "submodule.recurse=false",
+		"-c", "protocol.file.allow=never",
 	}
 }
 

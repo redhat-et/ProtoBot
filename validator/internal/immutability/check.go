@@ -45,7 +45,7 @@ func Check(target, base layout.Snapshot) []layout.Diagnostic {
 		diagnostics = append(diagnostics, layout.Diagnostic{
 			Code:    CodeTextImmutable,
 			Path:    document.Path,
-			Message: fmt.Sprintf("parsed text for %s differs from the comparison base", id),
+			Message: fmt.Sprintf("parsed text for %q differs from the comparison base", id),
 		})
 	}
 	sortDiagnostics(diagnostics)

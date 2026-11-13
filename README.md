@@ -83,8 +83,11 @@ validator/
   go.mod
   cmd/validator/            # V2 specification validator CLI
   internal/cli/             # checkout path and comparison-base arguments
+  internal/gitcmd/          # isolated Git child process execution
+  internal/immutability/    # parsed requirement text immutability check
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
+  internal/revision/        # comparison-base Git revision reader
   internal/specvalidation/  # relationship type allowlist and later checks
   internal/testtags/        # Gherkin @req:<ID> tag reference resolution
 wms/

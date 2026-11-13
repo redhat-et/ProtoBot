@@ -11,6 +11,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/gitcmd"
 	"github.com/redhat-et/protobot/validator/internal/immutability"
+	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/revision"
 )
 
@@ -625,6 +626,28 @@ func TestRunUnknownBaseFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr, revision.CodeNotFound) {
 		t.Fatalf("stderr %q omitted %s", stderr, revision.CodeNotFound)
+	}
+}
+
+func TestReportDiagnosticsSanitizesControlCharactersAndWorkflowCommands(t *testing.T) {
+	var buf bytes.Buffer
+	reportDiagnostics(&buf, []layout.Diagnostic{
+		{
+			Code:    "code\nwith\rcontrols",
+			Path:    "path\n::error::injected",
+			Message: "message\r\n::warning::breakout",
+		},
+	})
+	got := buf.String()
+	if strings.Contains(got, "\r") {
+		t.Fatalf("output contains carriage return: %q", got)
+	}
+	// The only newline should be the trailing newline of the printed line.
+	if strings.Count(got, "\n") != 1 {
+		t.Fatalf("output contains internal newline: %q", got)
+	}
+	if strings.Contains(got, "::") {
+		t.Fatalf("output contains workflow command prefix: %q", got)
 	}
 }
 

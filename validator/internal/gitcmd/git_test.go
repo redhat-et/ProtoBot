@@ -16,6 +16,11 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/tmp/hooks",
+		"GIT_SSH=/usr/bin/ssh",
+		"GIT_SSH_COMMAND=ssh -v",
+		"GIT_PROXY_COMMAND=none",
+		"GIT_ALLOW_PROTOCOL=http",
+		"GIT_ASKPASS=/usr/bin/askpass",
 	})
 	if !slices.Contains(env, "PATH=/usr/bin") {
 		t.Fatalf("PATH was stripped: %q", env)
@@ -28,12 +33,25 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/tmp/hooks",
+		"GIT_SSH=/usr/bin/ssh",
+		"GIT_SSH_COMMAND=ssh -v",
+		"GIT_PROXY_COMMAND=none",
+		"GIT_ALLOW_PROTOCOL=http",
+		"GIT_ASKPASS=/usr/bin/askpass",
 	} {
 		if slices.Contains(env, banned) {
 			t.Fatalf("env still has %s: %q", banned, env)
 		}
 	}
-	for _, fixed := range []string{"LC_ALL=C", "LANGUAGE=", "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1"} {
+	for _, fixed := range []string{
+		"LC_ALL=C",
+		"LANGUAGE=",
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_NO_REPLACE_OBJECTS=1",
+		"GIT_NO_LAZY_FETCH=1",
+		"GIT_TERMINAL_PROMPT=0",
+		"SSH_ASKPASS_REQUIRE=never",
+	} {
 		if !slices.Contains(env, fixed) {
 			t.Fatalf("env missing %s: %q", fixed, env)
 		}
@@ -48,6 +66,7 @@ func TestGitCommandPrependsIsolationArgs(t *testing.T) {
 		"-c", "core.hooksPath=" + os.DevNull,
 		"-c", "core.fsmonitor=false",
 		"-c", "submodule.recurse=false",
+		"-c", "protocol.file.allow=never",
 		"-C", "/repo",
 		"status",
 	}
