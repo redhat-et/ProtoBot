@@ -157,7 +157,6 @@ def parse_setup_state(output: str) -> SetupState:
             and stripped
             == "Would remove stale vendored assets at .fullsend/bin/fullsend (if present)"
         ):
-            section = None
             continue
         if section == "variables":
             match = re.match(
@@ -532,7 +531,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.target):
+    if not re.fullmatch(
+        r"[A-Za-z0-9_.][A-Za-z0-9_.-]*/[A-Za-z0-9_.][A-Za-z0-9_.-]*",
+        args.target,
+    ):
         parser.error("target must be a GitHub owner/repository")
 
     root = args.root.resolve()

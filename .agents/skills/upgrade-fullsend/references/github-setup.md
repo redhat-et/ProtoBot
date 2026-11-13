@@ -65,7 +65,7 @@ customizations in `.github/workflows/fullsend.yaml`:
   both `pull_request_target` and `pull_request_review` remains generated
   content, not a downstream override.
 
-Also preserve ProtoBot's local stop-fix job, which authorizes `/fs-fix-stop`
+Also preserve ProtoBot's local `stop-fix` job, which authorizes `/fs-fix-stop`
 and applies `fullsend-no-fix`. These dispatch rules and additions are
 ProtoBot-specific; do not apply the dispatch rules verbatim to other
 repositories. For any other target, inventory and preserve its own intended
@@ -132,20 +132,41 @@ plan with its dependency and timing documented.
 ## Applying approved settings
 
 Use the same explicit `FULLSEND_TARGET_REPO` used for the setup preview. Set
-`NAME`, `VALUE`, and `SECRET_FILE` from each approved row. Skip unchanged,
-unresolved, or unapproved rows.
+`NAME`, `VALUE`, and `SECRET_FILE` as data from each approved row; do not build
+shell source from proposed values or use `eval`. Skip unchanged, unresolved, or
+unapproved rows.
 
-For an approved repository variable:
+For each approved repository variable, validate the name and target with the
+same checks as the preview helper, then pass the value through standard input
+so the shell never interprets it as command text:
 
 ```bash
-gh variable set "$NAME" --repo "$FULLSEND_TARGET_REPO" --body "$VALUE"
+set -euo pipefail
+[[ "$NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+  printf 'invalid repository setting name\n' >&2
+  exit 1
+}
+[[ "$FULLSEND_TARGET_REPO" =~ ^[A-Za-z0-9_.][A-Za-z0-9_.-]*/[A-Za-z0-9_.][A-Za-z0-9_.-]*$ ]] || {
+  printf 'invalid GitHub owner/repository target\n' >&2
+  exit 1
+}
+printf '%s' "$VALUE" | gh variable set "$NAME" --repo "$FULLSEND_TARGET_REPO"
 ```
 
-For an approved GitHub Actions secret, use the approved private file outside
-the worktree, or run the same command without redirection for a local
-interactive prompt:
+For an approved GitHub Actions secret, apply the same name and target checks.
+Use the approved private file outside the worktree, or run the same command
+without redirection for a local interactive prompt:
 
 ```bash
+set -euo pipefail
+[[ "$NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+  printf 'invalid repository setting name\n' >&2
+  exit 1
+}
+[[ "$FULLSEND_TARGET_REPO" =~ ^[A-Za-z0-9_.][A-Za-z0-9_.-]*/[A-Za-z0-9_.][A-Za-z0-9_.-]*$ ]] || {
+  printf 'invalid GitHub owner/repository target\n' >&2
+  exit 1
+}
 gh secret set "$NAME" --repo "$FULLSEND_TARGET_REPO" --app actions \
   < "$SECRET_FILE"
 ```

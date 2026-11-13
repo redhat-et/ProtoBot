@@ -30,27 +30,59 @@ self-update syntax.
 
 ## Verify a release archive before installation
 
-The official distribution is the GitHub release archive. If the currently
-installed CLI does not document a signature-verified self-update for the exact
-target release, select `FULLSEND_ASSET` and `FULLSEND_CHECKSUM_ASSET` from the
-release metadata for the host operating system and architecture. Do not
-hard-code a version or assume an archive layout. Download the selected archive
-and checksum manifest into a temporary staging directory:
+Use this fallback only when the installed CLI lacks a signature-verified
+self-update for the exact release. Require its Sigstore checksum bundle and stop
+if verification fails; a same-origin checksum alone is insufficient.
+
+Derive the archive basename from the validated tag and host `GOOS`/`GOARCH`:
+`fullsend_<version-without-v>_<goos>_<goarch>.tar.gz`. Use the fixed
+`checksums.txt` and `checksums.txt.sigstore.json` names, and confirm all three
+occur in Step 1's asset list. Never pass arbitrary metadata names to shell
+commands. Stop for unsupported platforms or missing assets.
 
 ```bash
+set -euo pipefail
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) FULLSEND_GOOS=darwin; FULLSEND_GOARCH=arm64 ;;
+  Darwin:x86_64) FULLSEND_GOOS=darwin; FULLSEND_GOARCH=amd64 ;;
+  Linux:aarch64|Linux:arm64) FULLSEND_GOOS=linux; FULLSEND_GOARCH=arm64 ;;
+  Linux:x86_64) FULLSEND_GOOS=linux; FULLSEND_GOARCH=amd64 ;;
+  *) printf 'unsupported Fullsend release platform\n' >&2; exit 1 ;;
+esac
 FULLSEND_STAGE=$(mktemp -d)
+FULLSEND_ASSET="fullsend_${FULLSEND_TARGET_VERSION#v}_${FULLSEND_GOOS}_${FULLSEND_GOARCH}.tar.gz"
+FULLSEND_CHECKSUM_ASSET=checksums.txt
+FULLSEND_SIGNATURE_ASSET=checksums.txt.sigstore.json
+command -v cosign >/dev/null || {
+  printf 'cosign is required to verify the release checksum signature\n' >&2
+  exit 1
+}
 gh release download "$FULLSEND_TARGET_VERSION" \
   --repo fullsend-ai/fullsend \
-  --pattern "$FULLSEND_ASSET" --pattern "$FULLSEND_CHECKSUM_ASSET" \
+  --pattern "$FULLSEND_ASSET" \
+  --pattern "$FULLSEND_CHECKSUM_ASSET" \
+  --pattern "$FULLSEND_SIGNATURE_ASSET" \
   --dir "$FULLSEND_STAGE"
 ```
 
-Before extracting or executing the archive, compare its locally calculated
-SHA-256 with the exact archive entry in the downloaded checksum manifest. Do
-not accept a checksum from another release, asset, or source. Inspect archive
-members and reject absolute paths or any member whose normalized path escapes
-the staging directory; extract only beneath that directory. Install the
-verified binary at the existing user-writable location for a manual
+Verify the bundle against the Fullsend release workflow identity and GitHub
+Actions OIDC issuer before trusting the checksum manifest; stop on failure:
+
+```bash
+cosign verify-blob \
+  --bundle "$FULLSEND_STAGE/$FULLSEND_SIGNATURE_ASSET" \
+  --certificate-identity \
+  "https://github.com/fullsend-ai/fullsend/.github/workflows/release.yml@refs/tags/$FULLSEND_TARGET_VERSION" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "$FULLSEND_STAGE/$FULLSEND_CHECKSUM_ASSET"
+```
+
+Only after verification, compare the archive SHA-256 with the exact entry for
+`FULLSEND_ASSET` in the signed manifest. Do not accept a checksum from another
+release, asset, or source.
+Inspect archive members and reject absolute paths or any member whose normalized
+path escapes the staging directory; extract only beneath that directory. Install
+the verified binary at the existing user-writable location for a manual
 installation, or use an isolated directory on `PATH`. Never overwrite a
 package-manager-owned executable with an extracted binary or change unrelated
 tools such as OpenShell.

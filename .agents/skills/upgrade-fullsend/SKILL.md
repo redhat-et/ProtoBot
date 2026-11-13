@@ -48,14 +48,36 @@ Run commands from the repository root. Check the CLI on every invocation,
 even when the repository's pins already match. Do not assume a particular
 installed version, operating system, architecture, or installation method.
 
-If the user requested a release, normalize it to its published tag and set
-`FULLSEND_TARGET_VERSION` to that tag. Otherwise, resolve the latest stable
-release once:
+Set `FULLSEND_SKILL_DIR` to the directory containing this `SKILL.md`. If the
+user requested a release, set `FULLSEND_TARGET_VERSION` from that approved
+input as data. Otherwise, resolve the latest stable release once:
 
 ```bash
+FULLSEND_SKILL_DIR=/path/to/protobot/.agents/skills/upgrade-fullsend
 FULLSEND_TARGET_VERSION=$(
   gh api --hostname github.com \
     repos/fullsend-ai/fullsend/releases/latest --jq .tag_name
+)
+```
+
+Normalize and validate the chosen value before any GitHub or CLI command uses
+it. Pass it as an argument to the bundled normalizer; do not insert tag text
+into shell source:
+
+```bash
+FULLSEND_TARGET_VERSION=$(
+  python3 - "$FULLSEND_SKILL_DIR/scripts" "$FULLSEND_TARGET_VERSION" <<'PY'
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from update_fullsend_pins import UpdateError, normalize_version
+
+try:
+    print(normalize_version(sys.argv[2]))
+except UpdateError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(2)
+PY
 )
 export FULLSEND_TARGET_VERSION
 ```
@@ -105,12 +127,10 @@ installation, and refreshing shell command lookup.
 The setup preview is a required, report-only preflight. Set one explicit
 `FULLSEND_TARGET_REPO` and use it for the preview and every repository-settings
 operation. The helper scripts live with this skill, not the target repository.
-Set `FULLSEND_SKILL_DIR` to the directory containing this `SKILL.md` and
-`FULLSEND_TARGET_ROOT` to the selected repository's root; use that same root
-throughout the upgrade:
+Reuse `FULLSEND_SKILL_DIR` from Step 1 and set `FULLSEND_TARGET_ROOT` to the
+selected repository's root; use that same root throughout the upgrade:
 
 ```bash
-FULLSEND_SKILL_DIR=/path/to/protobot/.agents/skills/upgrade-fullsend
 FULLSEND_TARGET_ROOT=/path/to/repository
 FULLSEND_TARGET_REPO=example-org/example-repo
 python3 "$FULLSEND_SKILL_DIR/scripts/show_fullsend_setup_diff.py" \

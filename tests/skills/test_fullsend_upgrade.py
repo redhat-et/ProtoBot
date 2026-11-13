@@ -622,6 +622,21 @@ class FullsendSetupPreviewTests(unittest.TestCase):
         self.assertEqual(0, result)
         self.assertNotIn("# REVIEW REQUIRED", error)
 
+    def test_preview_rejects_target_segments_starting_with_hyphen(self) -> None:
+        for target in ("--force/example-org", "example-org/--force"):
+            with self.subTest(target=target):
+                error = io.StringIO()
+                with (
+                    self.assertRaises(SystemExit) as raised,
+                    contextlib.redirect_stderr(error),
+                ):
+                    setup_preview.main(["--version", "v1.2.3", "--", target])
+
+                self.assertEqual(2, raised.exception.code)
+                self.assertIn(
+                    "target must be a GitHub owner/repository", error.getvalue()
+                )
+
     def test_preview_returns_three_when_generated_workflow_differs(self) -> None:
         result, output, error = self.run_preview(
             b"jobs: {}\n",
@@ -813,6 +828,19 @@ class FullsendSetupPreviewTests(unittest.TestCase):
                 self.assertRaises(setup_preview.UpdateError),
             ):
                 setup_preview.parse_setup_state(output)
+
+    def test_setup_state_rejects_trailing_text_after_vendored_assets_footer(
+        self,
+    ) -> None:
+        output = (
+            "Would set repository variables:\n\n"
+            "Would set 0 repository secrets:\n"
+            "Would remove stale vendored assets at .fullsend/bin/fullsend (if present)\n"
+            "unexpected trailing line\n"
+        )
+
+        with self.assertRaises(setup_preview.UpdateError):
+            setup_preview.parse_setup_state(output)
 
     def test_workflow_references_are_extracted_from_github_expressions(self) -> None:
         planned = setup_preview.PlannedFile(".github/workflows/review.yml", 0)
