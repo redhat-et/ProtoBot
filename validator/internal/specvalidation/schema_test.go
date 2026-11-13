@@ -32,8 +32,30 @@ func TestValidateRecordSchema(t *testing.T) {
 			snapshot: schemaSnapshot(requirementWithRelationships(nil), validInterfaceDocument()),
 		},
 		{
-			name:     "empty applies_to mapping",
-			snapshot: schemaSnapshot(requirementWithEmptyAppliesTo(), validInterfaceDocument()),
+			name:       "empty applies_to mapping",
+			snapshot:   schemaSnapshot(requirementWithEmptyAppliesTo(), validInterfaceDocument()),
+			wantCodes:  []string{CodeRequirementMissingField},
+			wantFields: []string{"applies_to"},
+		},
+		{
+			name:       "empty applies_to lists",
+			snapshot:   schemaSnapshot(requirementWithEmptyAppliesToLists(), validInterfaceDocument()),
+			wantCodes:  []string{CodeRequirementMissingField},
+			wantFields: []string{"applies_to"},
+		},
+		{
+			name:       "blank applies_to selectors",
+			snapshot:   schemaSnapshot(requirementWithBlankAppliesToSelectors(), validInterfaceDocument()),
+			wantCodes:  []string{CodeRequirementMissingField},
+			wantFields: []string{"applies_to"},
+		},
+		{
+			name:     "applies_to with only interfaces",
+			snapshot: schemaSnapshot(requirementWithOnlyInterfaces(), validInterfaceDocument()),
+		},
+		{
+			name:     "applies_to with only scopes",
+			snapshot: schemaSnapshot(requirementWithOnlyScopes(), validInterfaceDocument()),
 		},
 		{
 			name:       "missing requirement id",
@@ -400,6 +422,59 @@ func requirementWithEmptyAppliesTo() layout.Document[records.Requirement] {
 	document.Record.AppliesTo = records.Applicability{}
 	document.Fields = omitField(document.Fields, "applies_to")
 	document.Fields["applies_to"] = true
+	return document
+}
+
+func requirementWithEmptyAppliesToLists() layout.Document[records.Requirement] {
+	document := validRequirementDocument()
+	document.Record.AppliesTo = records.Applicability{
+		Interfaces: []string{},
+		Scopes:     []string{},
+	}
+	document.Fields = omitField(document.Fields, "applies_to")
+	document.Fields["applies_to"] = true
+	document.Fields["applies_to.interfaces"] = true
+	document.Fields["applies_to.scopes"] = true
+	return document
+}
+
+func requirementWithBlankAppliesToSelectors() layout.Document[records.Requirement] {
+	document := validRequirementDocument()
+	document.Record.AppliesTo = records.Applicability{
+		Interfaces: []string{"   "},
+		Scopes:     []string{"\t", ""},
+	}
+	document.Fields = omitField(document.Fields, "applies_to")
+	document.Fields["applies_to"] = true
+	document.Fields["applies_to.interfaces"] = true
+	document.Fields["applies_to.interfaces[0]"] = true
+	document.Fields["applies_to.scopes"] = true
+	document.Fields["applies_to.scopes[0]"] = true
+	document.Fields["applies_to.scopes[1]"] = true
+	return document
+}
+
+func requirementWithOnlyInterfaces() layout.Document[records.Requirement] {
+	document := validRequirementDocument()
+	document.Record.AppliesTo = records.Applicability{
+		Interfaces: []string{"health-api"},
+	}
+	document.Fields = omitField(document.Fields, "applies_to")
+	document.Fields["applies_to"] = true
+	document.Fields["applies_to.interfaces"] = true
+	document.Fields["applies_to.interfaces[0]"] = true
+	return document
+}
+
+func requirementWithOnlyScopes() layout.Document[records.Requirement] {
+	document := validRequirementDocument()
+	document.Record.AppliesTo = records.Applicability{
+		Scopes: []string{"api"},
+	}
+	document.Fields = omitField(document.Fields, "applies_to")
+	document.Fields["applies_to"] = true
+	document.Fields["applies_to.scopes"] = true
+	document.Fields["applies_to.scopes[0]"] = true
 	return document
 }
 

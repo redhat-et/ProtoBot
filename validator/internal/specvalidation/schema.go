@@ -65,6 +65,9 @@ func validateRequirementSchema(document layout.Document[records.Requirement]) []
 		}
 		diagnostics = append(diagnostics, missingFieldDiagnostic(CodeRequirementMissingField, document.Path, field))
 	}
+	if fieldPresent(document.Fields, "applies_to") && !hasApplicableSelector(record.AppliesTo) {
+		diagnostics = append(diagnostics, missingFieldDiagnostic(CodeRequirementMissingField, document.Path, "applies_to"))
+	}
 	if fieldPresent(document.Fields, "status") && strings.TrimSpace(record.Status) != "" && !allowedStatuses[record.Status] {
 		diagnostics = append(diagnostics, Diagnostic{
 			Code:  CodeRequirementInvalidStatus,
@@ -132,6 +135,19 @@ func fieldPresent(fields map[string]bool, field string) bool {
 		return false
 	}
 	return fields[field]
+}
+
+func hasApplicableSelector(appliesTo records.Applicability) bool {
+	return hasNonBlankSelector(appliesTo.Interfaces) || hasNonBlankSelector(appliesTo.Scopes)
+}
+
+func hasNonBlankSelector(selectors []string) bool {
+	for _, selector := range selectors {
+		if strings.TrimSpace(selector) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func unexpectedFields(fields map[string]bool, allowed func(string) bool) []string {
