@@ -384,6 +384,55 @@ status: active
 	}
 }
 
+func TestRunSuppressesReferenceDiagnosticWhenTargetFailsToParse(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for REQ-API-00001.yaml", stderr)
+	}
+	if strings.Contains(stderr, "is not declared") {
+		t.Fatalf("stderr %q unexpectedly reported cascading 'is not declared' for malformed target", stderr)
+	}
+}
+
+func TestRunRejectsAmbiguousInterfaceReference(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/interfaces/api-a.yaml", "name: health-api\nkind: http\ndescription: Health check.\n")
+	writeSpecFile(t, target, "spec/interfaces/api-b.yaml", "name: health-api\nkind: http\ndescription: Duplicate health check.\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "health-api") || !strings.Contains(stderr, "ambiguous") {
+		t.Fatalf("stderr %q omitted ambiguous interface diagnostic", stderr)
+	}
+}
+
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001

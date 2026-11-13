@@ -350,3 +350,122 @@ status: active
 		t.Errorf("second message %q omitted REQ-MISSING-00001", diagnostics[1].Message)
 	}
 }
+
+func TestValidateSuppressesCascadingReferenceDiagnosticsOnParseFailure(t *testing.T) {
+	snapshot := layout.Snapshot{
+		Requirements: []layout.Document[records.Requirement]{{
+			Path: "spec/requirements/REQ-API-00002.yaml",
+			Record: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{"health-api", "genuinely-missing-api"},
+				},
+				Relationships: []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+					{Type: records.RelRelatedTo, Target: "REQ-API-00099"},
+				},
+			},
+		}},
+	}
+	layoutDiagnostics := []layout.Diagnostic{
+		{
+			Code:    layout.CodeParseFailed,
+			Path:    "spec/requirements/REQ-API-00001.yaml",
+			Message: "parse YAML: yaml: line 1: did not find expected node content",
+		},
+		{
+			Code:    layout.CodeParseFailed,
+			Path:    "spec/interfaces/health-api.yaml",
+			Message: "parse YAML: yaml: line 1: did not find expected node content",
+		},
+	}
+
+	diagnostics := Validate(snapshot, layoutDiagnostics...)
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics=%v, want 2 (only genuinely missing targets)", diagnostics)
+	}
+	if diagnostics[0].Field != "applies_to.interfaces[1]" || !identifiesType(diagnostics[0].Message, "genuinely-missing-api") {
+		t.Errorf("first diagnostic=%+v", diagnostics[0])
+	}
+	if diagnostics[1].Field != "relationships[1].target" || !identifiesType(diagnostics[1].Message, "REQ-API-00099") {
+		t.Errorf("second diagnostic=%+v", diagnostics[1])
+	}
+}
+
+func TestValidateRejectsAmbiguousInterfaceReference(t *testing.T) {
+	snapshot := layout.Snapshot{
+		Interfaces: []layout.Document[records.InterfaceRecord]{
+			{
+				Path:   "spec/interfaces/api-a.yaml",
+				Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
+			},
+			{
+				Path:   "spec/interfaces/api-b.yaml",
+				Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
+			},
+		},
+		Requirements: []layout.Document[records.Requirement]{{
+			Path: "spec/requirements/REQ-API-00002.yaml",
+			Record: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{"health-api"},
+				},
+			},
+		}},
+	}
+
+	diagnostics := Validate(snapshot)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeReferenceAmbiguous {
+		t.Errorf("code=%q, want %q", got.Code, CodeReferenceAmbiguous)
+	}
+	if got.Field != "applies_to.interfaces[0]" {
+		t.Errorf("field=%q, want applies_to.interfaces[0]", got.Field)
+	}
+	if !identifiesType(got.Message, "health-api") || !identifiesType(got.Message, "ambiguous") {
+		t.Errorf("message %q does not identify ambiguous health-api", got.Message)
+	}
+}
+
+func TestValidateRejectsAmbiguousRelationshipTarget(t *testing.T) {
+	snapshot := layout.Snapshot{
+		Requirements: []layout.Document[records.Requirement]{
+			{
+				Path:   "spec/requirements/REQ-API-00001-a.yaml",
+				Record: records.Requirement{ID: "REQ-API-00001", Status: records.StatusActive},
+			},
+			{
+				Path:   "spec/requirements/REQ-API-00001-b.yaml",
+				Record: records.Requirement{ID: "REQ-API-00001", Status: records.StatusRetired},
+			},
+			{
+				Path: "spec/requirements/REQ-API-00002.yaml",
+				Record: records.Requirement{
+					ID: "REQ-API-00002",
+					Relationships: []records.Relationship{
+						{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+					},
+				},
+			},
+		},
+	}
+
+	diagnostics := Validate(snapshot)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeReferenceAmbiguous {
+		t.Errorf("code=%q, want %q", got.Code, CodeReferenceAmbiguous)
+	}
+	if got.Field != "relationships[0].target" {
+		t.Errorf("field=%q, want relationships[0].target", got.Field)
+	}
+	if !identifiesType(got.Message, "REQ-API-00001") || !identifiesType(got.Message, "ambiguous") {
+		t.Errorf("message %q does not identify ambiguous REQ-API-00001", got.Message)
+	}
+}
