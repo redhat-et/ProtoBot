@@ -379,6 +379,37 @@ func TestRunTestTagReferenceResolution(t *testing.T) {
 	}
 }
 
+func TestRunRejectsRelationshipCycles(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00002
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /ready, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001") || !strings.Contains(stderr, "REQ-API-00002") {
+		t.Fatalf("stderr %q omitted participating requirement IDs", stderr)
+	}
+	if !strings.Contains(stderr, "depends-on") {
+		t.Fatalf("stderr %q omitted depends-on", stderr)
+	}
+}
+
 func TestRunLayoutDiagnostics(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
