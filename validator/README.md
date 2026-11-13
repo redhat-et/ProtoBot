@@ -24,7 +24,11 @@ requirement targets satisfy resolution. It also scans Gherkin `.feature`
 files under `tests/` for `@req:<ID>` tags and fails when a tag does not
 resolve to a known requirement record. Active and retired IDs both count
 as known; unknown or misspelled IDs fail with line-level diagnostics.
-Schema, EARS, and identifier checks land in follow-on work.
+Requirement text is checked for exactly one `shall` and for a match
+against the declared EARS type (`ubiquitous`, `event-driven`,
+`state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
+State-driven statements require the keyword `While`. Schema,
+identifier, and remaining reference checks land in follow-on work.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
