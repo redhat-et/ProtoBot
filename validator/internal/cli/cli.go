@@ -76,11 +76,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	snapshot, diagnostics := layout.Read(opts.target)
 	failed := len(diagnostics) > 0
 	for _, diagnostic := range diagnostics {
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s: %s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
+		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 	}
 	for _, diagnostic := range specvalidation.Validate(snapshot) {
 		failed = true
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s: %s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
+		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 	}
 	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
 		failed = true
@@ -147,6 +147,16 @@ func optionValue(args []string, i int) (string, int, bool) {
 		return args[i+1], i + 2, true
 	}
 	return "", i + 1, false
+}
+
+var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+func sanitizeDiagnosticField(s string) string {
+	return lineBreakReplacer.Replace(s)
+}
+
+func printDiagnostic(w io.Writer, code, path, message string) {
+	_, _ = fmt.Fprintf(w, "validator: %s: %s: %s\n", code, sanitizeDiagnosticField(path), sanitizeDiagnosticField(message))
 }
 
 func usageError(stderr io.Writer, message string) int {

@@ -2,8 +2,10 @@ package layout
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -361,9 +363,12 @@ func TestReadEntryWithControlCharRejected(t *testing.T) {
 	if len(snapshot.Requirements) != 0 {
 		t.Fatalf("file with newline in name was parsed: %+v", snapshot.Requirements)
 	}
-	wantPath := "spec/requirements/a b.yaml"
+	wantPath := path.Join("spec/requirements", strconv.Quote(filename))
 	if !hasDiagnostic(diagnostics, CodeUnexpectedFile, wantPath) {
 		t.Fatalf("missing unexpected_file diagnostic for %q: %v", wantPath, diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, CodeUnexpectedFile, wantPath, "has an unsafe name") {
+		t.Fatalf("missing unexpected_file diagnostic message %q for %q: %v", "has an unsafe name", wantPath, diagnostics)
 	}
 	for _, d := range diagnostics {
 		if strings.Contains(d.Path, "\n") || strings.Contains(d.Path, "\r") {

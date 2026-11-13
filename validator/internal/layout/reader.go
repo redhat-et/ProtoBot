@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -115,9 +116,13 @@ func loadDir[T any](root *os.Root, relative string, decode func([]byte) (T, map[
 	var diagnostics []Diagnostic
 	for _, entry := range entries {
 		name := entry.Name()
-		entryRel := path.Join(relative, name)
+		entryName := name
+		if hasControl(name) {
+			entryName = strconv.Quote(name)
+		}
+		entryRel := path.Join(relative, entryName)
 		if !safeEntryName(name) {
-			diagnostics = append(diagnostics, diagnostic(CodeUnexpectedFile, entryRel, "is not a regular YAML record"))
+			diagnostics = append(diagnostics, diagnostic(CodeUnexpectedFile, entryRel, "has an unsafe name"))
 			continue
 		}
 		document, failure := loadEntry(root, entryRel, decode)
@@ -189,12 +194,19 @@ func safeEntryName(name string) bool {
 	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
 		return false
 	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return false
-		}
+	if hasControl(name) {
+		return false
 	}
 	return filepath.Base(name) == name
+}
+
+func hasControl(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeRecord[T any](data []byte) (T, map[string]bool, error) {
@@ -310,9 +322,12 @@ func collectFields(node *yaml.Node, location string, fields map[string]bool) {
 var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
 func diagnostic(code, path, message string) Diagnostic {
+	if hasControl(path) {
+		path = strconv.Quote(path)
+	}
 	return Diagnostic{
 		Code:    code,
-		Path:    lineBreakReplacer.Replace(path),
+		Path:    path,
 		Message: lineBreakReplacer.Replace(message),
 	}
 }

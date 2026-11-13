@@ -31,7 +31,8 @@ reported output.
 `layout.Read` discovers `*.yaml` files in those directories. It does
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
 or interface basenames to match the in-record name. No current check
-covers basename-to-record-ID or basename-to-name matching; that matching
+covers basename-to-record-ID or basename-to-name matching (tracked in
+[#443](https://github.com/redhat-et/ProtoBot/issues/443)); that matching
 is not implemented yet. Requirement ID format, uniqueness, and related
 in-record identifier checks are enforced by follow-on check groups
 [#385](https://github.com/redhat-et/ProtoBot/issues/385) and
@@ -51,19 +52,37 @@ The command exits with:
 - `1` when it reports diagnostics or target errors
 - `2` on usage or command-line syntax errors
 
-Target errors (such as a missing, unstattable, or non-directory
-`--target`) print an uncoded message to stderr:
+Usage errors (exit status 2) print an uncoded error message followed by
+the command usage:
+
+```text
+validator: <message>
+
+usage:
+  validator --target PATH --base REF
+  validator --help
+  validator -h
+
+  --target PATH   checkout directory to validate
+  --base REF      comparison base for identity and immutability checks
+```
+
+Target errors (exit status 1, such as a missing, unstattable, or
+non-directory `--target`) print an uncoded message to stderr:
 
 ```text
 validator: <message>
 ```
 
-Layout and specification diagnostics are written to stderr, one per
-line:
+Layout and specification diagnostics (exit status 1) are written to
+stderr, one per line:
 
 ```text
 validator: <code>: <path>: <message>
 ```
+
+Check the exit status first. A line without a `<code>` field is not a
+diagnostic.
 
 This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,

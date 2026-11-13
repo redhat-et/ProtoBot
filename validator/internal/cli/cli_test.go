@@ -532,6 +532,20 @@ func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
 	}
 }
 
+func TestPrintDiagnosticSanitizesLineBreaks(t *testing.T) {
+	var buf bytes.Buffer
+	printDiagnostic(&buf, "relationship.invalid_type", "spec/requirements/a\nb.yaml", "unsupported relationship type\nmulti line\r\nmessage")
+	got := buf.String()
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %q", len(lines), got)
+	}
+	want := "validator: relationship.invalid_type: spec/requirements/a b.yaml: unsupported relationship type multi line message\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 // TestRunIsDeterministic pins in-process repeatability of Run: the
 // command reads no clock, environment, random source, or shared
 // mutable state. It is not a cross-process isolation check.
