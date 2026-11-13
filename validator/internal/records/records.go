@@ -21,7 +21,7 @@ const (
 	StatusRetired = "retired"
 )
 
-// Relationship type values accepted by later validation.
+// Allowed requirement relationship types.
 const (
 	RelDependsOn  = "depends-on"
 	RelSupersedes = "supersedes"

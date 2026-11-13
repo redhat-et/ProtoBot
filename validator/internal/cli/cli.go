@@ -2,6 +2,7 @@
 //
 //	validator --target PATH --base REF
 //	validator --help
+//	validator -h
 //
 // The process is deterministic and network-free. It reads the checkout at
 // --target and records --base as the comparison argument. It does not
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 	"github.com/redhat-et/protobot/validator/internal/testtags"
 )
 
@@ -28,6 +30,7 @@ const (
 const usage = `usage:
   validator --target PATH --base REF
   validator --help
+  validator -h
 
   --target PATH   checkout directory to validate
   --base REF      comparison base for identity and immutability checks
@@ -56,6 +59,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return usageError(stderr, "--base is required")
 	}
 
+	// Leave opts.target as given. filepath.Clean is lexical and can
+	// rewrite ".." through a symlink; later check groups can
+	// canonicalize internally if they need a stable path.
 	info, err := os.Stat(opts.target)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -68,17 +74,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	snapshot, diagnostics := layout.Read(opts.target)
-	failed := false
-	if len(diagnostics) > 0 {
-		for _, diagnostic := range diagnostics {
-			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
-		}
-		failed = true
+	failed := len(diagnostics) > 0
+	for _, diagnostic := range diagnostics {
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
 	}
-
-	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
-		_, _ = io.WriteString(stderr, formatTagDiagnostic(finding))
+	for _, diagnostic := range specvalidation.Validate(snapshot) {
 		failed = true
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+	}
+	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
+		failed = true
+		_, _ = io.WriteString(stderr, formatTagDiagnostic(finding))
 	}
 	if failed {
 		return exitFailure
@@ -135,6 +141,9 @@ func optionValue(args []string, i int) (string, int, bool) {
 		return value, i + 1, true
 	}
 	if i+1 < len(args) {
+		if strings.HasPrefix(args[i+1], "--") {
+			return "", i + 1, false
+		}
 		return args[i+1], i + 2, true
 	}
 	return "", i + 1, false
