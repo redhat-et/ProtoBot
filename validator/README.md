@@ -31,12 +31,12 @@ reported output.
 `layout.Read` discovers `*.yaml` files in those directories. It does
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
 or interface basenames to match the in-record name. No current check
-covers basename-to-record-ID or basename-to-name matching (tracked in
-[#443](https://github.com/redhat-et/ProtoBot/issues/443)); that matching
-is not implemented yet. Requirement ID format, uniqueness, and related
-in-record identifier checks are enforced by follow-on check groups
+covers basename-to-record-ID or basename-to-name matching; that matching
+is not implemented yet and remains with follow-on check groups
 [#385](https://github.com/redhat-et/ProtoBot/issues/385) and
-[#395](https://github.com/redhat-et/ProtoBot/issues/395).
+[#395](https://github.com/redhat-et/ProtoBot/issues/395), which also
+enforce requirement ID format, uniqueness, and related in-record
+identifier checks.
 
 ```text
 validator --target PATH --base REF
@@ -74,21 +74,24 @@ non-directory `--target`) print an uncoded message to stderr:
 validator: <message>
 ```
 
-Layout and specification diagnostics (exit status 1) are written to
-stderr, one per line:
+Layout, specification, and test-tag diagnostics (exit status 1) are
+written to stderr, one per line:
 
 ```text
 validator: <code>: <path>: <message>
 ```
 
-Check the exit status first. A line without a `<code>` field is not a
-diagnostic.
+`<path>` identifies the affected file, including `:line` when the
+diagnostic applies to a specific line. Check the exit status first.
+A line without a `<code>` field is not a diagnostic.
 
 This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
-`layout.parse_failed`) and specification check codes (such as
-`relationship.invalid_type`). A `.yaml` record larger than 1 MiB
-produces `layout.read_failed`.
+`layout.parse_failed`), specification check codes (such as
+`relationship.invalid_type`, `relationship.cycle`), and test-tag codes
+(`testtags.read_failed`, `testtags.unexpected_file`,
+`testtags.unresolved`). A `.yaml` record larger than 1 MiB produces
+`layout.read_failed`.
 
 Build and test it from this directory:
 

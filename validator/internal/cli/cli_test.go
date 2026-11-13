@@ -370,14 +370,14 @@ func TestRunTestTagReferenceResolution(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("unresolved tags code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "tests/unknown.feature:1:") {
-		t.Fatalf("stderr %q omitted unknown-tag path and line", stderr)
+	if !strings.Contains(stderr, "validator: testtags.unresolved: tests/unknown.feature:1:") {
+		t.Fatalf("stderr %q omitted testtags.unresolved code for unknown tag", stderr)
 	}
 	if !strings.Contains(stderr, "REQ-UNKNOWN") {
 		t.Fatalf("stderr %q omitted unknown requirement ID", stderr)
 	}
-	if !strings.Contains(stderr, "tests/misspelled.feature:1:") {
-		t.Fatalf("stderr %q omitted misspelled-tag path and line", stderr)
+	if !strings.Contains(stderr, "validator: testtags.unresolved: tests/misspelled.feature:1:") {
+		t.Fatalf("stderr %q omitted testtags.unresolved code for misspelled tag", stderr)
 	}
 	if !strings.Contains(stderr, "REQ-API-0000l") {
 		t.Fatalf("stderr %q omitted misspelled requirement ID", stderr)
@@ -527,6 +527,36 @@ func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
 			t.Fatalf("stderr line starts with workflow command: %q", line)
 		}
 		if !strings.HasPrefix(line, "validator: layout.unexpected_file:") {
+			t.Fatalf("stderr line has unexpected prefix: %q", line)
+		}
+	}
+}
+
+func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
+	target := t.TempDir()
+	testsDir := filepath.Join(target, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	injectedName := "a\n::error::injected.feature"
+	filePath := filepath.Join(testsDir, injectedName)
+	if err := os.WriteFile(filePath, []byte("@req:REQ-UNKNOWN\nFeature: Injected\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "::") {
+			t.Fatalf("stderr line starts with workflow command: %q", line)
+		}
+		if !strings.HasPrefix(line, "validator: testtags.unresolved:") {
 			t.Fatalf("stderr line has unexpected prefix: %q", line)
 		}
 	}
