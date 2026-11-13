@@ -164,6 +164,8 @@ func loadEntry[T any](root *os.Root, relative string, decode func([]byte) (T, ma
 		d := diagnostic(CodeReadFailed, relative, fmt.Sprintf("cannot read file: %s", err))
 		return Document[T]{}, &d
 	}
+	// Guard against files that grew between stat and read, or where stat
+	// reported an inaccurate size.
 	if int64(len(data)) > maxYAMLBytes {
 		d := diagnostic(CodeReadFailed, relative, "YAML file exceeds the 1 MiB limit")
 		return Document[T]{}, &d
@@ -245,9 +247,6 @@ func inspectNode(node *yaml.Node, location string) error {
 	if node.Style&yaml.TaggedStyle != 0 {
 		return fmt.Errorf("unsafe YAML tag at %s", location)
 	}
-	if strings.HasPrefix(node.Tag, "!") && !strings.HasPrefix(node.Tag, "!!") {
-		return fmt.Errorf("unsafe YAML tag %q at %s", node.Tag, location)
-	}
 
 	switch node.Kind {
 	case yaml.MappingNode:
@@ -303,7 +302,7 @@ func collectFields(node *yaml.Node, location string, fields map[string]bool) {
 }
 
 func diagnostic(code, path, message string) Diagnostic {
-	return Diagnostic{Code: code, Path: path, Message: message}
+	return Diagnostic{Code: code, Path: path, Message: strings.Join(strings.Fields(message), " ")}
 }
 
 func sortDiagnostics(diagnostics []Diagnostic) {

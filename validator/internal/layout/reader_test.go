@@ -245,26 +245,37 @@ func TestReadMalformedYAML(t *testing.T) {
 		name     string
 		filename string
 		content  string
+		wantMsg  string
 	}{
 		{
 			name:     "utf8 bom",
 			filename: "spec/requirements/bom.yaml",
 			content:  "\xef\xbb\xbfid: REQ-API-00001\ntype: ubiquitous\ntext: The service shall exist.\nstatus: active\n",
+			wantMsg:  "UTF-8 BOM",
 		},
 		{
 			name:     "invalid utf8",
 			filename: "spec/requirements/invalid-utf8.yaml",
 			content:  "id: REQ-API-00001\ntype: ubiquitous\ntext: \xff\xfe invalid\nstatus: active\n",
+			wantMsg:  "not valid UTF-8",
 		},
 		{
 			name:     "non-string mapping key",
 			filename: "spec/requirements/non-string-key.yaml",
 			content:  "123: value\nstatus: active\n",
+			wantMsg:  "must be a string",
 		},
 		{
-			name:     "explicit yaml tag",
-			filename: "spec/requirements/tagged.yaml",
+			name:     "explicit yaml tag custom",
+			filename: "spec/requirements/tagged-custom.yaml",
 			content:  "id: !custom REQ-API-00001\nstatus: active\n",
+			wantMsg:  "unsafe YAML tag",
+		},
+		{
+			name:     "explicit yaml tag standard",
+			filename: "spec/requirements/tagged-standard.yaml",
+			content:  "id: !!str REQ-API-00001\nstatus: active\n",
+			wantMsg:  "unsafe YAML tag",
 		},
 	}
 	for _, tc := range cases {
@@ -274,6 +285,9 @@ func TestReadMalformedYAML(t *testing.T) {
 			_, diags := Read(isolated)
 			if !hasDiagnostic(diags, CodeParseFailed, tc.filename) {
 				t.Fatalf("missing parse_failed diagnostic for %s: %v", tc.name, diags)
+			}
+			if !hasDiagnosticMessage(diags, CodeParseFailed, tc.filename, tc.wantMsg) {
+				t.Fatalf("diagnostic for %s does not contain %q: %v", tc.name, tc.wantMsg, diags)
 			}
 		})
 	}
@@ -294,6 +308,27 @@ func TestReadOversizedFile(t *testing.T) {
 	}
 	if len(snapshot.Requirements) != 0 {
 		t.Fatalf("oversized file was parsed: %+v", snapshot.Requirements)
+	}
+}
+
+func TestReadExactLimitFile(t *testing.T) {
+	target := t.TempDir()
+	exact := make([]byte, maxYAMLBytes)
+	for i := range exact {
+		exact[i] = ' '
+	}
+	prefix := []byte("id: REQ-API-00001\ntype: ubiquitous\ntext: \"")
+	copy(exact, prefix)
+	suffix := []byte("\"\nstatus: active\n")
+	copy(exact[len(exact)-len(suffix):], suffix)
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", string(exact))
+
+	snapshot, diagnostics := Read(target)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics for exact limit file: %v", diagnostics)
+	}
+	if len(snapshot.Requirements) != 1 {
+		t.Fatalf("exact limit file was not parsed: %+v", snapshot.Requirements)
 	}
 }
 
@@ -557,6 +592,15 @@ func abs(t *testing.T, path string) string {
 func hasDiagnostic(diagnostics []Diagnostic, code, path string) bool {
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == code && diagnostic.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDiagnosticMessage(diagnostics []Diagnostic, code, path, substr string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code && diagnostic.Path == path && strings.Contains(diagnostic.Message, substr) {
 			return true
 		}
 	}
