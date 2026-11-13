@@ -13,8 +13,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/redhat-et/protobot/validator/internal/ears"
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 	"github.com/redhat-et/protobot/validator/internal/testtags"
@@ -74,9 +76,19 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	snapshot, diagnostics := layout.Read(opts.target)
-	failed := len(diagnostics) > 0
+	findings := make([]finding, 0, len(diagnostics)+len(snapshot.Requirements))
 	for _, diagnostic := range diagnostics {
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		findings = append(findings, finding{path: diagnostic.Path, code: diagnostic.Code, message: diagnostic.Message})
+	}
+	for _, diagnostic := range ears.CheckAll(requirementStatements(snapshot)) {
+		findings = append(findings, finding{path: diagnostic.Path, code: diagnostic.Code, message: diagnostic.Message})
+	}
+	failed := len(findings) > 0
+	if len(findings) > 0 {
+		sortFindings(findings)
+		for _, item := range findings {
+			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", item.path, item.message)
+		}
 	}
 	for _, diagnostic := range specvalidation.Validate(snapshot) {
 		failed = true
@@ -175,4 +187,35 @@ func formatTagDiagnostic(finding testtags.Diagnostic) string {
 		return fmt.Sprintf("validator: %s:%d: %s\n", finding.Path, finding.Line, finding.Message)
 	}
 	return fmt.Sprintf("validator: %s: %s\n", finding.Path, finding.Message)
+}
+
+type finding struct {
+	path    string
+	code    string
+	message string
+}
+
+func requirementStatements(snapshot layout.Snapshot) []ears.Statement {
+	statements := make([]ears.Statement, 0, len(snapshot.Requirements))
+	for _, document := range snapshot.Requirements {
+		statements = append(statements, ears.Statement{
+			Path: document.Path,
+			Type: document.Record.Type,
+			Text: document.Record.Text,
+		})
+	}
+	return statements
+}
+
+func sortFindings(findings []finding) {
+	sort.SliceStable(findings, func(i, j int) bool {
+		left, right := findings[i], findings[j]
+		if left.path != right.path {
+			return left.path < right.path
+		}
+		if left.code != right.code {
+			return left.code < right.code
+		}
+		return left.message < right.message
+	})
 }
