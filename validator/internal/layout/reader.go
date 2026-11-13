@@ -265,6 +265,9 @@ func inspectNode(node *yaml.Node, location string) error {
 	if node.Style&yaml.TaggedStyle != 0 {
 		return fmt.Errorf("unsafe YAML tag at %s", location)
 	}
+	if strings.HasPrefix(node.Tag, "!") && !strings.HasPrefix(node.Tag, "!!") {
+		return fmt.Errorf("unsafe YAML tag %q at %s", node.Tag, location)
+	}
 
 	switch node.Kind {
 	case yaml.MappingNode:
