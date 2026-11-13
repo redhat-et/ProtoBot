@@ -392,6 +392,50 @@ func TestValidateSuppressesCascadingReferenceDiagnosticsOnParseFailure(t *testin
 	}
 }
 
+func TestValidateCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *testing.T) {
+	snapshot := layout.Snapshot{
+		Requirements: []layout.Document[records.Requirement]{{
+			Path: "spec/requirements/REQ-API-00002.yaml",
+			Record: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{"health-api"},
+				},
+				Relationships: []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+				},
+			},
+		}},
+	}
+	layoutDiagnostics := []layout.Diagnostic{
+		{
+			Code:    layout.CodeParseFailed,
+			Path:    "spec/requirements/health-api.yaml",
+			Message: "parse YAML: yaml: line 1: did not find expected node content",
+		},
+		{
+			Code:    layout.CodeParseFailed,
+			Path:    "spec/requirements/REQ-API-00001.yaml",
+			Message: "parse YAML: yaml: line 1: did not find expected node content",
+		},
+	}
+
+	diagnostics := Validate(snapshot, layoutDiagnostics...)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeReferenceNotFound {
+		t.Errorf("code=%q, want %q", got.Code, CodeReferenceNotFound)
+	}
+	if got.Field != "applies_to.interfaces[0]" {
+		t.Errorf("field=%q, want applies_to.interfaces[0]", got.Field)
+	}
+	if !identifiesType(got.Message, "health-api") {
+		t.Errorf("message %q does not identify health-api", got.Message)
+	}
+}
+
 func TestValidateRejectsAmbiguousInterfaceReference(t *testing.T) {
 	snapshot := layout.Snapshot{
 		Interfaces: []layout.Document[records.InterfaceRecord]{

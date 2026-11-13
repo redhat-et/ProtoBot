@@ -3,7 +3,6 @@ package specvalidation
 import (
 	"fmt"
 	"path"
-	"path/filepath"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
@@ -63,17 +62,7 @@ func targetFailedToLoad(dir, target string, failedPaths map[string]bool) bool {
 	if len(failedPaths) == 0 || target == "" {
 		return false
 	}
-	expectedFile := target + ".yaml"
-	expectedPath := path.Join(dir, expectedFile)
-	if failedPaths[expectedPath] || failedPaths[expectedFile] || failedPaths[target] {
-		return true
-	}
-	for failedPath := range failedPaths {
-		if path.Base(failedPath) == expectedFile || filepath.Base(failedPath) == expectedFile {
-			return true
-		}
-	}
-	return false
+	return failedPaths[path.Join(dir, target+".yaml")]
 }
 
 func validateInterfaceAttachments(

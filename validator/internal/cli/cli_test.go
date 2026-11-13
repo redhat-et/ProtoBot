@@ -408,6 +408,40 @@ status: active
 	}
 }
 
+func TestRunCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/health-api.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "spec/requirements/health-api.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for spec/requirements/health-api.yaml", stderr)
+	}
+	if !strings.Contains(stderr, "spec/requirements/REQ-API-00001.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for spec/requirements/REQ-API-00001.yaml", stderr)
+	}
+	if !strings.Contains(stderr, "Interface \"health-api\" at applies_to.interfaces[0] is not declared.") {
+		t.Fatalf("stderr %q omitted reference.not_found diagnostic for health-api", stderr)
+	}
+	if strings.Contains(stderr, "Requirement \"REQ-API-00001\" at relationships[0].target is not declared.") {
+		t.Fatalf("stderr %q unexpectedly reported cascading 'is not declared' for malformed target", stderr)
+	}
+}
+
 func TestRunRejectsAmbiguousInterfaceReference(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/interfaces/api-a.yaml", "name: health-api\nkind: http\ndescription: Health check.\n")
