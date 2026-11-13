@@ -1,21 +1,28 @@
 # Validator
 
 `validator` is the ProtoBot V2 specification validator. It is a
-deterministic, network-free Go command. It reads a checkout and a
-comparison base; it does not contact a tracker, a network service, or
-an external daemon.
+deterministic, network-free Go command. It reads the checkout at
+`--target` and records `--base` as the comparison argument; it does
+not contact a tracker, a network service, or an external daemon.
 
-This module is the foundation for later check groups. The command line
-accepts the checkout path and comparison base. It reads requirement and
-interface YAML records from `spec/requirements/` and `spec/interfaces/`
-in the target checkout. Missing directories are treated as empty.
-Unreadable files, non-YAML entries, and malformed YAML produce
-diagnostics. Schema, EARS, identifier, and reference checks land in
-follow-on work.
+The design is the [ProtoBot V2 validator][design]. This module
+implements the command line and the spec directory reader (issues #381
+and #383). The command line accepts the checkout path and comparison
+base. It reads requirement and interface YAML records from
+`spec/requirements/` and `spec/interfaces/` in the target checkout.
+Missing directories are treated as empty. Unreadable files, non-YAML
+entries, and malformed YAML produce diagnostics. Schema, EARS,
+identifier, and reference checks remain in follow-on issues
+(#385–#402).
+
+`--target` is used as given. The command does not apply
+`filepath.Clean`, so relative paths and trailing slashes stay in the
+reported output.
 
 ```text
 validator --target PATH --base REF
 validator --help
+validator -h
 ```
 
 Build and test it from this directory:
@@ -26,3 +33,5 @@ go build -o validator ./cmd/validator
 go test ./...
 go vet ./...
 ```
+
+[design]: ../docs/architecture/ProtoBotV2.md
