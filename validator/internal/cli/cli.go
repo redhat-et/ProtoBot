@@ -84,7 +84,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
 		failed = true
-		_, _ = io.WriteString(stderr, formatTagDiagnostic(finding))
+		targetPath := finding.Path
+		if finding.Line > 0 {
+			targetPath = fmt.Sprintf("%s:%d", finding.Path, finding.Line)
+		}
+		printDiagnostic(stderr, finding.Code, targetPath, finding.Message)
 	}
 	if failed {
 		return exitFailure
@@ -178,11 +182,4 @@ func requirementIDs(snapshot layout.Snapshot) map[string]struct{} {
 		ids[document.Record.ID] = struct{}{}
 	}
 	return ids
-}
-
-func formatTagDiagnostic(finding testtags.Diagnostic) string {
-	if finding.Line > 0 {
-		return fmt.Sprintf("validator: %s:%d: %s\n", finding.Path, finding.Line, finding.Message)
-	}
-	return fmt.Sprintf("validator: %s: %s\n", finding.Path, finding.Message)
 }
