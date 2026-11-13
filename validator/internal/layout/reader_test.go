@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"gopkg.in/yaml.v3"
 )
 
 func TestReadValidRecords(t *testing.T) {
@@ -292,6 +293,30 @@ func TestReadMalformedYAML(t *testing.T) {
 				t.Fatalf("diagnostic for %s does not contain %q: %v", tc.name, tc.wantMsg, diags)
 			}
 		})
+	}
+}
+
+func TestInspectNodeLocalTagWithoutTaggedStyle(t *testing.T) {
+	node := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!custom",
+		Value: "REQ-API-00001",
+	}
+	err := inspectNode(node, "root")
+	if err == nil {
+		t.Fatal("expected error for local tag without TaggedStyle, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsafe YAML tag \"!custom\" at root") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+
+	standardNode := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!!str",
+		Value: "REQ-API-00001",
+	}
+	if err := inspectNode(standardNode, "root"); err != nil {
+		t.Fatalf("standard tag without TaggedStyle should be accepted: %v", err)
 	}
 }
 
