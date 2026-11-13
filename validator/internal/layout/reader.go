@@ -168,6 +168,11 @@ func safeEntryName(name string) bool {
 	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
 		return false
 	}
+	for i := 0; i < len(name); i++ {
+		if name[i] < 0x20 || name[i] == 0x7f {
+			return false
+		}
+	}
 	return filepath.Base(name) == name
 }
 

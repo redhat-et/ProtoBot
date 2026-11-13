@@ -5,7 +5,7 @@
 //	validator -h
 //
 // The process is deterministic and network-free. It reads the checkout at
-// --target and records --base as the comparison argument. It does not
+// --target and compares parsed requirement text against --base. It does not
 // contact a tracker, open a network connection, or start a daemon.
 package cli
 
@@ -15,7 +15,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/redhat-et/protobot/validator/internal/immutability"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 	"github.com/redhat-et/protobot/validator/internal/testtags"
 )
@@ -76,11 +78,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	snapshot, diagnostics := layout.Read(opts.target)
 	failed := len(diagnostics) > 0
 	for _, diagnostic := range diagnostics {
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", sanitize(diagnostic.Path), sanitize(diagnostic.Message))
 	}
 	for _, diagnostic := range specvalidation.Validate(snapshot) {
 		failed = true
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", sanitize(diagnostic.Path), sanitize(diagnostic.Message))
 	}
 	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
 		failed = true
@@ -90,8 +92,48 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return exitFailure
 	}
 
+	baseSnapshot, diagnostics := revision.Read(opts.target, opts.base)
+	if len(diagnostics) > 0 {
+		reportDiagnostics(stderr, diagnostics)
+		return exitFailure
+	}
+
+	diagnostics = immutability.Check(snapshot, baseSnapshot)
+	if len(diagnostics) > 0 {
+		reportDiagnostics(stderr, diagnostics)
+		return exitFailure
+	}
+
 	_, _ = fmt.Fprintf(stdout, "validator: ok\ntarget: %s\nbase: %s\n", opts.target, opts.base)
 	return exitOK
+}
+
+func reportDiagnostics(stderr io.Writer, diagnostics []layout.Diagnostic) {
+	for _, diagnostic := range diagnostics {
+		code := sanitize(diagnostic.Code)
+		path := sanitize(diagnostic.Path)
+		message := sanitize(diagnostic.Message)
+		if path == "" {
+			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", code, message)
+			continue
+		}
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s: %s\n", code, path, message)
+	}
+}
+
+func sanitize(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	out := b.String()
+	for strings.Contains(out, "::") {
+		out = strings.ReplaceAll(out, "::", ":")
+	}
+	return out
 }
 
 func parseArgs(args []string) (options, error) {
@@ -172,7 +214,7 @@ func requirementIDs(snapshot layout.Snapshot) map[string]struct{} {
 
 func formatTagDiagnostic(finding testtags.Diagnostic) string {
 	if finding.Line > 0 {
-		return fmt.Sprintf("validator: %s:%d: %s\n", finding.Path, finding.Line, finding.Message)
+		return fmt.Sprintf("validator: %s:%d: %s\n", sanitize(finding.Path), finding.Line, sanitize(finding.Message))
 	}
-	return fmt.Sprintf("validator: %s: %s\n", finding.Path, finding.Message)
+	return fmt.Sprintf("validator: %s: %s\n", sanitize(finding.Path), sanitize(finding.Message))
 }

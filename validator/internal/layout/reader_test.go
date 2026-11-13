@@ -479,6 +479,23 @@ func interfaceYAML(name string) string {
 	return "name: " + name + "\nkind: http\ndescription: Named external interface.\n"
 }
 
+func TestSafeEntryNameRejectsControlCharacters(t *testing.T) {
+	for _, name := range []string{
+		"bad\nname.yaml",
+		"bad\rname.yaml",
+		"bad\x00name.yaml",
+		"bad\x1fname.yaml",
+		"bad\x7fname.yaml",
+	} {
+		if safeEntryName(name) {
+			t.Errorf("safeEntryName(%q) = true, want false", name)
+		}
+	}
+	if !safeEntryName("good-name.yaml") {
+		t.Errorf("safeEntryName(%q) = false, want true", "good-name.yaml")
+	}
+}
+
 func writeFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
