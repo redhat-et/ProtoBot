@@ -1,6 +1,6 @@
 # managed by ears-manager; do not edit by hand
 id: CS-00005
-base_commit: 800ae40cf2e57a4b235a7789530b1dbf877e4539
+base_commit: 66870f479af8b52653bab6d7ea3265fef57763ea
 intent: Rewrite the Architecture artifact for ProtoBot V2 and carry the V2 design as an appendix (#414)
 operations: []
 artifact_operations:
@@ -9,5 +9,5 @@ artifact_operations:
 affected_interfaces: []
 implementation_required: false
 implementation_rationale: Documentation-only change to the registered Architecture artifact; no code or behavior changes.
-impact_assessment_base_commit: 800ae40cf2e57a4b235a7789530b1dbf877e4539
+impact_assessment_base_commit: 66870f479af8b52653bab6d7ea3265fef57763ea
 created: "2026-11-12T20:37:27Z"

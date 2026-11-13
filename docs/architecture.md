@@ -941,7 +941,7 @@ coordinator-admitted coding remains enabled. The status issue is excluded from
 triage, backlog, `ready-to-code` and `assignment-active` labels, and source or
 managed issue closure.
 
-**Readiness.** An [existing successful retro run][existing-retro-run] proves
+**Readiness.** An [existing successful retro run][retro-mint-evidence] proves
 mint and Vertex inference through this exact upstream pin; its generic custom
 harness job was skipped, so it does not prove the coordinator. Build and smoke
 test the composed coordinator — the prototype's caller plus the shared
@@ -951,15 +951,15 @@ dispatch, assignment recovery, non-closing output, and closure. No end-to-end
 coordinator deployment success is claimed.
 
 References: [Actions concurrency][actions-concurrency],
-[`workflow_run` trust boundary][workflow-run],
+[`workflow_run` trust boundary][workflow-trigger-docs],
 [`GITHUB_TOKEN` event restrictions][token-events], and the
 [pinned Fullsend runner][fullsend-runner].
 
 [actions-concurrency]: https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
-[workflow-run]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run
+[workflow-trigger-docs]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run
 [token-events]: https://docs.github.com/en/actions/concepts/security/github_token
 [fullsend-runner]: https://github.com/fullsend-ai/fullsend/blob/3454a2e4ee2b667e2ed71fa9d384edc6de3d4f74/.github/workflows/reusable-dispatch.yml#L1673-L1878
-[existing-retro-run]: https://github.com/redhat-et/ProtoBot/actions/runs/41005357719
+[retro-mint-evidence]: https://github.com/redhat-et/ProtoBot/actions/runs/41005357719
 [auto-close-setting]: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/managing-auto-closing-issues
 [squash-settings]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/configuring-commit-squashing-for-pull-requests
 
