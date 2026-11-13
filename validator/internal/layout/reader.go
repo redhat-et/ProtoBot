@@ -33,6 +33,10 @@ const (
 	CodeParseFailed    = "layout.parse_failed"
 )
 
+// maxYAMLBytes is the maximum size of a requirement or interface YAML
+// record. Larger files are rejected before the contents are parsed.
+const maxYAMLBytes = 1 << 20
+
 // Diagnostic is a deterministic finding about one path in the checkout.
 type Diagnostic struct {
 	Code    string
@@ -144,10 +148,24 @@ func loadEntry[T any](root *os.Root, relative string, decode func([]byte) (T, ma
 		d := diagnostic(CodeUnexpectedFile, relative, "is not a YAML record")
 		return Document[T]{}, &d
 	}
+	if info.Size() > maxYAMLBytes {
+		d := diagnostic(CodeReadFailed, relative, "YAML file exceeds the 1 MiB limit")
+		return Document[T]{}, &d
+	}
 
-	data, err := root.ReadFile(osPath)
+	file, err := root.Open(osPath)
 	if err != nil {
 		d := diagnostic(CodeReadFailed, relative, fmt.Sprintf("cannot read file: %s", err))
+		return Document[T]{}, &d
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maxYAMLBytes+1))
+	if err != nil {
+		d := diagnostic(CodeReadFailed, relative, fmt.Sprintf("cannot read file: %s", err))
+		return Document[T]{}, &d
+	}
+	if int64(len(data)) > maxYAMLBytes {
+		d := diagnostic(CodeReadFailed, relative, "YAML file exceeds the 1 MiB limit")
 		return Document[T]{}, &d
 	}
 	value, fields, err := decode(data)

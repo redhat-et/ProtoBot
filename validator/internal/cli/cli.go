@@ -76,11 +76,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	snapshot, diagnostics := layout.Read(opts.target)
 	failed := len(diagnostics) > 0
 	for _, diagnostic := range diagnostics {
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s: %s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
 	}
 	for _, diagnostic := range specvalidation.Validate(snapshot) {
 		failed = true
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s: %s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
 	}
 	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
 		failed = true

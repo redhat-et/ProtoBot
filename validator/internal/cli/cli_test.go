@@ -418,8 +418,15 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
+	if !strings.Contains(stderr, "layout.unexpected_file") {
+		t.Fatalf("stderr %q omitted diagnostic code", stderr)
+	}
 	if !strings.Contains(stderr, "notes.txt") {
 		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	wantPrefix := "validator: layout.unexpected_file: spec/requirements/notes.txt:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
 }
 
@@ -458,8 +465,9 @@ func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
-		t.Fatalf("stderr %q omitted offending path", stderr)
+	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
 }
 

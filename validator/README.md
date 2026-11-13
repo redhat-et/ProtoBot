@@ -11,27 +11,54 @@ and #383). The command line accepts the checkout path and comparison
 base. It reads requirement and interface YAML records from
 `spec/requirements/` and `spec/interfaces/` in the target checkout.
 Missing directories are treated as empty. Unreadable files, non-YAML
-entries, and malformed YAML produce diagnostics. Requirement
-relationship types are restricted to `depends-on`, `supersedes`, and
-`related-to`; unsupported types, including legacy `conflicts-with`, fail
-validation. Directed `depends-on` and `supersedes` graphs must be
-acyclic; a cycle fails with `relationship.cycle` and names the
-participating requirement IDs. `related-to` associations are exempt.
-It also scans Gherkin `.feature` files under `tests/` for
-`@req:<ID>` tags and fails when a tag does not resolve to a known
-requirement record. Active and retired IDs both count as known; unknown
-or misspelled IDs fail with line-level diagnostics. Schema, EARS,
-identifier, and remaining reference checks land in follow-on work.
+entries, files larger than 1 MiB, and malformed YAML produce
+diagnostics. Requirement relationship types are restricted to
+`depends-on`, `supersedes`, and `related-to`; unsupported types,
+including legacy `conflicts-with`, fail validation. Directed
+`depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
+`relationship.cycle` and names the participating requirement IDs.
+`related-to` associations are exempt. It also scans Gherkin `.feature`
+files under `tests/` for `@req:<ID>` tags and fails when a tag does not
+resolve to a known requirement record. Active and retired IDs both count
+as known; unknown or misspelled IDs fail with line-level diagnostics.
+Schema, EARS, identifier, and remaining reference checks land in
+follow-on work.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
 reported output.
+
+`layout.Read` discovers `*.yaml` files in those directories. It does
+not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
+or interface basenames to match the in-record name. Requirement ID
+format, uniqueness, and related identifier checks are enforced by
+follow-on check groups
+[#385](https://github.com/redhat-et/ProtoBot/issues/385) and
+[#395](https://github.com/redhat-et/ProtoBot/issues/395).
 
 ```text
 validator --target PATH --base REF
 validator --help
 validator -h
 ```
+
+## Exit status and diagnostics
+
+The command exits with:
+
+- `0` when validation succeeds
+- `1` when it reports diagnostics
+- `2` on usage or command-line syntax errors
+
+Layout diagnostics are written to stderr, one per line:
+
+```text
+validator: <code>: <path>: <message>
+```
+
+This line format is stable for external tool integration. Current
+layout codes are `layout.read_failed`, `layout.unexpected_file`, and
+`layout.parse_failed`.
 
 Build and test it from this directory:
 
