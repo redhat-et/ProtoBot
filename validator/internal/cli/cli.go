@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/testtags"
 )
 
 // Exit statuses.
@@ -66,11 +67,20 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, fmt.Sprintf("target path %q is not a directory", opts.target))
 	}
 
-	_, diagnostics := layout.Read(opts.target)
+	snapshot, diagnostics := layout.Read(opts.target)
+	failed := false
 	if len(diagnostics) > 0 {
 		for _, diagnostic := range diagnostics {
 			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
 		}
+		failed = true
+	}
+
+	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
+		_, _ = io.WriteString(stderr, formatTagDiagnostic(finding))
+		failed = true
+	}
+	if failed {
 		return exitFailure
 	}
 
@@ -138,4 +148,22 @@ func usageError(stderr io.Writer, message string) int {
 func fail(stderr io.Writer, message string) int {
 	_, _ = fmt.Fprintf(stderr, "validator: %s\n", message)
 	return exitFailure
+}
+
+func requirementIDs(snapshot layout.Snapshot) map[string]struct{} {
+	ids := make(map[string]struct{}, len(snapshot.Requirements))
+	for _, document := range snapshot.Requirements {
+		if document.Record.ID == "" {
+			continue
+		}
+		ids[document.Record.ID] = struct{}{}
+	}
+	return ids
+}
+
+func formatTagDiagnostic(finding testtags.Diagnostic) string {
+	if finding.Line > 0 {
+		return fmt.Sprintf("validator: %s:%d: %s\n", finding.Path, finding.Line, finding.Message)
+	}
+	return fmt.Sprintf("validator: %s: %s\n", finding.Path, finding.Message)
 }

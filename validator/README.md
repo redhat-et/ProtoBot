@@ -10,8 +10,11 @@ accepts the checkout path and comparison base. It reads requirement and
 interface YAML records from `spec/requirements/` and `spec/interfaces/`
 in the target checkout. Missing directories are treated as empty.
 Unreadable files, non-YAML entries, and malformed YAML produce
-diagnostics. Schema, EARS, identifier, and reference checks land in
-follow-on work.
+diagnostics. It also scans Gherkin `.feature` files under `tests/` for
+`@req:<ID>` tags and fails when a tag does not resolve to a known
+requirement record. Active and retired IDs both count as known; unknown
+or misspelled IDs fail with line-level diagnostics. Schema, EARS,
+identifier, and remaining reference checks land in follow-on work.
 
 ```text
 validator --target PATH --base REF

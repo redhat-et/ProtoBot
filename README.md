@@ -85,6 +85,7 @@ validator/
   internal/cli/             # checkout path and comparison-base arguments
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
+  internal/testtags/        # Gherkin @req:<ID> tag reference resolution
 wms/
   go.mod
   adapter/                  # backend-neutral wire types and operation surfaces
