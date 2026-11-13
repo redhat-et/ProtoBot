@@ -5,6 +5,11 @@
 // The layout reader does not require those fields.
 package records
 
+import (
+	"fmt"
+	"regexp"
+)
+
 // EARS type values from the V2 requirement record.
 const (
 	TypeUbiquitous       = "ubiquitous"
@@ -55,4 +60,17 @@ type InterfaceRecord struct {
 	Name        string `yaml:"name"`
 	Kind        string `yaml:"kind"`
 	Description string `yaml:"description"`
+}
+
+// requirementIDPattern is REQ-<SCOPE>-<NNNNN>: an uppercase scope tag
+// and a five-digit sequence. The same rule is in ADR-0002 and the V2
+// requirement record.
+var requirementIDPattern = regexp.MustCompile(`^REQ-[A-Z][A-Z0-9-]*-[0-9]{5}$`)
+
+// ValidateRequirementID reports whether id matches REQ-<SCOPE>-<NNNNN>.
+func ValidateRequirementID(id string) error {
+	if !requirementIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid requirement id %q", id)
+	}
+	return nil
 }

@@ -2,26 +2,29 @@
 
 `validator` is the ProtoBot V2 specification validator. It is a
 deterministic, network-free Go command. It reads the checkout at
-`--target` and records `--base` as the comparison argument; it does
-not contact a tracker, a network service, or an external daemon.
+`--target` and compares requirement identifiers against `--base`; it
+does not contact a tracker, a network service, or an external daemon.
 
 The design is the [ProtoBot V2 validator][design]. This module
-implements the command line and the spec directory reader (issues #381
-and #383). The command line accepts the checkout path and comparison
-base. It reads requirement and interface YAML records from
-`spec/requirements/` and `spec/interfaces/` in the target checkout.
-Missing directories are treated as empty. Unreadable files, non-YAML
-entries, and malformed YAML produce diagnostics. Requirement
+implements the command line, the spec directory reader, relationship
+type allowlisting, and requirement identifier checks. Covered issues
+are #381, #383, #387, #390, and #395. The command line accepts the checkout
+path and comparison base. It reads requirement and interface YAML
+records from `spec/requirements/` and `spec/interfaces/` in the target
+checkout. Missing directories are treated as empty. Unreadable files,
+non-YAML entries, and malformed YAML produce diagnostics. Requirement
 relationship types are restricted to `depends-on`, `supersedes`, and
 `related-to`; unsupported types, including legacy `conflicts-with`, fail
 validation. Directed `depends-on` and `supersedes` graphs must be
 acyclic; a cycle fails with `relationship.cycle` and names the
 participating requirement IDs. `related-to` associations are exempt.
-It also scans Gherkin `.feature` files under `tests/` for
+Requirement IDs must match `REQ-<SCOPE>-<NNNNN>`, be unique
+in the working tree, and must not be deleted or reused relative to the
+comparison base. It also scans Gherkin `.feature` files under `tests/` for
 `@req:<ID>` tags and fails when a tag does not resolve to a known
 requirement record. Active and retired IDs both count as known; unknown
-or misspelled IDs fail with line-level diagnostics. Schema, EARS,
-identifier, and remaining reference checks land in follow-on work.
+or misspelled IDs fail with line-level diagnostics. Schema, EARS, and
+remaining reference checks land in follow-on work.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the

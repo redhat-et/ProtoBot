@@ -19,7 +19,8 @@ type Diagnostic struct {
 // Validate runs specification checks on successfully parsed records.
 // Layout diagnostics remain the caller's responsibility.
 func Validate(snapshot layout.Snapshot) []Diagnostic {
-	diagnostics := validateRelationshipTypes(snapshot.Requirements)
+	diagnostics := validateRequirementIDs(snapshot.Requirements)
+	diagnostics = append(diagnostics, validateRelationshipTypes(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
 	sortDiagnostics(diagnostics)
 	return diagnostics
