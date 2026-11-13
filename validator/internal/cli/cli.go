@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 )
 
 // Exit statuses.
@@ -71,11 +72,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, fmt.Sprintf("target path %q is not a directory", opts.target))
 	}
 
-	_, diagnostics := layout.Read(opts.target)
-	if len(diagnostics) > 0 {
-		for _, diagnostic := range diagnostics {
-			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
-		}
+	snapshot, diagnostics := layout.Read(opts.target)
+	failed := len(diagnostics) > 0
+	for _, diagnostic := range diagnostics {
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+	}
+	for _, diagnostic := range specvalidation.Validate(snapshot) {
+		failed = true
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+	}
+	if failed {
 		return exitFailure
 	}
 

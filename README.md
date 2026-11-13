@@ -85,6 +85,7 @@ validator/
   internal/cli/             # checkout path and comparison-base arguments
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
+  internal/specvalidation/  # relationship type allowlist and later checks
 wms/
   go.mod
   adapter/                  # backend-neutral wire types and operation surfaces
