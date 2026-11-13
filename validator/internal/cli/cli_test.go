@@ -343,7 +343,7 @@ status: active
 	}
 }
 
-func TestValidator_TestTagReferenceResolution(t *testing.T) {
+func TestRunTestTagReferenceResolution(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "active"))
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", requirementYAML("REQ-API-00002", "retired"))

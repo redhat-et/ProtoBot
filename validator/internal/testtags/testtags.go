@@ -136,6 +136,9 @@ func scanFeature(root *os.Root, relative string, knownIDs map[string]struct{}) [
 }
 
 func tagsOnLine(relative string, line int, text string, knownIDs map[string]struct{}) []Diagnostic {
+	if line == 1 {
+		text = strings.TrimPrefix(text, "\ufeff")
+	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, "@") {
 		return nil

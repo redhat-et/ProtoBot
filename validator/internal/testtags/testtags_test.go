@@ -56,6 +56,20 @@ Feature: Health endpoint
 	}
 }
 
+func TestCheckBOMPrefixedFeature(t *testing.T) {
+	target := t.TempDir()
+	writeFile(t, target, "tests/bom_unknown.feature", "\ufeff@req:REQ-UNKNOWN\nFeature: BOM prefixed unknown\n")
+	writeFile(t, target, "tests/bom_known.feature", "\ufeff@req:REQ-API-00001\nFeature: BOM prefixed known\n")
+
+	diagnostics := Check(target, known("REQ-API-00001"))
+	if !hasUnresolved(diagnostics, "tests/bom_unknown.feature", 1, "REQ-UNKNOWN") {
+		t.Fatalf("missing unknown-ID diagnostic for BOM-prefixed feature: %v", diagnostics)
+	}
+	if hasUnresolved(diagnostics, "tests/bom_known.feature", 1, "REQ-API-00001") {
+		t.Fatalf("known ID in BOM-prefixed feature was reported unresolved: %v", diagnostics)
+	}
+}
+
 func TestCheckReportsLineLevelPathAndID(t *testing.T) {
 	target := t.TempDir()
 	writeFile(t, target, "tests/nested/health.feature", `Feature: Health endpoint
