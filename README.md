@@ -86,6 +86,7 @@ validator/
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
   internal/specvalidation/  # relationship type allowlist and later checks
+  internal/testtags/        # Gherkin @req:<ID> tag reference resolution
 wms/
   go.mod
   adapter/                  # backend-neutral wire types and operation surfaces

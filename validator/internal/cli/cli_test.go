@@ -343,6 +343,42 @@ status: active
 	}
 }
 
+func TestRunTestTagReferenceResolution(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "active"))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", requirementYAML("REQ-API-00002", "retired"))
+	writeSpecFile(t, target, "tests/active.feature", "@req:REQ-API-00001\nFeature: Active obligation\n")
+	writeSpecFile(t, target, "tests/retired.feature", "@req:REQ-API-00002\nFeature: Historical obligation\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("valid tags code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+
+	writeSpecFile(t, target, "tests/unknown.feature", "@req:REQ-UNKNOWN\nFeature: Unknown identifier\n")
+	writeSpecFile(t, target, "tests/misspelled.feature", "@req:REQ-API-0000l\nFeature: Misspelled identifier\n")
+
+	code, stdout, stderr = runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("unresolved tags code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "tests/unknown.feature:1:") {
+		t.Fatalf("stderr %q omitted unknown-tag path and line", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-UNKNOWN") {
+		t.Fatalf("stderr %q omitted unknown requirement ID", stderr)
+	}
+	if !strings.Contains(stderr, "tests/misspelled.feature:1:") {
+		t.Fatalf("stderr %q omitted misspelled-tag path and line", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-0000l") {
+		t.Fatalf("stderr %q omitted misspelled requirement ID", stderr)
+	}
+}
+
 func TestRunLayoutDiagnostics(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
@@ -450,4 +486,8 @@ func writeSpecFile(t *testing.T, root, rel, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func requirementYAML(id, status string) string {
+	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\nstatus: " + status + "\n"
 }
