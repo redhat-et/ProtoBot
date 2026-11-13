@@ -21,6 +21,7 @@ type Diagnostic struct {
 func Validate(snapshot layout.Snapshot) []Diagnostic {
 	diagnostics := validateRelationshipTypes(snapshot.Requirements)
 	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
+	diagnostics = append(diagnostics, validateReferences(snapshot)...)
 	sortDiagnostics(diagnostics)
 	return diagnostics
 }
