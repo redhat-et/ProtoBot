@@ -5,7 +5,7 @@
 //	validator -h
 //
 // The process is deterministic and network-free. It reads the checkout at
-// --target and records --base as the comparison argument. It does not
+// --target and compares parsed requirement text against --base. It does not
 // contact a tracker, open a network connection, or start a daemon.
 package cli
 
@@ -15,7 +15,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/redhat-et/protobot/validator/internal/immutability"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 	"github.com/redhat-et/protobot/validator/internal/testtags"
 )
@@ -90,8 +92,30 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return exitFailure
 	}
 
+	baseSnapshot, diagnostics := revision.Read(opts.target, opts.base)
+	if len(diagnostics) > 0 {
+		reportDiagnostics(stderr, diagnostics)
+		return exitFailure
+	}
+
+	diagnostics = immutability.Check(snapshot, baseSnapshot)
+	if len(diagnostics) > 0 {
+		reportDiagnostics(stderr, diagnostics)
+		return exitFailure
+	}
+
 	_, _ = fmt.Fprintf(stdout, "validator: ok\ntarget: %s\nbase: %s\n", opts.target, opts.base)
 	return exitOK
+}
+
+func reportDiagnostics(stderr io.Writer, diagnostics []layout.Diagnostic) {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Path == "" {
+			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Code, diagnostic.Message)
+			continue
+		}
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s: %s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
+	}
 }
 
 func parseArgs(args []string) (options, error) {

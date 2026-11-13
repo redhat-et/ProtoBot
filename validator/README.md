@@ -20,8 +20,12 @@ participating requirement IDs. `related-to` associations are exempt.
 It also scans Gherkin `.feature` files under `tests/` for
 `@req:<ID>` tags and fails when a tag does not resolve to a known
 requirement record. Active and retired IDs both count as known; unknown
-or misspelled IDs fail with line-level diagnostics. Schema, EARS,
-identifier, and remaining reference checks land in follow-on work.
+or misspelled IDs fail with line-level diagnostics. Parsed requirement
+`text` is compared against `--base` for every existing ID; YAML scalar
+reformatting that preserves the parsed string passes, and metadata-only
+edits such as status transitions pass. A wording change under an existing
+ID fails. Schema, EARS, identifier, and remaining reference checks land
+in follow-on work.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
