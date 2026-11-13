@@ -271,12 +271,8 @@ func TestRunTargetIsFile(t *testing.T) {
 
 func TestRunValidSpecRecords(t *testing.T) {
 	target := t.TempDir()
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-status: active
-`)
-	writeSpecFile(t, target, "spec/interfaces/cli.yaml", "name: cli\nkind: cli\ndescription: Validator command line.\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", completeRequirementYAML())
+	writeSpecFile(t, target, "spec/interfaces/cli.yaml", completeInterfaceYAML())
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -292,6 +288,9 @@ func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: depends-on
     target: REQ-API-00001
@@ -316,6 +315,9 @@ func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: depends-on
     target: REQ-API-00001
@@ -398,6 +400,9 @@ func TestRunReportsBothLayoutAndRelationshipDiagnostics(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: conflicts-with
     target: REQ-API-00004
@@ -477,6 +482,105 @@ func moduleRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(file), "..", "..")
 }
 
+func TestRunRejectsMissingRequiredFields(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "id: REQ-API-00002\n")
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, field := range []string{"type", "text", "applies_to", "relationships", "status", "kind", "description"} {
+		if !strings.Contains(stderr, field) {
+			t.Errorf("stderr %q omitted missing field %q", stderr, field)
+		}
+	}
+}
+
+func TestRunRejectsInvalidStatus(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: implemented
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "implemented") {
+		t.Fatalf("stderr %q omitted invalid status", stderr)
+	}
+}
+
+func TestRunRejectsLegacyMetadata(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", completeRequirementYAML()+`verification:
+  mode: isolated-interface
+provenance: user-authored
+created: "2026-01-01T00:00:00Z"
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, field := range []string{"verification", "provenance", "created"} {
+		if !strings.Contains(stderr, field) {
+			t.Errorf("stderr %q omitted legacy field %q", stderr, field)
+		}
+	}
+}
+
+func TestRunReportsBothLayoutAndSchemaDiagnostics(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+status: draft
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted schema diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "draft") {
+		t.Fatalf("stderr %q omitted invalid status", stderr)
+	}
+}
+
+func completeRequirementYAML() string {
+	return `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`
+}
+
+func completeInterfaceYAML() string {
+	return "name: cli\nkind: cli\ndescription: Validator command line.\n"
+}
+
 func writeSpecFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
@@ -489,5 +593,5 @@ func writeSpecFile(t *testing.T, root, rel, content string) {
 }
 
 func requirementYAML(id, status string) string {
-	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\nstatus: " + status + "\n"
+	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\nstatus: " + status + "\napplies_to:\n  scopes:\n    - api\nrelationships: []\n"
 }

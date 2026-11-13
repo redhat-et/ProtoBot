@@ -1,6 +1,7 @@
 package specvalidation
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,10 +140,9 @@ func TestValidateRelationshipTypesReportsEveryInvalidEntry(t *testing.T) {
 
 func TestValidateRelationshipTypesIgnoresInterfaces(t *testing.T) {
 	snapshot := layout.Snapshot{
-		Interfaces: []layout.Document[records.InterfaceRecord]{{
-			Path:   "spec/interfaces/health-api.yaml",
-			Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
-		}},
+		Interfaces: []layout.Document[records.InterfaceRecord]{
+			interfaceDocument("spec/interfaces/health-api.yaml"),
+		},
 		Requirements: []layout.Document[records.Requirement]{
 			requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", nil),
 		},
@@ -157,6 +157,9 @@ func TestValidateRelationshipTypesAfterLayoutRead(t *testing.T) {
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: related-to
     target: REQ-API-00001
@@ -218,11 +221,45 @@ func requirementSnapshot(path, id string, relationships []records.Relationship) 
 }
 
 func requirementDocument(path, id string, relationships []records.Relationship) layout.Document[records.Requirement] {
+	fields := map[string]bool{
+		"id":            true,
+		"type":          true,
+		"text":          true,
+		"applies_to":    true,
+		"relationships": true,
+		"status":        true,
+	}
+	for i := range relationships {
+		fields[fmt.Sprintf("relationships[%d]", i)] = true
+		fields[fmt.Sprintf("relationships[%d].type", i)] = true
+		fields[fmt.Sprintf("relationships[%d].target", i)] = true
+	}
 	return layout.Document[records.Requirement]{
 		Path: path,
 		Record: records.Requirement{
 			ID:            id,
+			Type:          records.TypeEventDriven,
+			Text:          "When a client sends GET /health, the service shall return HTTP 200.",
+			AppliesTo:     records.Applicability{Scopes: []string{"api"}},
 			Relationships: relationships,
+			Status:        records.StatusActive,
+		},
+		Fields: fields,
+	}
+}
+
+func interfaceDocument(path string) layout.Document[records.InterfaceRecord] {
+	return layout.Document[records.InterfaceRecord]{
+		Path: path,
+		Record: records.InterfaceRecord{
+			Name:        "health-api",
+			Kind:        "http",
+			Description: "Health check HTTP API used by unauthenticated clients.",
+		},
+		Fields: map[string]bool{
+			"name":        true,
+			"kind":        true,
+			"description": true,
 		},
 	}
 }
