@@ -17,10 +17,13 @@ type Diagnostic struct {
 }
 
 // Validate runs specification checks on successfully parsed records.
-// Layout diagnostics remain the caller's responsibility.
-func Validate(snapshot layout.Snapshot) []Diagnostic {
+// Layout diagnostics remain the caller's responsibility; passing them
+// suppresses cascading reference diagnostics for target records that
+// failed to load.
+func Validate(snapshot layout.Snapshot, layoutDiagnostics ...layout.Diagnostic) []Diagnostic {
 	diagnostics := validateRelationshipTypes(snapshot.Requirements)
 	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
+	diagnostics = append(diagnostics, validateReferences(snapshot, layoutDiagnostics...)...)
 	sortDiagnostics(diagnostics)
 	return diagnostics
 }

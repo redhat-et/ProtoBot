@@ -289,6 +289,21 @@ status: active
 
 func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00000.yaml", `id: REQ-API-00000
+type: ubiquitous
+text: The service shall exist.
+status: retired
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall log requests.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
+type: ubiquitous
+text: The service shall expose metrics.
+status: active
+`)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -311,8 +326,169 @@ status: active
 	}
 }
 
+func TestRunAcceptsResolvedReferences(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\nkind: http\ndescription: Health check HTTP API.\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+status: retired
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+relationships:
+  - type: supersedes
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunRejectsDanglingReferences(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - undeclared-api
+relationships:
+  - type: depends-on
+    target: REQ-MISSING-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "undeclared-api") {
+		t.Fatalf("stderr %q omitted dangling interface", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-MISSING-00001") {
+		t.Fatalf("stderr %q omitted dangling relationship target", stderr)
+	}
+}
+
+func TestRunSuppressesReferenceDiagnosticWhenTargetFailsToParse(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for REQ-API-00001.yaml", stderr)
+	}
+	if strings.Contains(stderr, "is not declared") {
+		t.Fatalf("stderr %q unexpectedly reported cascading 'is not declared' for malformed target", stderr)
+	}
+}
+
+func TestRunCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/health-api.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "spec/requirements/health-api.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for spec/requirements/health-api.yaml", stderr)
+	}
+	if !strings.Contains(stderr, "spec/requirements/REQ-API-00001.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for spec/requirements/REQ-API-00001.yaml", stderr)
+	}
+	if !strings.Contains(stderr, "Interface \"health-api\" at applies_to.interfaces[0] is not declared.") {
+		t.Fatalf("stderr %q omitted reference.not_found diagnostic for health-api", stderr)
+	}
+	if strings.Contains(stderr, "Requirement \"REQ-API-00001\" at relationships[0].target is not declared.") {
+		t.Fatalf("stderr %q unexpectedly reported cascading 'is not declared' for malformed target", stderr)
+	}
+}
+
+func TestRunRejectsAmbiguousInterfaceReference(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/interfaces/api-a.yaml", "name: health-api\nkind: http\ndescription: Health check.\n")
+	writeSpecFile(t, target, "spec/interfaces/api-b.yaml", "name: health-api\nkind: http\ndescription: Duplicate health check.\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "health-api") || !strings.Contains(stderr, "ambiguous") {
+		t.Fatalf("stderr %q omitted ambiguous interface diagnostic", stderr)
+	}
+}
+
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall log requests.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
+type: ubiquitous
+text: The service shall expose metrics.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", `id: REQ-API-00004
+type: ubiquitous
+text: The service shall rate-limit clients.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00005.yaml", `id: REQ-API-00005
+type: ubiquitous
+text: The service shall record audit events.
+status: active
+`)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -426,6 +602,11 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 func TestRunReportsBothLayoutAndRelationshipDiagnostics(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", `id: REQ-API-00004
+type: ubiquitous
+text: The service shall rate-limit clients.
+status: active
+`)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.

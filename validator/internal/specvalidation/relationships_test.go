@@ -81,7 +81,7 @@ func TestValidateRelationshipTypes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			diagnostics := Validate(requirementSnapshot(path, "REQ-API-00002", tc.relationships))
+			diagnostics := Validate(requirementSnapshot(path, "REQ-API-00002", tc.relationships, relationshipTargets(tc.relationships)...))
 			if len(tc.wantTypes) == 0 {
 				if len(diagnostics) != 0 {
 					t.Fatalf("diagnostics=%v, want none", diagnostics)
@@ -122,6 +122,8 @@ func TestValidateRelationshipTypesReportsEveryInvalidEntry(t *testing.T) {
 				{Type: "conflicts-with", Target: "REQ-API-00002"},
 				{Type: records.RelRelatedTo, Target: "REQ-API-00004"},
 			}),
+			requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", nil),
+			requirementDocument("spec/requirements/REQ-API-00004.yaml", "REQ-API-00004", nil),
 		},
 	}
 
@@ -154,6 +156,16 @@ func TestValidateRelationshipTypesIgnoresInterfaces(t *testing.T) {
 
 func TestValidateRelationshipTypesAfterLayoutRead(t *testing.T) {
 	target := t.TempDir()
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+status: active
+`)
+	writeFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
+type: ubiquitous
+text: The service shall log health checks.
+status: active
+`)
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -169,8 +181,8 @@ status: active
 	if len(layoutDiagnostics) != 0 {
 		t.Fatalf("layout diagnostics=%v", layoutDiagnostics)
 	}
-	if len(snapshot.Requirements) != 1 {
-		t.Fatalf("requirements=%d, want 1", len(snapshot.Requirements))
+	if len(snapshot.Requirements) != 3 {
+		t.Fatalf("requirements=%d, want 3", len(snapshot.Requirements))
 	}
 
 	diagnostics := Validate(snapshot)
@@ -196,7 +208,7 @@ func TestValidateRelationshipTypesIsDeterministic(t *testing.T) {
 	snapshot := requirementSnapshot("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
 		{Type: "conflicts-with", Target: "REQ-API-00001"},
 		{Type: "blocks", Target: "REQ-API-00003"},
-	})
+	}, "REQ-API-00001", "REQ-API-00003")
 	first := Validate(snapshot)
 	second := Validate(snapshot)
 	if len(first) != len(second) {
@@ -352,7 +364,7 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			diagnostics := Validate(tc.snapshot)
+			diagnostics := cycleDiagnostics(Validate(tc.snapshot))
 			if len(diagnostics) != tc.wantCount {
 				t.Fatalf("diagnostics=%v, want %d", diagnostics, tc.wantCount)
 			}
@@ -471,6 +483,16 @@ status: active
 	}
 }
 
+func cycleDiagnostics(diagnostics []Diagnostic) []Diagnostic {
+	var filtered []Diagnostic
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == CodeCycle {
+			filtered = append(filtered, diagnostic)
+		}
+	}
+	return filtered
+}
+
 func snapshotFromDocs(docs ...layout.Document[records.Requirement]) layout.Snapshot {
 	return layout.Snapshot{Requirements: docs}
 }
@@ -484,12 +506,36 @@ func identifiesIDs(message string, ids ...string) bool {
 	return true
 }
 
-func requirementSnapshot(path, id string, relationships []records.Relationship) layout.Snapshot {
-	return layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{
-			requirementDocument(path, id, relationships),
-		},
+func requirementSnapshot(path, id string, relationships []records.Relationship, extraIDs ...string) layout.Snapshot {
+	requirements := []layout.Document[records.Requirement]{
+		requirementDocument(path, id, relationships),
 	}
+	seen := map[string]bool{id: true}
+	for _, extraID := range extraIDs {
+		if extraID == "" || seen[extraID] {
+			continue
+		}
+		seen[extraID] = true
+		requirements = append(requirements, requirementDocument(
+			"spec/requirements/"+extraID+".yaml",
+			extraID,
+			nil,
+		))
+	}
+	return layout.Snapshot{Requirements: requirements}
+}
+
+func relationshipTargets(relationships []records.Relationship) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, relationship := range relationships {
+		if relationship.Target == "" || seen[relationship.Target] {
+			continue
+		}
+		seen[relationship.Target] = true
+		ids = append(ids, relationship.Target)
+	}
+	return ids
 }
 
 func requirementDocument(path, id string, relationships []records.Relationship) layout.Document[records.Requirement] {
