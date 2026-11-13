@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/redhat-et/protobot/validator/internal/records"
@@ -188,6 +189,11 @@ func safeEntryName(name string) bool {
 	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
 		return false
 	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
 	return filepath.Base(name) == name
 }
 
@@ -301,8 +307,14 @@ func collectFields(node *yaml.Node, location string, fields map[string]bool) {
 	}
 }
 
+var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
 func diagnostic(code, path, message string) Diagnostic {
-	return Diagnostic{Code: code, Path: path, Message: strings.Join(strings.Fields(message), " ")}
+	return Diagnostic{
+		Code:    code,
+		Path:    lineBreakReplacer.Replace(path),
+		Message: lineBreakReplacer.Replace(message),
+	}
 }
 
 func sortDiagnostics(diagnostics []Diagnostic) {
