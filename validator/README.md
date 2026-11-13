@@ -44,7 +44,11 @@ values are `active` or `retired`. Legacy metadata (`verification`,
 Requirement text is checked for exactly one `shall` and for a match
 against the declared EARS type (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
-State-driven statements require the keyword `While`.
+State-driven statements require the keyword `While`. Parsed requirement
+`text` is compared against `--base` for every existing ID; YAML scalar
+reformatting that preserves the parsed string passes, and metadata-only
+edits such as status transitions pass. A wording change under an
+existing ID fails.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the

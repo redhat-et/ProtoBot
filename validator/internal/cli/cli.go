@@ -5,8 +5,9 @@
 //	validator -h
 //
 // The process is deterministic and network-free. It reads the checkout at
-// --target and compares requirement identifiers against --base. It does
-// not contact a tracker, open a network connection, or start a daemon.
+// --target and compares requirement identifiers and parsed text against
+// --base. It does not contact a tracker, open a network connection, or
+// start a daemon.
 package cli
 
 import (
@@ -17,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/ears"
+	"github.com/redhat-et/protobot/validator/internal/immutability"
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/revision"
 	"github.com/redhat-et/protobot/validator/internal/specvalidation"
@@ -105,6 +107,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		for _, diagnostic := range specvalidation.CompareBase(snapshot, baseSnapshot, diagnostics, baseParseDiagnostics...) {
 			failed = true
 			reportSpec(stderr, diagnostic)
+		}
+
+		for _, diagnostic := range immutability.Check(snapshot, baseSnapshot) {
+			failed = true
+			printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 		}
 	}
 	for _, diagnostic := range ears.CheckAll(requirementStatements(snapshot)) {
