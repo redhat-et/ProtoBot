@@ -1,5 +1,6 @@
 /.worktrees/
 /review-*.md
+/.fullsend/.fullsend-cache/
 
 # Leftover test fixtures from tests/lint/test_violations.sh
 # (cleanup trap handles normal exit, but SIGKILL can leave these behind)
