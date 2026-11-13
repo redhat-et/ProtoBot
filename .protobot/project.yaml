@@ -27,5 +27,5 @@ artifacts:
     - id: vision
       kind: vision
       path: docs/vision.md
-      digest: sha256:b372028ed9832d103e5315a285d05eb5c18858f39e401c2d60bc9f288f93234d
+      digest: sha256:4ae68b297e02f1c61732a7b1abd163ba71f32ee3ce54976ca224193bea60c362
       owner: user
