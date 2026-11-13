@@ -137,21 +137,25 @@ These capabilities are the product. The surrounding platform is not.
 
 ## Non-goals
 
-ProtoBot V2 does not aim to:
+ProtoBot V2 will not:
 
-1. **Host a Web Drafting Table in the MVP.** The V2 workflow begins with
-   the local Drafting Table experience. A hosted web interface can be
-   considered separately.
-2. **Support multiple issue-tracker backends.** V2 coordinates through
+1. **Support multiple issue-tracker backends.** V2 coordinates through
    GitHub Issues rather than a multi-tracker abstraction.
-3. **Automate the IdeaBot handoff.** The initial handoff remains manual:
-   IdeaBot material is copied into the Drafting Table session.
-4. **Build a custom coordination service.** GitHub Issues, Actions, and
+2. **Build a custom coordination service.** GitHub Issues, Actions, and
    Git provide coordination and history.
-5. **Introduce per-change delivery manifests.** A specification pull
+3. **Introduce per-change delivery manifests.** A specification pull
    request is the change record; merged Git history supplies provenance.
-6. **Require identical regenerated code.** Regeneration is judged on
+4. **Require identical regenerated code.** Regeneration is judged on
    reproducing behavior and constraints, not incidental implementation.
+
+### Deferred from the MVP
+
+The V2 MVP does not include:
+
+1. **Web Drafting Table.** The MVP begins with the local Drafting Table
+   experience. A hosted web interface remains a future possibility.
+2. **Automated IdeaBot handoff.** The initial handoff is manual:
+   IdeaBot material is copied into the Drafting Table session.
 
 ## Authority
 
