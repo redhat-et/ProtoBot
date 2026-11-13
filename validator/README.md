@@ -14,7 +14,10 @@ Missing directories are treated as empty. Unreadable files, non-YAML
 entries, and malformed YAML produce diagnostics. Requirement
 relationship types are restricted to `depends-on`, `supersedes`, and
 `related-to`; unsupported types, including legacy `conflicts-with`, fail
-validation. It also scans Gherkin `.feature` files under `tests/` for
+validation. Directed `depends-on` and `supersedes` graphs must be
+acyclic; a cycle fails with `relationship.cycle` and names the
+participating requirement IDs. `related-to` associations are exempt.
+It also scans Gherkin `.feature` files under `tests/` for
 `@req:<ID>` tags and fails when a tag does not resolve to a known
 requirement record. Active and retired IDs both count as known; unknown
 or misspelled IDs fail with line-level diagnostics. Schema, EARS,

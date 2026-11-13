@@ -20,6 +20,7 @@ type Diagnostic struct {
 // Layout diagnostics remain the caller's responsibility.
 func Validate(snapshot layout.Snapshot) []Diagnostic {
 	diagnostics := validateRelationshipTypes(snapshot.Requirements)
+	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
 	sortDiagnostics(diagnostics)
 	return diagnostics
 }

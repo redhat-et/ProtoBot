@@ -209,6 +209,281 @@ func TestValidateRelationshipTypesIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestValidateRelationshipAcyclicity(t *testing.T) {
+	cases := []struct {
+		name         string
+		snapshot     layout.Snapshot
+		wantCount    int
+		wantCode     string
+		wantRelation string
+		wantIDs      []string
+	}{
+		{
+			name: "acyclic depends-on chain",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00003"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", nil),
+			),
+		},
+		{
+			name: "diamond depends-on dag",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+					{Type: records.RelDependsOn, Target: "REQ-API-00003"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00004"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00004"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00004.yaml", "REQ-API-00004", nil),
+			),
+		},
+		{
+			name: "acyclic supersedes chain",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", []records.Relationship{
+					{Type: records.RelSupersedes, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelSupersedes, Target: "REQ-API-00001"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", nil),
+			),
+		},
+		{
+			name: "two-node depends-on cycle",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+				}),
+			),
+			wantCount:    1,
+			wantCode:     CodeCycle,
+			wantRelation: records.RelDependsOn,
+			wantIDs:      []string{"REQ-API-00001", "REQ-API-00002"},
+		},
+		{
+			name: "multi-node depends-on cycle",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00003"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+				}),
+			),
+			wantCount:    1,
+			wantCode:     CodeCycle,
+			wantRelation: records.RelDependsOn,
+			wantIDs:      []string{"REQ-API-00001", "REQ-API-00002", "REQ-API-00003"},
+		},
+		{
+			name: "self-referential depends-on loop",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+				}),
+			),
+			wantCount:    1,
+			wantCode:     CodeCycle,
+			wantRelation: records.RelDependsOn,
+			wantIDs:      []string{"REQ-API-00001"},
+		},
+		{
+			name: "two-node supersedes cycle",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelSupersedes, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelSupersedes, Target: "REQ-API-00001"},
+				}),
+			),
+			wantCount:    1,
+			wantCode:     CodeCycle,
+			wantRelation: records.RelSupersedes,
+			wantIDs:      []string{"REQ-API-00001", "REQ-API-00002"},
+		},
+		{
+			name: "related-to cycle is exempt",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelRelatedTo, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelRelatedTo, Target: "REQ-API-00001"},
+				}),
+			),
+		},
+		{
+			name: "dangling depends-on target is not a cycle",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00099"},
+				}),
+			),
+		},
+		{
+			name: "related-to back edge does not cycle depends-on",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelRelatedTo, Target: "REQ-API-00001"},
+				}),
+			),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			diagnostics := Validate(tc.snapshot)
+			if len(diagnostics) != tc.wantCount {
+				t.Fatalf("diagnostics=%v, want %d", diagnostics, tc.wantCount)
+			}
+			if tc.wantCount == 0 {
+				return
+			}
+			got := diagnostics[0]
+			if got.Code != tc.wantCode {
+				t.Errorf("code=%q, want %q", got.Code, tc.wantCode)
+			}
+			if got.Field != "relationships" {
+				t.Errorf("field=%q, want relationships", got.Field)
+			}
+			if !strings.Contains(got.Message, tc.wantRelation) {
+				t.Errorf("message %q does not identify relation %q", got.Message, tc.wantRelation)
+			}
+			if !identifiesIDs(got.Message, tc.wantIDs...) {
+				t.Errorf("message %q does not identify IDs %v", got.Message, tc.wantIDs)
+			}
+			if got.Path == "" {
+				t.Errorf("path is empty, want a participating requirement file")
+			}
+		})
+	}
+}
+
+func TestValidateRelationshipAcyclicityReportsIndependentGraphs(t *testing.T) {
+	snapshot := snapshotFromDocs(
+		requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+			{Type: records.RelSupersedes, Target: "REQ-API-00002"},
+		}),
+		requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00003"},
+			{Type: records.RelSupersedes, Target: "REQ-API-00001"},
+		}),
+		requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", nil),
+	)
+
+	diagnostics := Validate(snapshot)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1 supersedes cycle", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeCycle {
+		t.Errorf("code=%q, want %q", got.Code, CodeCycle)
+	}
+	if !strings.Contains(got.Message, records.RelSupersedes) {
+		t.Errorf("message %q does not identify supersedes", got.Message)
+	}
+	if strings.Contains(got.Message, records.RelDependsOn) {
+		t.Errorf("message %q unexpectedly mentions depends-on", got.Message)
+	}
+	if !identifiesIDs(got.Message, "REQ-API-00001", "REQ-API-00002") {
+		t.Errorf("message %q omitted participating IDs", got.Message)
+	}
+}
+
+func TestValidateRelationshipAcyclicityIsDeterministic(t *testing.T) {
+	snapshot := snapshotFromDocs(
+		requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+		}),
+		requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+		}),
+	)
+	first := Validate(snapshot)
+	reversed := snapshotFromDocs(snapshot.Requirements[1], snapshot.Requirements[0])
+	second := Validate(reversed)
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("diagnostics first=%v second=%v, want 1 each", first, second)
+	}
+	if first[0] != second[0] {
+		t.Fatalf("document order changed diagnostics: %+v vs %+v", first[0], second[0])
+	}
+}
+
+func TestValidateRelationshipAcyclicityAfterLayoutRead(t *testing.T) {
+	target := t.TempDir()
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00002
+status: active
+`)
+	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /ready, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	snapshot, layoutDiagnostics := layout.Read(target)
+	if len(layoutDiagnostics) != 0 {
+		t.Fatalf("layout diagnostics=%v", layoutDiagnostics)
+	}
+
+	diagnostics := Validate(snapshot)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeCycle {
+		t.Errorf("code=%q, want %q", got.Code, CodeCycle)
+	}
+	if !strings.Contains(got.Message, records.RelDependsOn) {
+		t.Errorf("message %q does not identify depends-on", got.Message)
+	}
+	if !identifiesIDs(got.Message, "REQ-API-00001", "REQ-API-00002") {
+		t.Errorf("message %q omitted participating IDs", got.Message)
+	}
+}
+
+func snapshotFromDocs(docs ...layout.Document[records.Requirement]) layout.Snapshot {
+	return layout.Snapshot{Requirements: docs}
+}
+
+func identifiesIDs(message string, ids ...string) bool {
+	for _, id := range ids {
+		if !strings.Contains(message, id) {
+			return false
+		}
+	}
+	return true
+}
+
 func requirementSnapshot(path, id string, relationships []records.Relationship) layout.Snapshot {
 	return layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
