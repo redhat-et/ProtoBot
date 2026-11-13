@@ -616,6 +616,67 @@ func TestRunUnknownBaseFails(t *testing.T) {
 	}
 }
 
+func TestRunRepairedBaseMalformedYAMLExitsZero(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/broken.yaml", "id: [\n")
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "commit with malformed base yaml")
+
+	writeSpecFile(t, target, "spec/requirements/broken.yaml", requirementYAML("REQ-FIX-00001"))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitOK {
+		t.Fatalf("code=%d, want %d; stderr=%q", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+	if !strings.Contains(stderr, "comparison base") {
+		t.Fatalf("stderr %q omitted comparison base prefix for historical malformed file", stderr)
+	}
+}
+
+func TestRunDeletedBaseMalformedYAMLFailsClosed(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/broken.yaml", "id: [\n")
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "commit with malformed base yaml")
+
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "broken.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "broken.yaml") || !strings.Contains(stderr, "removed") {
+		t.Fatalf("stderr %q omitted deletion diagnostic for unparsed base file", stderr)
+	}
+}
+
+func TestRunRepairedBaseInvalidAndDuplicateIDsExitsZero(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/bad.yaml", requirementYAML("not-an-id"))
+	writeSpecFile(t, target, "spec/requirements/dup1.yaml", requirementYAML("REQ-DUP-00001"))
+	writeSpecFile(t, target, "spec/requirements/dup2.yaml", requirementYAML("REQ-DUP-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "commit with bad and duplicate ids")
+
+	writeSpecFile(t, target, "spec/requirements/bad.yaml", requirementYAML("REQ-FIX-00001"))
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "dup2.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitOK {
+		t.Fatalf("code=%d, want %d; stderr=%q", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
 func TestRunNonGitCheckoutFails(t *testing.T) {
 	target := t.TempDir()
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")

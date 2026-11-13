@@ -67,7 +67,7 @@ type InterfaceRecord struct {
 // requirement record.
 var requirementIDPattern = regexp.MustCompile(`^REQ-[A-Z][A-Z0-9-]*-[0-9]{5}$`)
 
-// ValidateRequirementID reports whether id matches REQ-<SCOPE>-<NNNNN>.
+// ValidateRequirementID returns an error if id does not match REQ-<SCOPE>-<NNNNN>.
 func ValidateRequirementID(id string) error {
 	if !requirementIDPattern.MatchString(id) {
 		return fmt.Errorf("invalid requirement id %q", id)

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
@@ -84,16 +85,40 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		reportSpec(stderr, diagnostic)
 	}
 
-	baseSnapshot, baseDiagnostics := revision.Read(opts.target, opts.base)
-	revisionFailed := false
-	for _, diagnostic := range baseDiagnostics {
+	baseSnapshot, baseParseDiagnostics, revErr := revision.Read(opts.target, opts.base)
+	if revErr != nil {
 		failed = true
-		if diagnostic.Code == revision.CodeNotFound || diagnostic.Code == revision.CodeReadFailed {
-			revisionFailed = true
+		if rErr, ok := revErr.(*revision.Error); ok {
+			reportLayout(stderr, layout.Diagnostic{Code: rErr.Code, Message: rErr.Message})
+		} else {
+			reportLayout(stderr, layout.Diagnostic{Code: revision.CodeReadFailed, Message: revErr.Error()})
 		}
-		reportLayout(stderr, diagnostic)
-	}
-	if !revisionFailed {
+	} else {
+		targetPaths := make(map[string]bool)
+		for _, doc := range snapshot.Requirements {
+			targetPaths[doc.Path] = true
+		}
+		for _, diagnostic := range baseParseDiagnostics {
+			targetHasFile := targetPaths[diagnostic.Path]
+			if !targetHasFile {
+				if _, statErr := os.Stat(filepath.Join(opts.target, filepath.FromSlash(diagnostic.Path))); statErr == nil {
+					targetHasFile = true
+				}
+			}
+			if !targetHasFile {
+				// Deletion fail-closed: base YAML blob could not be parsed and path is absent from target.
+				failed = true
+				reportLayout(stderr, layout.Diagnostic{
+					Code:    specvalidation.CodeDeleted,
+					Path:    diagnostic.Path,
+					Message: fmt.Sprintf("requirement ID could not be read from comparison base and file was removed (%s)", diagnostic.Message),
+				})
+			} else {
+				// Prefix remaining base-only message; do not set failed=true.
+				reportBaseLayout(stderr, opts.base, diagnostic)
+			}
+		}
+
 		for _, diagnostic := range specvalidation.CompareBase(snapshot, baseSnapshot) {
 			failed = true
 			reportSpec(stderr, diagnostic)
@@ -117,6 +142,14 @@ func reportLayout(stderr io.Writer, diagnostic layout.Diagnostic) {
 		return
 	}
 	_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+}
+
+func reportBaseLayout(stderr io.Writer, base string, diagnostic layout.Diagnostic) {
+	if diagnostic.Path == "" {
+		_, _ = fmt.Fprintf(stderr, "validator: comparison base %s: %s: %s\n", base, diagnostic.Code, diagnostic.Message)
+		return
+	}
+	_, _ = fmt.Fprintf(stderr, "validator: comparison base %s: %s: %s\n", base, diagnostic.Path, diagnostic.Message)
 }
 
 func reportSpec(stderr io.Writer, diagnostic specvalidation.Diagnostic) {
