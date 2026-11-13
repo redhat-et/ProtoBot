@@ -16,6 +16,7 @@ func TestValidateRelationshipTypes(t *testing.T) {
 		name          string
 		relationships []records.Relationship
 		wantTypes     []string
+		wantFields    []string
 	}{
 		{
 			name: "allowed types",
@@ -38,21 +39,24 @@ func TestValidateRelationshipTypes(t *testing.T) {
 			relationships: []records.Relationship{
 				{Type: "conflicts-with", Target: "REQ-API-00001"},
 			},
-			wantTypes: []string{"conflicts-with"},
+			wantTypes:  []string{"conflicts-with"},
+			wantFields: []string{"relationships[0].type"},
 		},
 		{
 			name: "undeclared type",
 			relationships: []records.Relationship{
 				{Type: "blocks", Target: "REQ-API-00001"},
 			},
-			wantTypes: []string{"blocks"},
+			wantTypes:  []string{"blocks"},
+			wantFields: []string{"relationships[0].type"},
 		},
 		{
 			name: "empty type",
 			relationships: []records.Relationship{
 				{Type: "", Target: "REQ-API-00001"},
 			},
-			wantTypes: []string{""},
+			wantTypes:  []string{""},
+			wantFields: []string{"relationships[0].type"},
 		},
 		{
 			name: "mixed valid and invalid",
@@ -62,14 +66,16 @@ func TestValidateRelationshipTypes(t *testing.T) {
 				{Type: records.RelRelatedTo, Target: "REQ-API-00003"},
 				{Type: "derived-from", Target: "REQ-API-00005"},
 			},
-			wantTypes: []string{"conflicts-with", "derived-from"},
+			wantTypes:  []string{"conflicts-with", "derived-from"},
+			wantFields: []string{"relationships[1].type", "relationships[3].type"},
 		},
 		{
 			name: "case mismatch is rejected",
 			relationships: []records.Relationship{
 				{Type: "Depends-On", Target: "REQ-API-00001"},
 			},
-			wantTypes: []string{"Depends-On"},
+			wantTypes:  []string{"Depends-On"},
+			wantFields: []string{"relationships[0].type"},
 		},
 	}
 
@@ -96,8 +102,8 @@ func TestValidateRelationshipTypes(t *testing.T) {
 				if !identifiesType(got.Message, wantType) {
 					t.Errorf("message %q does not identify type %q", got.Message, wantType)
 				}
-				if !strings.HasPrefix(got.Field, "relationships[") || !strings.HasSuffix(got.Field, "].type") {
-					t.Errorf("field %q omitted relationship index", got.Field)
+				if got.Field != tc.wantFields[i] {
+					t.Errorf("field=%q, want %q", got.Field, tc.wantFields[i])
 				}
 			}
 		})

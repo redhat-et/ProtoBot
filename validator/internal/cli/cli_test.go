@@ -356,6 +356,33 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRunReportsBothLayoutAndRelationshipDiagnostics(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: conflicts-with
+    target: REQ-API-00004
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted relationship diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "conflicts-with") {
+		t.Fatalf("stderr %q omitted legacy type", stderr)
+	}
+}
+
 func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "null\n")
