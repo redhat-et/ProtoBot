@@ -13,6 +13,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/redhat-et/protobot/validator/internal/layout"
 )
 
 // Exit statuses.
@@ -62,6 +64,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	if !info.IsDir() {
 		return fail(stderr, fmt.Sprintf("target path %q is not a directory", opts.target))
+	}
+
+	_, diagnostics := layout.Read(opts.target)
+	if len(diagnostics) > 0 {
+		for _, diagnostic := range diagnostics {
+			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		}
+		return exitFailure
 	}
 
 	_, _ = fmt.Fprintf(stdout, "validator: ok\ntarget: %s\nbase: %s\n", opts.target, opts.base)
