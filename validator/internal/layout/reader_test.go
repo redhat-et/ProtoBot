@@ -240,6 +240,61 @@ func TestReadMalformedYAML(t *testing.T) {
 	if len(snapshot.Requirements) != 1 {
 		t.Fatalf("valid requirement was dropped: %+v", snapshot.Requirements)
 	}
+
+	cases := []struct {
+		name     string
+		filename string
+		content  string
+	}{
+		{
+			name:     "utf8 bom",
+			filename: "spec/requirements/bom.yaml",
+			content:  "\xef\xbb\xbfid: REQ-API-00001\ntype: ubiquitous\ntext: The service shall exist.\nstatus: active\n",
+		},
+		{
+			name:     "invalid utf8",
+			filename: "spec/requirements/invalid-utf8.yaml",
+			content:  "id: REQ-API-00001\ntype: ubiquitous\ntext: \xff\xfe invalid\nstatus: active\n",
+		},
+		{
+			name:     "non-string mapping key",
+			filename: "spec/requirements/non-string-key.yaml",
+			content:  "123: value\nstatus: active\n",
+		},
+		{
+			name:     "explicit yaml tag",
+			filename: "spec/requirements/tagged.yaml",
+			content:  "id: !custom REQ-API-00001\nstatus: active\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolated := t.TempDir()
+			writeFile(t, isolated, tc.filename, tc.content)
+			_, diags := Read(isolated)
+			if !hasDiagnostic(diags, CodeParseFailed, tc.filename) {
+				t.Fatalf("missing parse_failed diagnostic for %s: %v", tc.name, diags)
+			}
+		})
+	}
+}
+
+func TestReadOversizedFile(t *testing.T) {
+	target := t.TempDir()
+	oversized := make([]byte, maxYAMLBytes+1)
+	for i := range oversized {
+		oversized[i] = ' '
+	}
+	copy(oversized, []byte("id: REQ-API-00001\ntext: "))
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", string(oversized))
+
+	snapshot, diagnostics := Read(target)
+	if !hasDiagnostic(diagnostics, CodeReadFailed, "spec/requirements/REQ-API-00001.yaml") {
+		t.Fatalf("missing oversized file diagnostic: %v", diagnostics)
+	}
+	if len(snapshot.Requirements) != 0 {
+		t.Fatalf("oversized file was parsed: %+v", snapshot.Requirements)
+	}
 }
 
 func TestReadFieldsMatchDecodedRecord(t *testing.T) {
@@ -344,7 +399,7 @@ func TestReadDoesNotFollowOutsideSymlink(t *testing.T) {
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", validRequirement)
 	link := filepath.Join(target, "spec", "requirements", "escape.yaml")
 	if err := os.Symlink(outside, link); err != nil {
-		t.Fatal(err)
+		t.Skipf("Symlink is unavailable: %v", err)
 	}
 
 	snapshot, diagnostics := Read(target)
@@ -370,7 +425,7 @@ func TestReadDoesNotFollowStoreSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outsideDir, filepath.Join(target, "spec", "requirements")); err != nil {
-		t.Fatal(err)
+		t.Skipf("Symlink is unavailable: %v", err)
 	}
 
 	snapshot, diagnostics := Read(target)
