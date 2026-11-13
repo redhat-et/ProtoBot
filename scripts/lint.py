@@ -485,7 +485,7 @@ _REGISTRY: dict[str, dict[str, Any]] = {
             },
         },
     },
-    # ── Local: gofmt, go vet, baseline ratchet ────────────
+    # ── Local: gofmt, go vet, baseline ratchet, ADR amendments ────
     "local": {
         "installer": "system",
         "hooks": {
@@ -529,6 +529,14 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "pass_filenames": False,
                 "default_files": r"^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$",
             },
+            "adr-amendments": {
+                "cmd": "python3",
+                "fixed_args": ["scripts/check_adr_amendments.py"],
+                "pass_filenames": False,
+                "always_run": True,
+                "types": ["markdown"],
+                "default_files": r"^docs/decisions/.*\.md$",
+            },
         },
     },
 }
@@ -544,6 +552,7 @@ def _run_hook(
     hook_yaml: dict[str, Any],
     files: list[str],
     version: str | None,
+    deleted_files: list[str] | None = None,
 ) -> tuple[str, str]:
     """Run one hook.  Returns ``(status, detail)``."""
 
@@ -559,13 +568,24 @@ def _run_hook(
     # tool so that hooks with no applicable files are skipped
     # cheaply (e.g. hadolint in a repo with no Dockerfiles).
     pass_filenames = hook_info.get("pass_filenames", True)
-    hook_files = _filter_by_types(files, hook_info.get("types"))
+    # always_run mirrors pre-commit: the hook runs even when no file
+    # matches its filter. Only pass_filenames-false hooks declare it;
+    # a pass_filenames-true hook with no matches keeps skipping.
+    always_run = bool(hook_yaml.get("always_run") or hook_info.get("always_run"))
+    candidate_files = list(files)
+    if not pass_filenames and deleted_files:
+        candidate_files.extend(deleted_files)
+
+    hook_files = _filter_by_types(candidate_files, hook_info.get("types"))
     hook_files = _filter_by_regex(
         hook_files,
         files_pattern,
         exclude_pattern,
     )
-    if not hook_files:
+    if pass_filenames:
+        hook_files = [f for f in hook_files if (REPO_ROOT / f).is_file()]
+
+    if not hook_files and not (always_run and not pass_filenames):
         return "skip", "no matching files"
 
     # ── Builtin hooks ──────────────────────────────────────────
@@ -720,6 +740,44 @@ def _get_files(args: argparse.Namespace) -> list[str]:
     return [f for f in raw if (REPO_ROOT / f).is_file()]
 
 
+def _get_deleted_files(args: argparse.Namespace) -> list[str]:
+    """Return paths deleted in the working tree or index vs HEAD."""
+    if args.all_files:
+        return []
+    if args.files:
+        return [
+            str(f)
+            for f in args.files
+            if (REPO_ROOT / f).resolve().is_relative_to(REPO_ROOT)
+            and not (REPO_ROOT / f).is_file()
+        ]
+    changed = _git(
+        "diff",
+        "--name-only",
+        "--diff-filter=D",
+        "HEAD",
+        critical=True,
+    )
+    staged = _git(
+        "diff",
+        "--name-only",
+        "--cached",
+        "--diff-filter=D",
+        critical=True,
+    )
+    unstaged = _git(
+        "diff",
+        "--name-only",
+        "--diff-filter=D",
+        critical=True,
+    )
+    combined: set[str] = set()
+    for line in (changed + "\n" + staged + "\n" + unstaged).splitlines():
+        if line.strip():
+            combined.add(line.strip())
+    return sorted(combined)
+
+
 # ── Parity check ───────────────────────────────────────────────
 
 
@@ -773,6 +831,17 @@ def _check_parity(config: dict[str, Any]) -> bool:
     return ok
 
 
+def _any_always_run(config: dict[str, Any]) -> bool:
+    """Return True when any configured hook is marked ``always_run``."""
+    for repo in config.get("repos", []):
+        reg = _REGISTRY.get(_normalize_url(repo["repo"])) or {}
+        for h in repo.get("hooks", []):
+            hinfo = reg.get("hooks", {}).get(h["id"], {})
+            if h.get("always_run") or hinfo.get("always_run"):
+                return True
+    return False
+
+
 # ── Entrypoint ─────────────────────────────────────────────────
 
 _STATUS_ICON: dict[str, str] = {
@@ -815,8 +884,9 @@ def main() -> int:
 
     frozen = _extract_frozen_versions()
     files = _get_files(args)
+    deleted_files = _get_deleted_files(args)
 
-    if not files:
+    if not files and not deleted_files and not _any_always_run(config):
         print("No files to check.")
         return 0
 
@@ -848,7 +918,9 @@ def main() -> int:
 
             # Progress indicator (overwritten by result line)
             print(f"  Running {hid} …", end="\r", flush=True)
-            status, detail = _run_hook(hid, hinfo, reg, h, files, version)
+            status, detail = _run_hook(
+                hid, hinfo, reg, h, files, version, deleted_files=deleted_files
+            )
 
             icon = _STATUS_ICON.get(status, "?")
             suffix = f"  ({detail})" if detail and status == "skip" else ""

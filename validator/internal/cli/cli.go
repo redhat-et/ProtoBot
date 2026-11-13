@@ -2,6 +2,7 @@
 //
 //	validator --target PATH --base REF
 //	validator --help
+//	validator -h
 //
 // The process is deterministic and network-free. It reads the checkout at
 // --target and records --base as the comparison argument. It does not
@@ -13,6 +14,9 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 )
 
 // Exit statuses.
@@ -25,6 +29,7 @@ const (
 const usage = `usage:
   validator --target PATH --base REF
   validator --help
+  validator -h
 
   --target PATH   checkout directory to validate
   --base REF      comparison base for identity and immutability checks
@@ -53,6 +58,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return usageError(stderr, "--base is required")
 	}
 
+	// Leave opts.target as given. filepath.Clean is lexical and can
+	// rewrite ".." through a symlink; later check groups can
+	// canonicalize internally if they need a stable path.
 	info, err := os.Stat(opts.target)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -62,6 +70,19 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	if !info.IsDir() {
 		return fail(stderr, fmt.Sprintf("target path %q is not a directory", opts.target))
+	}
+
+	snapshot, diagnostics := layout.Read(opts.target)
+	failed := len(diagnostics) > 0
+	for _, diagnostic := range diagnostics {
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+	}
+	for _, diagnostic := range specvalidation.Validate(snapshot) {
+		failed = true
+		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+	}
+	if failed {
+		return exitFailure
 	}
 
 	_, _ = fmt.Fprintf(stdout, "validator: ok\ntarget: %s\nbase: %s\n", opts.target, opts.base)
@@ -115,6 +136,9 @@ func optionValue(args []string, i int) (string, int, bool) {
 		return value, i + 1, true
 	}
 	if i+1 < len(args) {
+		if strings.HasPrefix(args[i+1], "--") {
+			return "", i + 1, false
+		}
 		return args[i+1], i + 2, true
 	}
 	return "", i + 1, false
