@@ -471,6 +471,24 @@ func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 	}
 }
 
+func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [1]\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
+	}
+	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00001.yaml:"
+	if !strings.HasPrefix(lines[0], wantPrefix) {
+		t.Fatalf("stderr line %q omitted %q", lines[0], wantPrefix)
+	}
+}
+
 // TestRunIsDeterministic pins in-process repeatability of Run: the
 // command reads no clock, environment, random source, or shared
 // mutable state. It is not a cross-process isolation check.

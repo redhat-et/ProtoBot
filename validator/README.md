@@ -30,9 +30,11 @@ reported output.
 
 `layout.Read` discovers `*.yaml` files in those directories. It does
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
-or interface basenames to match the in-record name. Requirement ID
-format, uniqueness, and related identifier checks are enforced by
-follow-on check groups
+or interface basenames to match the in-record name. No current check
+covers basename-to-record-ID or basename-to-name matching (tracked in
+[#443](https://github.com/redhat-et/ProtoBot/issues/443)).
+Requirement ID format, uniqueness, and related in-record identifier
+checks are enforced by follow-on check groups
 [#385](https://github.com/redhat-et/ProtoBot/issues/385) and
 [#395](https://github.com/redhat-et/ProtoBot/issues/395).
 
@@ -47,8 +49,15 @@ validator -h
 The command exits with:
 
 - `0` when validation succeeds
-- `1` when it reports diagnostics
+- `1` when it reports diagnostics or target errors
 - `2` on usage or command-line syntax errors
+
+Target errors (such as a missing, unstattable, or non-directory
+`--target`) print an uncoded message to stderr:
+
+```text
+validator: <message>
+```
 
 Layout diagnostics are written to stderr, one per line:
 
@@ -58,7 +67,8 @@ validator: <code>: <path>: <message>
 
 This line format is stable for external tool integration. Current
 layout codes are `layout.read_failed`, `layout.unexpected_file`, and
-`layout.parse_failed`.
+`layout.parse_failed`. A file larger than 1 MiB produces
+`layout.read_failed`.
 
 Build and test it from this directory:
 
