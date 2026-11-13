@@ -2044,7 +2044,7 @@ these checks, and the transcript has no record for them.
 [ux-resume]: drafting-table-ux.md#resuming-an-existing-session
 [ux-stale]: drafting-table-ux.md#stale-git-or-wms-state
 [vision-nongoals]: ../vision.md#non-goals
-[web-dt]: ../architecture.md#user-facing-interfaces
+[web-dt]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#user-facing-interfaces
 [what-committed]: git-integration.md#what-is-committed
 [wms-fixture]: drafting-table-wms.md#fake-adapter-fixture
 [wms-namespace]: drafting-table-wms.md#boundary-and-ownership

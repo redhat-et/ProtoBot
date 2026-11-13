@@ -169,7 +169,7 @@ This document adds a `repository` block for the Git-facing fields:
 | `artifacts` | The artifact registry: `id`, `kind`, `path`, `digest`, `owner`, and optional `validator` per entry ([ADR-0002][adr2-registry]). |
 
 `ears-manager` owns this file and is the only writer
-([Persistent State](../architecture.md#project-configuration-protobot)).
+([Persistent State][v1-arch-project-configuration-protobot]).
 The Drafting Table reads it and commits it; it is not meant to edit
 it, and the guard refuses such an edit on the calls it checks.
 A fail-open write can rewrite the digests, but `ears-manager check`
@@ -376,7 +376,7 @@ reviewed project policy, edited by a human and reviewed in the
 pull request, in the same way as `.protobot/policy.yaml`. This
 ownership is not stated anywhere else in the hierarchy; the same
 pull request records it in
-[architecture.md](../architecture.md#project-configuration-protobot).
+[architecture.md][v1-arch-project-configuration-protobot].
 
 An artifact imported from a Kit is re-owned on the way in.
 `ears-manager` writes the file, so `ears-manager` is its registry
@@ -786,7 +786,7 @@ ceremony and the credential path differ.
 | Where code lands | Job Site merges `wi/` branches | Identical |
 
 The credential rows follow the deployment topology in the
-[WMS Adapter API](../architecture.md#wms-adapter-api) and the
+[WMS Adapter API][v1-arch-wms-adapter-api] and the
 credential isolation rules in
 [Authentication and Credential Isolation][credential-isolation].
 In hosted modes, the Gate authenticates the caller and scopes the
@@ -799,7 +799,7 @@ the Gate's context, and by the host's branch protection
 
 The Web Drafting Table adds per-user session state and
 authorization at the application boundary
-([Web Drafting Table](../architecture.md#user-facing-interfaces)).
+([Web Drafting Table][v1-arch-user-facing-interfaces]).
 That changes where the working tree lives and who may act on a
 project; it does not change any rule in this document.
 
@@ -1118,7 +1118,7 @@ resurface.
 | Harness tool permission rules | Defined by [#33](agent-harness/adapter-contract.md#what-the-harness-layer-stops). This document names the layer and its effect, not its configuration. |
 | Kit import commits | Kit packaging is open ([Kits](components.md#kits)). The imported specification content arrives as a proposed change set and follows this contract. The lock file `.protobot/kits.lock` is a separate matter: no document names its writer, so this contract does not stage it. Whoever settles Kit packaging must name that owner. |
 | Conflict-resolution UX | The failure table states the deterministic diagnostic and the safe retry. How the Drafting Table presents a conflict to the user is UX (#28). |
-| Web Drafting Table working-tree hosting | Where a hosted session keeps its checkout and session state is a deployment concern ([Web Drafting Table](../architecture.md#user-facing-interfaces)). The Git rules are unchanged. |
+| Web Drafting Table working-tree hosting | Where a hosted session keeps its checkout and session state is a deployment concern ([Web Drafting Table][v1-arch-user-facing-interfaces]). The Git rules are unchanged. |
 
 ---
 
@@ -1176,7 +1176,7 @@ resurface.
 [change-types]: user-interaction-flow.md#incremental-development-and-change-types
 [credential-isolation]: components.md#authentication-and-credential-isolation
 [demo-artifacts]: user-interaction-flow.md#demonstration-artifacts
-[governed-tools]: ../architecture.md#governed-tool-integrations
+[governed-tools]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#governed-tool-integrations
 [pr-merge-build]: components.md#the-pr--merge--build-model
 [projections]: components.md#worker-repository-projections-decided
 [scm-fixture]: source-control-manager.md#repository-fixture-against-the-scm
@@ -1184,3 +1184,7 @@ resurface.
 
 [layer-stops]: agent-harness/adapter-contract.md#what-the-harness-layer-stops
 [fail-open]: agent-harness/adapter-contract.md#file-source-arguments
+
+[v1-arch-project-configuration-protobot]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#project-configuration-protobot
+[v1-arch-user-facing-interfaces]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#user-facing-interfaces
+[v1-arch-wms-adapter-api]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#wms-adapter-api

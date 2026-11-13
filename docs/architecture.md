@@ -134,7 +134,7 @@ incompatible decisions.
 
 | Constraint | Rationale |
 | --- | --- |
-| Minted credentials | Fullsend roles obtain short-lived App credentials from the hosted mint. The coordinator uses the existing `retro` identity. The mint trust boundary checks repository and workflow identity, so the reviewed caller on the default branch is the authorized entry point ([Appendix C](#trusted-state-and-credential-boundary)). Agents never receive repository secrets, and no token returns through outputs or artifacts. |
+| Minted credentials | Fullsend roles obtain short-lived App credentials from the hosted mint. The coordinator uses the existing `retro` identity. The open-source mint binds repository and called-workflow identity, not the caller workflow. Whether the live mint binds the caller is unconfirmed; if it does not, authorization is the reviewed default-branch caller plus caller-ref validation before minting ([Appendix C](#trusted-state-and-credential-boundary)). Agents never receive repository secrets, and no token returns through outputs or artifacts. |
 | Sandbox isolation | Agents run in the Fullsend sandbox. The sandbox holds no GitHub token and no authenticated GitHub proxy. Staged issue, pull request, run, and evidence text is untrusted data. Per-pull-request and main suites run with minimum read-only permissions, a fresh checkout, and no persisted credentials. |
 | Inference credential boundary | Inference credentials carry no authority beyond calling the model. Either they stay on the trusted host behind a proxy, or the inference principal is scoped to the inference API alone. Adoption selects and verifies one. |
 | No database | Git, GitHub Issues, and CI artifacts are the only stores. |
@@ -507,11 +507,12 @@ applies. Tag notation under the Gherkin MVP:
 # after replacement:  @req:REQ-API-00003
 ```
 
-A test may refer to several requirement IDs. It may be removed only once it no
-longer refers to any active requirement; until then, it is rewritten or
-retagged. When a requirement retires, the implementation PR must not leave a
-retired tag as the only apparent association while an active requirement loses
-coverage unnoticed.
+Under the Gherkin MVP a Feature carries exactly one `@req:<ID>` tag. A test
+outside that rule may refer to several requirement IDs, and it may be removed
+only once it no longer refers to any active requirement; until then, it is
+rewritten or retagged. When a requirement retires, the implementation PR must
+not leave a retired tag as the only apparent association while an active
+requirement loses coverage unnoticed.
 
 #### Tests and requirement evidence report
 
@@ -596,11 +597,12 @@ One specification PR may produce several managed issues.
 
 Blocking uses these native dependencies, not text statements or manual labels.
 
-Requirement IDs are coordination and ownership metadata, not behavior
-authority. Tests are not allocated separately: a test may demonstrate several
-requirements, and shared test or source files are implementation coupling
-handled by review and CI. Historical assignment or report revision is context
-only; a replacement requirement does not pin old behavior.
+Requirement IDs are coordination and ownership metadata, not behavior authority.
+Tests are not allocated separately: tests outside the Gherkin one-requirement
+rule may demonstrate several requirements, and shared test or source files are
+implementation coupling handled by review and CI. Historical assignment or
+report revision is context only; a replacement requirement does not pin old
+behavior.
 
 ### The flow
 
@@ -1219,9 +1221,9 @@ still be adequate interpretations of the current EARS statement.
 The split rule is an always-running classify/aggregate gate evaluated before any
 conditional profile. Any diff containing both Specification-class and
 Implementation-class paths fails the gate; no profile runs. Process paths may
-accompany either class. After the gate passes, any diff with
-Specification-class paths runs the specification profile. Every diff with no
-Specification-class path — including process-only, process plus code, docs, and
+accompany either class. After the gate passes, any diff with Specification-class
+paths runs the specification profile. Every diff with no Specification-class
+path — including process-only (which includes `docs/**`), process plus code, and
 source/tests — runs the implementation profile. Process paths require human
 approval and relevant process checks in either profile.
 
@@ -1505,7 +1507,7 @@ The taxonomy is defined once and shared by every V2 check.
 | Class | Paths | Role in split |
 | --- | --- | --- |
 | Specification | `Vision.md`, `Architecture.md`, `spec/**` | must not mix with Implementation |
-| Process (protected) | `ci/**`, `.github/**`, `AGENTS.md`, `CLAUDE.md`, `opencode.json`, `.agents/**`, `.claude/**`, `.opencode/**`, `.fullsend/**` | may accompany either class; human-protected; relevant process checks |
+| Process (protected) | `ci/**`, `.github/**`, `AGENTS.md`, `CLAUDE.md`, `opencode.json`, `.agents/**`, `.claude/**`, `.opencode/**`, `.fullsend/**`, `docs/**` | may accompany either class; human-protected; relevant process checks |
 | Implementation | everything else not listed above, including `src/**` and `tests/**` | must not mix with Specification |
 
 The split rule forbids only Specification-class plus Implementation-class paths
@@ -1513,9 +1515,12 @@ in one PR. Process-class paths may accompany either. Any diff with
 Specification-class paths runs the specification profile; optional process
 changes require relevant process checks, not a mandatory product suite unless a
 process check needs it. Every diff with no Specification-class path —
-process-only, process plus code, docs, or source/tests — runs the implementation
-profile. Process paths require human approval in either profile. Tests are
-implementation, not specification.
+process-only (which includes `docs/**`), process plus code, or source/tests —
+runs the implementation profile. Process paths require human approval in either
+profile. Tests are implementation, not specification. Background documents under
+`docs/`, such as the architecture decision records, are Process-class:
+human-reviewed, and free to accompany either class
+([ADR-0004](decisions/0004-adopt-protobot-v2.md)).
 
 ### Appendix B: Reference checks
 
