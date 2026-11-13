@@ -208,7 +208,3 @@ func gitOutput(dir string, args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 	return cmd.Output()
 }
-
-func diagnostic(code, path, message string) layout.Diagnostic {
-	return layout.Diagnostic{Code: code, Path: path, Message: message}
-}
