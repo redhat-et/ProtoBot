@@ -1,7 +1,7 @@
 {
   "version": "1",
-  "generated_by": "skillsaw 0.21.0",
-  "generated_at": "2026-10-20T16:25:22.061005+00:00",
+  "generated_by": "skillsaw 0.22.0",
+  "generated_at": "2026-11-12T19:22:52.651794+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -132,27 +132,11 @@
       "severity": "info"
     },
     {
-      "fingerprint": "34956d561909f4c1",
-      "rule_id": "content-unlinked-internal-reference",
-      "file_path": "AGENTS.md",
-      "line": 97,
-      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
-      "severity": "info"
-    },
-    {
       "fingerprint": "c00433faf64ec552",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
       "line": 98,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
-      "severity": "info"
-    },
-    {
-      "fingerprint": "48d1852b65875421",
-      "rule_id": "content-unlinked-internal-reference",
-      "file_path": "AGENTS.md",
-      "line": 100,
-      "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
     {
@@ -279,9 +263,9 @@
       "fingerprint": "9ac2052ca695ae1d",
       "rule_id": "context-budget",
       "file_path": "AGENTS.md",
-      "message": "Estimated 4,036 tokens exceeds agents-md warn limit of 4,000",
+      "message": "Estimated 4,035 tokens exceeds agents-md warn limit of 4,000",
       "severity": "warning",
-      "value": 4036,
+      "value": 4035,
       "baseline_mode": "ceiling"
     }
   ]
