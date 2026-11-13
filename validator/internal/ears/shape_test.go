@@ -103,6 +103,7 @@ func TestCheckRejectsTypeMismatch(t *testing.T) {
 		{name: "unwanted-behavior missing then", kind: records.TypeUnwantedBehavior, text: "If active, the system shall respond."},
 		{name: "optional-feature uses ubiquitous text", kind: records.TypeOptionalFeature, text: "The system shall respond."},
 		{name: "complex has only one trigger form", kind: records.TypeComplex, text: "When active, the system shall respond."},
+		{name: "complex has two instances of the same trigger form", kind: records.TypeComplex, text: "When active, when requested, the system shall respond."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
