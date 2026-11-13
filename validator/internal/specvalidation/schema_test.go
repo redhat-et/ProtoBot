@@ -18,6 +18,7 @@ func TestValidateRecordSchema(t *testing.T) {
 		snapshot   layout.Snapshot
 		wantCodes  []string
 		wantFields []string
+		wantPath   string
 	}{
 		{
 			name:     "valid records",
@@ -36,18 +37,21 @@ func TestValidateRecordSchema(t *testing.T) {
 			snapshot:   schemaSnapshot(requirementWithEmptyAppliesTo(), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "empty applies_to lists",
 			snapshot:   schemaSnapshot(requirementWithEmptyAppliesToLists(), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "blank applies_to selectors",
 			snapshot:   schemaSnapshot(requirementWithBlankAppliesToSelectors(), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to"},
+			wantPath:   reqPath,
 		},
 		{
 			name:     "applies_to with only interfaces",
@@ -62,132 +66,154 @@ func TestValidateRecordSchema(t *testing.T) {
 			snapshot:   schemaSnapshot(requirementOmitting("id"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"id"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "missing requirement type",
 			snapshot:   schemaSnapshot(requirementOmitting("type"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"type"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "missing requirement text",
 			snapshot:   schemaSnapshot(requirementOmitting("text"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"text"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "missing applies_to",
 			snapshot:   schemaSnapshot(requirementOmitting("applies_to"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "missing relationships",
 			snapshot:   schemaSnapshot(requirementOmitting("relationships"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"relationships"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "missing requirement status",
 			snapshot:   schemaSnapshot(requirementOmitting("status"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"status"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "blank requirement id",
 			snapshot:   schemaSnapshot(requirementBlankString("id"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"id"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "missing interface name",
 			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceOmitting("name")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"name"},
+			wantPath:   ifacePath,
 		},
 		{
 			name:       "missing interface kind",
 			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceOmitting("kind")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"kind"},
+			wantPath:   ifacePath,
 		},
 		{
 			name:       "missing interface description",
 			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceOmitting("description")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"description"},
+			wantPath:   ifacePath,
 		},
 		{
 			name:       "blank interface description",
 			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceBlankString("description")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"description"},
+			wantPath:   ifacePath,
 		},
 		{
 			name:       "invalid status draft",
 			snapshot:   schemaSnapshot(requirementWithStatus("draft"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "invalid status implemented",
 			snapshot:   schemaSnapshot(requirementWithStatus("implemented"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "invalid status pending",
 			snapshot:   schemaSnapshot(requirementWithStatus("pending"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "status case mismatch",
 			snapshot:   schemaSnapshot(requirementWithStatus("Active"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy verification field",
 			snapshot:   schemaSnapshot(requirementWithExtra("verification", "verification.mode"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"verification"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy provenance field",
 			snapshot:   schemaSnapshot(requirementWithExtra("provenance"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"provenance"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy created field",
 			snapshot:   schemaSnapshot(requirementWithExtra("created"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"created"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "unknown requirement key",
 			snapshot:   schemaSnapshot(requirementWithExtra("owner"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"owner"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "unknown applies_to key",
 			snapshot:   schemaSnapshot(requirementWithExtra("applies_to.owner"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"applies_to.owner"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "unknown relationship key",
 			snapshot:   schemaSnapshot(requirementWithExtra("relationships[0].rationale"), validInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"relationships[0].rationale"},
+			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy interface fields",
 			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceWithExtra("id", "type", "created", "status")),
 			wantCodes:  []string{CodeInterfaceUnexpectedField, CodeInterfaceUnexpectedField, CodeInterfaceUnexpectedField, CodeInterfaceUnexpectedField},
 			wantFields: []string{"created", "id", "status", "type"},
+			wantPath:   ifacePath,
 		},
 	}
 
@@ -208,8 +234,8 @@ func TestValidateRecordSchema(t *testing.T) {
 				if got.Code != wantCode {
 					t.Errorf("code=%q, want %q", got.Code, wantCode)
 				}
-				if got.Path != reqPath && got.Path != ifacePath {
-					t.Errorf("path=%q, want requirement or interface path", got.Path)
+				if got.Path != tc.wantPath {
+					t.Errorf("path=%q, want %q", got.Path, tc.wantPath)
 				}
 				if got.Field != tc.wantFields[i] {
 					t.Errorf("field=%q, want %q", got.Field, tc.wantFields[i])
@@ -217,6 +243,30 @@ func TestValidateRecordSchema(t *testing.T) {
 				if !strings.Contains(got.Message, tc.wantFields[i]) {
 					t.Errorf("message %q does not identify field %q", got.Message, tc.wantFields[i])
 				}
+			}
+		})
+	}
+}
+
+func TestValidateRecordSchemaEmptyAppliesToMessage(t *testing.T) {
+	cases := []struct {
+		name     string
+		document layout.Document[records.Requirement]
+	}{
+		{"empty applies_to mapping", requirementWithEmptyAppliesTo()},
+		{"empty applies_to lists", requirementWithEmptyAppliesToLists()},
+		{"blank applies_to selectors", requirementWithBlankAppliesToSelectors()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			diagnostics := schemaDiagnostics(Validate(schemaSnapshot(tc.document, validInterfaceDocument())))
+			if len(diagnostics) != 1 {
+				t.Fatalf("diagnostics=%v, want 1", diagnostics)
+			}
+			got := diagnostics[0]
+			wantMsg := "applies_to must name at least one interface or scope."
+			if got.Message != wantMsg {
+				t.Errorf("message=%q, want %q", got.Message, wantMsg)
 			}
 		})
 	}

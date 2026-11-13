@@ -424,6 +424,29 @@ status: active
 	}
 }
 
+func TestRunRejectsForgedNestedPathKey(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+relationships[0].type: depends-on
+status: active
+`)
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\nkind: http\ndescription: Health endpoint\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want exitFailure", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+}
+
 func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "null\n")

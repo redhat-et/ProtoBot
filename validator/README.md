@@ -19,10 +19,11 @@ under `tests/` for `@req:<ID>` tags and fails when a tag does not resolve to
 a known requirement record. Active and retired IDs both count as known;
 unknown or misspelled IDs fail with line-level diagnostics. Requirement
 records must include `id`, `type`, `text`, `applies_to`, `relationships`,
-and `status`. Interface records must include `name`, `kind`, and
-`description`. Status values are `active` or `retired`. Legacy metadata
+and `status`. `applies_to` must name at least one interface or scope. Blank
+selectors count as absent. Interface records must include `name`, `kind`,
+and `description`. Status values are `active` or `retired`. Legacy metadata
 (`verification`, `provenance`, `created`) and other unparsed fields are
-rejected. EARS, identifier, and remaining reference checks land in
+rejected. EARS, identifier, and remaining reference checks (#388) land in
 follow-on work.
 
 `--target` is used as given. The command does not apply

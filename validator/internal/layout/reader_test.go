@@ -242,6 +242,28 @@ func TestReadMalformedYAML(t *testing.T) {
 	}
 }
 
+func TestReadRejectsMappingKeysWithPunctuation(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{"dotted key", "id: REQ-API-00001\na.b: val\n"},
+		{"bracket open", "id: REQ-API-00001\nrelationships[0: val\n"},
+		{"bracket close", "id: REQ-API-00001\nrelationships]0: val\n"},
+		{"forged nested path", "id: REQ-API-00001\nrelationships[0].type: depends-on\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := t.TempDir()
+			writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", tc.yaml)
+			_, diagnostics := Read(target)
+			if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/REQ-API-00001.yaml") {
+				t.Fatalf("missing parse failed diagnostic for key with punctuation: %v", diagnostics)
+			}
+		})
+	}
+}
+
 func TestReadFieldsMatchDecodedRecord(t *testing.T) {
 	target := t.TempDir()
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", validRequirement)

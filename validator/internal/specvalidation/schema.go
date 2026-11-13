@@ -66,7 +66,12 @@ func validateRequirementSchema(document layout.Document[records.Requirement]) []
 		diagnostics = append(diagnostics, missingFieldDiagnostic(CodeRequirementMissingField, document.Path, field))
 	}
 	if fieldPresent(document.Fields, "applies_to") && !hasApplicableSelector(record.AppliesTo) {
-		diagnostics = append(diagnostics, missingFieldDiagnostic(CodeRequirementMissingField, document.Path, "applies_to"))
+		diagnostics = append(diagnostics, Diagnostic{
+			Code:    CodeRequirementMissingField,
+			Path:    document.Path,
+			Field:   "applies_to",
+			Message: "applies_to must name at least one interface or scope.",
+		})
 	}
 	if fieldPresent(document.Fields, "status") && strings.TrimSpace(record.Status) != "" && !allowedStatuses[record.Status] {
 		diagnostics = append(diagnostics, Diagnostic{
