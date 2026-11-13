@@ -10,7 +10,6 @@ description: >
 When asked to "rebase a PR", follow this structured process:
 
 - Check out the branch associated with the pull request into a local worktree
-  under `.worktrees/`, as required by the repository workflow.
 - Rebase the branch on the latest `upstream/main`
 - Resolve any merge conflicts that arise during the rebase process
 - Ensure all pre-commit checks pass before creating any commit for conflict

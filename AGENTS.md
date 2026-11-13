@@ -1,6 +1,5 @@
 # AGENTS
 
-- Create worktrees in `.worktrees/`
 - All pre-commit tests must pass before committing changes. In sandboxed
   environments without network access, use `python scripts/lint.py` as a
   network-independent alternative to `pre-commit run`.
