@@ -11,7 +11,7 @@ and #383). The command line accepts the checkout path and comparison
 base. It reads requirement and interface YAML records from
 `spec/requirements/` and `spec/interfaces/` in the target checkout.
 Missing directories are treated as empty. Unreadable files, non-YAML
-entries, files larger than 1 MiB, and malformed YAML produce
+entries, `.yaml` records larger than 1 MiB, and malformed YAML produce
 diagnostics. Requirement relationship types are restricted to
 `depends-on`, `supersedes`, and `related-to`; unsupported types,
 including legacy `conflicts-with`, fail validation. Directed
@@ -31,10 +31,9 @@ reported output.
 `layout.Read` discovers `*.yaml` files in those directories. It does
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
 or interface basenames to match the in-record name. No current check
-covers basename-to-record-ID or basename-to-name matching (tracked in
-[#443](https://github.com/redhat-et/ProtoBot/issues/443)).
-Requirement ID format, uniqueness, and related in-record identifier
-checks are enforced by follow-on check groups
+covers basename-to-record-ID or basename-to-name matching; that matching
+is not implemented yet. Requirement ID format, uniqueness, and related
+in-record identifier checks are enforced by follow-on check groups
 [#385](https://github.com/redhat-et/ProtoBot/issues/385) and
 [#395](https://github.com/redhat-et/ProtoBot/issues/395).
 
@@ -59,16 +58,18 @@ Target errors (such as a missing, unstattable, or non-directory
 validator: <message>
 ```
 
-Layout diagnostics are written to stderr, one per line:
+Layout and specification diagnostics are written to stderr, one per
+line:
 
 ```text
 validator: <code>: <path>: <message>
 ```
 
-This line format is stable for external tool integration. Current
-layout codes are `layout.read_failed`, `layout.unexpected_file`, and
-`layout.parse_failed`. A file larger than 1 MiB produces
-`layout.read_failed`.
+This line format is stable for external tool integration. Current codes
+include layout codes (`layout.read_failed`, `layout.unexpected_file`,
+`layout.parse_failed`) and specification check codes (such as
+`relationship.invalid_type`). A `.yaml` record larger than 1 MiB
+produces `layout.read_failed`.
 
 Build and test it from this directory:
 

@@ -332,6 +332,49 @@ func TestReadExactLimitFile(t *testing.T) {
 	}
 }
 
+func TestReadDuplicateKeyPreservesInternalSpaces(t *testing.T) {
+	target := t.TempDir()
+	content := "\"a  b\": 1\n\"a  b\": 2\nstatus: active\n"
+	writeFile(t, target, "spec/requirements/dup-spaces.yaml", content)
+
+	_, diagnostics := Read(target)
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/dup-spaces.yaml") {
+		t.Fatalf("missing parse_failed diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, CodeParseFailed, "spec/requirements/dup-spaces.yaml", `duplicate YAML key "a  b"`) {
+		t.Fatalf("diagnostic message collapsed spaces in key: %v", diagnostics)
+	}
+}
+
+func TestReadEntryWithControlCharRejected(t *testing.T) {
+	target := t.TempDir()
+	reqDir := filepath.Join(target, "spec", "requirements")
+	if err := os.MkdirAll(reqDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filename := "a\nb.yaml"
+	if err := os.WriteFile(filepath.Join(reqDir, filename), []byte("status: active\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	snapshot, diagnostics := Read(target)
+	if len(snapshot.Requirements) != 0 {
+		t.Fatalf("file with newline in name was parsed: %+v", snapshot.Requirements)
+	}
+	wantPath := "spec/requirements/a b.yaml"
+	if !hasDiagnostic(diagnostics, CodeUnexpectedFile, wantPath) {
+		t.Fatalf("missing unexpected_file diagnostic for %q: %v", wantPath, diagnostics)
+	}
+	for _, d := range diagnostics {
+		if strings.Contains(d.Path, "\n") || strings.Contains(d.Path, "\r") {
+			t.Fatalf("diagnostic path contains newline: %q", d.Path)
+		}
+		if strings.Contains(d.Message, "\n") || strings.Contains(d.Message, "\r") {
+			t.Fatalf("diagnostic message contains newline: %q", d.Message)
+		}
+	}
+}
+
 func TestReadFieldsMatchDecodedRecord(t *testing.T) {
 	target := t.TempDir()
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", validRequirement)

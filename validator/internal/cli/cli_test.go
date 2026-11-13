@@ -157,9 +157,7 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	dir := t.TempDir()
 	slash := dir + string(os.PathSeparator)
 	link := filepath.Join(t.TempDir(), "checkout")
-	if err := os.Symlink(dir, link); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
+	symlinkErr := os.Symlink(dir, link)
 	relParent := t.TempDir()
 	relName := "rel-target"
 	if err := os.Mkdir(filepath.Join(relParent, relName), 0o755); err != nil {
@@ -196,6 +194,9 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "directory symlink" && symlinkErr != nil {
+				t.Skipf("Symlink is unavailable: %v", symlinkErr)
+			}
 			if tc.chdir != "" {
 				t.Chdir(tc.chdir)
 			}
@@ -341,6 +342,10 @@ status: active
 	if !strings.Contains(stderr, "blocks") {
 		t.Fatalf("stderr %q omitted undeclared type", stderr)
 	}
+	wantPrefix := "validator: relationship.invalid_type: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
 }
 
 func TestRunTestTagReferenceResolution(t *testing.T) {
@@ -455,6 +460,14 @@ status: active
 	if !strings.Contains(stderr, "conflicts-with") {
 		t.Fatalf("stderr %q omitted legacy type", stderr)
 	}
+	wantLayoutPrefix := "validator: layout.unexpected_file: spec/requirements/notes.txt:"
+	if !strings.Contains(stderr, wantLayoutPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantLayoutPrefix)
+	}
+	wantRelPrefix := "validator: relationship.invalid_type: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantRelPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantRelPrefix)
+	}
 }
 
 func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
@@ -486,6 +499,36 @@ func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
 	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00001.yaml:"
 	if !strings.HasPrefix(lines[0], wantPrefix) {
 		t.Fatalf("stderr line %q omitted %q", lines[0], wantPrefix)
+	}
+}
+
+func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
+	target := t.TempDir()
+	reqDir := filepath.Join(target, "spec", "requirements")
+	if err := os.MkdirAll(reqDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	injectedName := "a\n::error::injected.yaml"
+	filePath := filepath.Join(reqDir, injectedName)
+	if err := os.WriteFile(filePath, []byte("status: active\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "::") {
+			t.Fatalf("stderr line starts with workflow command: %q", line)
+		}
+		if !strings.HasPrefix(line, "validator: layout.unexpected_file:") {
+			t.Fatalf("stderr line has unexpected prefix: %q", line)
+		}
 	}
 }
 
