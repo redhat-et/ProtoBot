@@ -35,7 +35,7 @@ inside an existing OpenCode session?_
 
 OpenCode is the first harness, not the only one. The Toolkit must work
 in any compatible agent harness
-([Specification Toolkit](../../architecture.md#specification-toolkit)),
+([Specification Toolkit][v1-arch-specification-toolkit]),
 and ProtoBot is expected to run in Claude Code, Codex, OpenCode, and
 harnesses that do not exist yet. The answer is one contract and one
 binding per harness:
@@ -73,7 +73,7 @@ The first Toolkit consumer is the `eliciting-requirements` skill in
 The Web Drafting Table and a standalone session manager are out of
 scope: the Web Drafting Table replaces the local harness with a hosted
 runtime
-([Drafting Table Boundary](../../architecture.md#drafting-table-boundary)),
+([Drafting Table Boundary][v1-arch-drafting-table-boundary]),
 and every harness already owns its sessions.
 
 ### Relationship to sibling contracts
@@ -385,7 +385,7 @@ the role reads Git state through the SCM's `repo_state`, never from
 files, and `.git/config` can hold a remote URL with a credential.
 `.protobot/` is denied, except `project.yaml`, because callers never
 parse the store
-([`ears-manager` CLI](../../architecture.md#ears-manager-cli));
+([`ears-manager` CLI][v1-arch-ears-manager-cli]);
 `project.yaml` is configuration that #34 lets the Drafting Table read,
 and #30 keeps it free of credentials. An `ears-manager` read can still
 return a store record's content, so that deny is a contract rule, not a
@@ -413,7 +413,7 @@ manifest:
   for it.
 - **`wms` is an MCP server**, because the WMS Adapter is a network
   service, and in single-player mode a local process over MCP stdio
-  ([WMS Adapter API](../../architecture.md#wms-adapter-api)). Its tools
+  ([WMS Adapter API][v1-arch-wms-adapter-api]). Its tools
   carry the operations and result shapes of #31, one tool per
   operation. Each harness adds its own prefix, for example
   `wms_<normalized-operation>` in OpenCode and
@@ -727,7 +727,7 @@ document names them, and guard rules 5 and 6 treat them as reads.
    the `stores` paths and the Git-facing fields from
    `.protobot/project.yaml` itself, which #34 lets the Drafting Table
    read; it parses no other file under `.protobot/`
-   ([`ears-manager` CLI](../../architecture.md#ears-manager-cli)). If
+   ([`ears-manager` CLI][v1-arch-ears-manager-cli]). If
    either read fails, it refuses every file write and shell command in
    the Drafting Table role and names the failure. In every role,
    inspection-independent path checks still refuse writes under the
@@ -1099,7 +1099,7 @@ sequenceDiagram
 ## What the harness layer stops
 
 The harness layer is the optional early layer of the
-[Governed tool integrations](../../architecture.md#governed-tool-integrations).
+[Governed tool integrations][v1-arch-governed-tool-integrations].
 The mandatory layers stay where #34 puts them
 ([Ungoverned-edit detection](../git-integration.md#ungoverned-edit-detection)).
 They catch an unauthorized persistent edit to a registered artifact when its
@@ -1278,7 +1278,7 @@ only the successful hook path does not establish fail-closed behavior.
   both cases.
 - **The `wms` server.** In single-player mode it is a local process
   that obtains the user's own Git host token itself, as the
-  [WMS Adapter API](../../architecture.md#wms-adapter-api) topology states.
+  [WMS Adapter API][v1-arch-wms-adapter-api] topology states.
   In multi-player mode it is remote: the harness's MCP client
   authenticates the user with OAuth 2.1, Red Hat SSO as the issuer, and
   the hosted WMS Adapter terminates the token and uses its own
@@ -1352,7 +1352,7 @@ may open and never supplies the project identity
 
 The adapter produces no demonstration artifact and writes nothing under
 `.protobot/attestations/`; those belong to the Job Site
-([Job Site Handoff Boundary](../../architecture.md#job-site-handoff-boundary)).
+([Job Site Handoff Boundary][v1-arch-job-site-handoff-boundary]).
 
 ### Traces
 
@@ -1808,7 +1808,7 @@ material.
 [adr2-verification]: ../../decisions/0002-ears-specification-record-schema.md#verification
 [credential-isolation]: ../components.md#authentication-and-credential-isolation
 [env-constraints]: ../../architecture.md#environmental-constraints
-[interface-approach]: ../../architecture.md#interface-specification-approach
+[interface-approach]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#interface-specification-approach
 [layer-stops]: #what-the-harness-layer-stops
 [pre-stage]: ../git-integration.md#the-pre-stage-digest-comparison
 [projections]: ../components.md#worker-repository-projections-decided
@@ -1819,7 +1819,7 @@ material.
 [scm-host]: ../source-control-manager.md#host-adapter-boundary
 [scm-mcp]: ../source-control-manager.md#mcp-protocol
 [scm-read]: ../source-control-manager.md#approved-state-read-face
-[strawman]: ../../architecture.md#opencode-plus-skill-strawman
+[strawman]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#opencode-plus-skill-strawman
 [structural]: ../overview.md#enforce-constraints-structurally-not-through-trust
 [ux]: ../drafting-table-ux.md
 [ux-approval]: ../drafting-table-ux.md#approval-and-post-merge-materialization
@@ -1832,3 +1832,10 @@ material.
 [ux-resume]: ../drafting-table-ux.md#resuming-an-existing-session
 [ux-stale]: ../drafting-table-ux.md#stale-git-or-wms-state
 [ux-wms]: ../drafting-table-ux.md#unavailable-wms
+
+[v1-arch-drafting-table-boundary]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#drafting-table-boundary
+[v1-arch-ears-manager-cli]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#ears-manager-cli
+[v1-arch-governed-tool-integrations]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#governed-tool-integrations
+[v1-arch-job-site-handoff-boundary]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#job-site-handoff-boundary
+[v1-arch-specification-toolkit]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#specification-toolkit
+[v1-arch-wms-adapter-api]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#wms-adapter-api

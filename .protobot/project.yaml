@@ -17,12 +17,12 @@ stores:
 store_digests:
     requirements: sha256:9a358a00bdabb03a3cff5cdce0fac181510eb977b166d476c0d67801beecef22
     interfaces: sha256:8e787702f4ccb37bac8f5e209d3d1da0f2e75d5fe42c32e71d46e179a5102b60
-    change_sets: sha256:f009316d98452d0ae93cb9baebe7dcdb11cba2599b615fddde47b1fd554aa6fb
+    change_sets: sha256:bf215d5f28ef39609b3a864e9bb4d5581363534d7a6fea9436d04af27a81f14b
 artifacts:
     - id: architecture
       kind: architecture
       path: docs/architecture.md
-      digest: sha256:84e6a8d0821befe52e093b99fedee57e9cd3d99f9c2e4791541c5c9955ea5097
+      digest: sha256:63b218c7345ad7ec8197bae3c84204822098e05cf71813fbe8a86dffc3dac052
       owner: user
     - id: vision
       kind: vision
