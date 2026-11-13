@@ -154,6 +154,21 @@ func reportSpec(stderr io.Writer, diagnostic specvalidation.Diagnostic) {
 	printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 }
 
+func sanitize(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	out := b.String()
+	for strings.Contains(out, "::") {
+		out = strings.ReplaceAll(out, "::", ":")
+	}
+	return out
+}
+
 func parseArgs(args []string) (options, error) {
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {

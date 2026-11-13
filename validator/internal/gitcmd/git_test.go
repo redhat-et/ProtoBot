@@ -25,6 +25,11 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/tmp/hooks",
+		"GIT_SSH=/usr/bin/ssh",
+		"GIT_SSH_COMMAND=ssh -v",
+		"GIT_PROXY_COMMAND=none",
+		"GIT_ALLOW_PROTOCOL=http",
+		"GIT_ASKPASS=/usr/bin/askpass",
 	})
 	if !slices.Contains(env, "PATH=/usr/bin") {
 		t.Fatalf("PATH was stripped: %q", env)
@@ -39,6 +44,11 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/tmp/hooks",
+		"GIT_SSH=/usr/bin/ssh",
+		"GIT_SSH_COMMAND=ssh -v",
+		"GIT_PROXY_COMMAND=none",
+		"GIT_ALLOW_PROTOCOL=http",
+		"GIT_ASKPASS=/usr/bin/askpass",
 	} {
 		if slices.Contains(env, banned) {
 			t.Fatalf("env still has %s: %q", banned, env)
@@ -67,6 +77,7 @@ func TestGitCommandPrependsIsolationArgs(t *testing.T) {
 		"-c", "core.hooksPath=" + os.DevNull,
 		"-c", "core.fsmonitor=false",
 		"-c", "submodule.recurse=false",
+		"-c", "protocol.file.allow=never",
 		"-C", "/repo",
 		"status",
 	}
