@@ -161,7 +161,7 @@ updates. Do not declare the upgrade complete or commit while required settings
 are unresolved or unapplied, except for an explicitly approved staged-
 compatibility plan with its dependency and timing documented.
 
-## Step 4: Apply confirmed repository settings
+## Step 4: Apply approved repository settings
 
 Apply only individually approved setting rows for the same explicit target.
 Use the [settings application and readback
@@ -230,7 +230,7 @@ repository's verification commands. For a ProtoBot target, run:
   set -e
   python3 scripts/check_harness_integrity.py
   python scripts/lint.py --all-files
-  for module in drafting-table ears-manager source-control-manager wms; do
+  for module in drafting-table ears-manager source-control-manager validator wms; do
     (cd "$module" && go test ./...)
   done
 )

@@ -210,6 +210,36 @@ class FullsendPinUpdaterTests(unittest.TestCase):
         )
         self.assertEqual(workflow_original, self.workflow.read_text(encoding="utf-8"))
 
+    def test_comment_only_harness_pin_is_not_counted_or_rewritten(self) -> None:
+        harness_original = f"# {_TEST_HARNESS_URL}#sha256={'a' * 64}\n"
+        workflow_original = (
+            "uses: fullsend-ai/fullsend/.github/workflows/reusable-ci.yml@"
+            f"{'b' * 40} # v0.9.0\n"
+        )
+        self.harness.write_text(harness_original, encoding="utf-8")
+        self.workflow.write_text(workflow_original, encoding="utf-8")
+
+        with (
+            patch.object(
+                updater, "fetch_bytes", return_value=b"updated harness\n"
+            ) as fetch_bytes,
+            patch.object(
+                updater, "resolve_workflow_sha", return_value="c" * 40
+            ) as resolve_workflow_sha,
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as error,
+        ):
+            result = updater.main(
+                ["--version", "v1.2.3", "--root", str(self.root), "--write"]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn("no Fullsend agents harness pins found", error.getvalue())
+        fetch_bytes.assert_not_called()
+        resolve_workflow_sha.assert_not_called()
+        self.assertEqual(harness_original, self.harness.read_text(encoding="utf-8"))
+        self.assertEqual(workflow_original, self.workflow.read_text(encoding="utf-8"))
+
     def test_discover_targets_only_includes_yaml_extensions(self) -> None:
         for kind, directory in (
             ("harness", self.harness.parent),
@@ -795,6 +825,48 @@ class FullsendSetupPreviewTests(unittest.TestCase):
             ),
             state,
         )
+
+    def test_setup_dry_run_rejects_extra_generated_path_before_resolution(self) -> None:
+        output = (
+            "Would commit: .github/workflows/fullsend.yaml (1 bytes)\n"
+            "Would commit: .github/workflows/prioritize.yml (1 bytes)\n"
+            "Would commit: .github/workflows/unexpected.yml (1 bytes)\n"
+            "Would set repository variables:\n\n"
+            "Would set 0 repository secrets:\n"
+        )
+        error = io.StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as root_directory,
+            patch.object(setup_preview, "resolve_cli_version", return_value="v1.2.3"),
+            patch.object(setup_preview, "run_command", return_value=output),
+            patch.object(setup_preview, "resolve_workflow_sha") as workflow_sha,
+            patch.object(setup_preview, "resolve_runner") as runner,
+            patch.object(
+                setup_preview, "resolve_ref_comment_separator"
+            ) as comment_separator,
+            patch.object(
+                setup_preview, "render_generated_file"
+            ) as render_generated_file,
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(error),
+        ):
+            result = setup_preview.main(
+                [
+                    "example-org/example-repo",
+                    "--version",
+                    "v1.2.3",
+                    "--root",
+                    root_directory,
+                ]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn("unsupported generated paths", error.getvalue())
+        workflow_sha.assert_not_called()
+        runner.assert_not_called()
+        comment_separator.assert_not_called()
+        render_generated_file.assert_not_called()
 
     def test_setup_state_rejects_malformed_rows_and_missing_sections(self) -> None:
         invalid_outputs = (

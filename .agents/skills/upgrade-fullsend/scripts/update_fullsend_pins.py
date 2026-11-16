@@ -26,9 +26,10 @@ VERSION_PATTERN = re.compile(
     r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
 )
 HARNESS_PIN_PATTERN = re.compile(
-    r"https://raw\.githubusercontent\.com/fullsend-ai/agents/"
-    r"v[^/\s\"]+/(?P<path>harness/[^#\s\"]+\.ya?ml)"
-    r"#sha256=(?P<sha>[0-9A-Fa-f]{64})"
+    r"(?m)^[ \t]*base:[ \t]*[\"']?"
+    r"(?P<pin>https://raw\.githubusercontent\.com/fullsend-ai/agents/"
+    r"v[^/\s\"']+/(?P<path>harness/[^#\s\"']+\.ya?ml)"
+    r"#sha256=(?P<sha>[0-9A-Fa-f]{64}))"
 )
 WORKFLOW_PIN_PATTERN = re.compile(
     r"(?m)^(?P<line_prefix>[ \t]*uses:[ \t]*)"
@@ -307,12 +308,11 @@ def update_harness_file(
                 fetch_bytes(url, timeout)
             ).hexdigest()
         new_pin = f"{url}#sha256={digest_cache[relative_path]}"
-        old_pin = match.group(0)
+        old_pin = match.group("pin")
         if old_pin == new_pin:
             continue
-        updated_text = (
-            updated_text[: match.start()] + new_pin + updated_text[match.end() :]
-        )
+        start, end = match.span("pin")
+        updated_text = updated_text[:start] + new_pin + updated_text[end:]
         replacements.append(Replacement(path, old_pin, new_pin))
 
     if not replacements:

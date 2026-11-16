@@ -218,7 +218,15 @@ def run_setup_dry_run(
             "the dry-run reported duplicate generated paths: "
             + ", ".join(sorted(duplicate_paths))
         )
-    missing_paths = set(TEMPLATE_BY_TARGET) - {item.path for item in planned_files}
+    expected_paths = set(TEMPLATE_BY_TARGET)
+    planned_paths = {item.path for item in planned_files}
+    unsupported_paths = planned_paths - expected_paths
+    if unsupported_paths:
+        raise UpdateError(
+            "the dry-run reported unsupported generated paths: "
+            + ", ".join(sorted(unsupported_paths))
+        )
+    missing_paths = expected_paths - planned_paths
     if missing_paths:
         raise UpdateError(
             "the dry-run omitted required generated paths: "

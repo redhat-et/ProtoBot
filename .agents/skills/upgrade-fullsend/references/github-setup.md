@@ -82,7 +82,7 @@ The helper is report-only. It compares proposed repository variables with
 `vars.NAME` and `secrets.NAME` references—including compound expressions—and
 reports missing variable values and secret presence. It also includes
 secret names proposed by setup. It never reads or changes secret values.
-The [settings workflow](../SKILL.md#step-4-apply-confirmed-repository-settings)
+The [settings workflow](../SKILL.md#step-4-apply-approved-repository-settings)
 shows concrete variable values and secret requirements, then lets the agent
 apply only individually approved changes; the preview helper stays read-only.
 Malformed variable or secret rows, unsupported settings headings, or missing
