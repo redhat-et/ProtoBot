@@ -169,8 +169,8 @@ func TestReadRejectsNestedDirectoryInBase(t *testing.T) {
 	if !hasPath(diagnostics, "spec/requirements/sub") {
 		t.Fatalf("expected path spec/requirements/sub, got %v", diagnostics)
 	}
-	if !hasCode(diagnostics, "revision.unexpected_file") {
-		t.Fatalf("expected revision.unexpected_file, got %v", diagnostics)
+	if !hasCode(diagnostics, CodeUnexpectedFile) {
+		t.Fatalf("expected %s, got %v", CodeUnexpectedFile, diagnostics)
 	}
 }
 

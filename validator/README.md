@@ -136,7 +136,7 @@ This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
 `layout.parse_failed`), revision check codes (`revision.not_found`,
 `revision.read_failed`, `revision.unsupported_entry`,
-`revision.parse_failed`), requirement check codes
+`revision.unexpected_file`, `revision.parse_failed`), requirement check codes
 (`requirement.missing_field`, `requirement.invalid_status`,
 `requirement.unexpected_field`, `requirement.invalid_id`,
 `requirement.duplicate_id`, `requirement.deleted`,

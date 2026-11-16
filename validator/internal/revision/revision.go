@@ -21,6 +21,7 @@ const (
 	CodeNotFound         = "revision.not_found"
 	CodeReadFailed       = "revision.read_failed"
 	CodeUnsupportedEntry = "revision.unsupported_entry"
+	CodeUnexpectedFile   = "revision.unexpected_file"
 	CodeParseFailed      = "revision.parse_failed"
 )
 
@@ -193,7 +194,7 @@ func listRequirements(target, commit, ref string) ([]treeEntry, []layout.Diagnos
 			if _, seen := seenDirs[nestedDir]; !seen {
 				seenDirs[nestedDir] = struct{}{}
 				diags = append(diags, layout.Diagnostic{
-					Code:    "revision.unexpected_file",
+					Code:    CodeUnexpectedFile,
 					Path:    nestedDir,
 					Message: fmt.Sprintf("comparison base %q: is a directory", ref),
 				})
