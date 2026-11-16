@@ -599,7 +599,7 @@ status: active
 	}
 }
 
-func TestRunSkipsRetiredRequirementsFromEARSShapeCheck(t *testing.T) {
+func TestRunValidatesRetiredRequirementsEARSShape(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-RET-00001.yaml", `id: REQ-RET-00001
 type: ubiquitous
@@ -612,11 +612,14 @@ status: retired
 `)
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
-	if code != exitOK || stderr != "" {
+	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "validator: ok") {
-		t.Fatalf("stdout %q does not report ok", stdout)
+	if !strings.Contains(stderr, "REQ-RET-00001.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "contains 0 occurrences") {
+		t.Fatalf("stderr %q does not contain 0 occurrences", stderr)
 	}
 }
 

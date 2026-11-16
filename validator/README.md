@@ -36,8 +36,7 @@ values are `active` or `retired`. Legacy metadata (`verification`,
 Requirement text is checked for exactly one `shall` and for a match
 against the declared EARS type (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
-State-driven statements require the keyword `While`. Retired
-requirements are exempt from the EARS shape check. Identifier checks
+State-driven statements require the keyword `While`. Identifier checks
 land in follow-on work.
 
 `--target` is used as given. The command does not apply
