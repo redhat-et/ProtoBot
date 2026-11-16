@@ -15,14 +15,14 @@ present in that checkout. The command operates locally and does not fetch.
 The design is the [ProtoBot V2 validator][design]. This module
 implements the command line, spec directory reader, record schema checks,
 relationship-type allowlist, relationship acyclicity, reference resolution,
-requirement identifier checks, and parsed-text immutability against comparison base
-(issues #381, #383, #385, #387, and #388, #390, #395, #397, #402). The command line
-accepts the checkout path and comparison base. It reads requirement and
-interface YAML records from `spec/requirements/` and `spec/interfaces/` in
-the target checkout. Missing directories are treated as empty. Unreadable
-files, non-YAML entries, `.yaml` records larger than 1 MiB, and malformed
-YAML produce diagnostics. A mapping key that contains `.`, `[`, or `]`
-fails with `layout.parse_failed`. Requirement relationship types are
+requirement identifier checks, and parsed-text immutability against comparison
+base (issues #381, #383, #385, #387, and #388, #390, #395, #397, #402). The
+command line accepts the checkout path and comparison base. It reads
+requirement and interface YAML records from `spec/requirements/` and
+`spec/interfaces/` in the target checkout. Missing directories are treated as
+empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
+and malformed YAML produce diagnostics. A mapping key that contains `.`, `[`,
+or `]` fails with `layout.parse_failed`. Requirement relationship types are
 restricted to `depends-on`, `supersedes`, and `related-to`; unsupported
 types, including legacy `conflicts-with`, fail validation. Directed
 `depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
@@ -135,11 +135,12 @@ diagnostic.
 This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
 `layout.parse_failed`), revision check codes (`revision.not_found`,
-`revision.read_failed`), requirement check codes
+`revision.read_failed`, `revision.unsupported_entry`,
+`revision.parse_failed`), requirement check codes
 (`requirement.missing_field`, `requirement.invalid_status`,
 `requirement.unexpected_field`, `requirement.invalid_id`,
 `requirement.duplicate_id`, `requirement.deleted`,
-`requirement.reused_id`), interface check codes
+`requirement.reused_id`, `requirement.text_immutable`), interface check codes
 (`interface.missing_field`, `interface.unexpected_field`), reference
 check codes (`reference.not_found`, `reference.ambiguous`),
 specification check codes (`relationship.invalid_type`,

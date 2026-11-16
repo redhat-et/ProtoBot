@@ -15,11 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"unicode"
-
-	"github.com/redhat-et/protobot/validator/internal/layout"
 )
 
 // TestsDir is the checkout-relative directory that holds derived tests.
@@ -110,16 +106,11 @@ func walkDir(root *os.Root, relative string, knownIDs map[string]struct{}) []Dia
 	var diagnostics []Diagnostic
 	for _, entry := range entries {
 		name := entry.Name()
-		entryName := name
-		if hasControl(name) {
-			entryName = strconv.Quote(name)
-		}
-		child := path.Join(relative, entryName)
-		if !layout.SafeEntryName(name) {
-			diagnostics = append(diagnostics, diagnostic(CodeUnexpectedFile, child, 0, "has an unsafe name"))
+		if !safeEntryName(name) {
 			continue
 		}
-		diagnostics = append(diagnostics, walk(root, path.Join(relative, name), knownIDs, false)...)
+		child := path.Join(relative, name)
+		diagnostics = append(diagnostics, walk(root, child, knownIDs, false)...)
 	}
 	return diagnostics
 }
@@ -176,13 +167,14 @@ func tagsOnLine(relative string, line int, text string, knownIDs map[string]stru
 	return diagnostics
 }
 
-func hasControl(s string) bool {
-	for _, r := range s {
-		if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Cf, r) {
-			return true
-		}
+func safeEntryName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
 	}
-	return false
+	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
+		return false
+	}
+	return filepath.Base(name) == name
 }
 
 func diagnostic(code, path string, line int, message string) Diagnostic {

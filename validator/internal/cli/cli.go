@@ -110,9 +110,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			reportSpec(stderr, diagnostic)
 		}
 
-		for _, diagnostic := range immutability.Check(snapshot, baseSnapshot) {
+		immutabilityDiagnostics := immutability.Check(snapshot, baseSnapshot)
+		if len(immutabilityDiagnostics) > 0 {
 			failed = true
-			printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+			reportDiagnostics(stderr, immutabilityDiagnostics)
 		}
 	}
 	for _, diagnostic := range ears.CheckAll(requirementStatements(snapshot)) {
@@ -153,6 +154,12 @@ func reportBaseLayout(stderr io.Writer, base string, diagnostic layout.Diagnosti
 
 func reportSpec(stderr io.Writer, diagnostic specvalidation.Diagnostic) {
 	printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+}
+
+func reportDiagnostics(stderr io.Writer, diagnostics []layout.Diagnostic) {
+	for _, diagnostic := range diagnostics {
+		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+	}
 }
 
 func writeLine(w io.Writer, line string) {

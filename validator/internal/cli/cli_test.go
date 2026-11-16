@@ -11,6 +11,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/gitcmd"
 	"github.com/redhat-et/protobot/validator/internal/immutability"
+	"github.com/redhat-et/protobot/validator/internal/layout"
 )
 
 func TestRunValidTargetAndBase(t *testing.T) {
@@ -1066,6 +1067,40 @@ func TestRunModifiedRequirementTextFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "REQ-API-00001") {
 		t.Fatalf("stderr %q omitted requirement id", stderr)
+	}
+}
+
+func TestRunReportsEarlierDiagnosticsAndTextImmutabilityTogether(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist."))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist now."))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout diagnostic", stderr)
+	}
+	if !strings.Contains(stderr, immutability.CodeTextImmutable) {
+		t.Fatalf("stderr %q omitted text immutability diagnostic", stderr)
+	}
+}
+
+func TestReportDiagnosticsDelegatesToPrintDiagnostic(t *testing.T) {
+	var buf bytes.Buffer
+	reportDiagnostics(&buf, []layout.Diagnostic{
+		{Code: "test.code", Path: "spec/requirements/a\nb.yaml", Message: "multi\nline"},
+		{Code: "test.pathless", Path: "", Message: "message\r\ntext"},
+	})
+	got := buf.String()
+	want := "validator: test.code: spec/requirements/a b.yaml: multi line\nvalidator: test.pathless: message text\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
