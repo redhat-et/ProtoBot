@@ -157,9 +157,7 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	dir := t.TempDir()
 	slash := dir + string(os.PathSeparator)
 	link := filepath.Join(t.TempDir(), "checkout")
-	if err := os.Symlink(dir, link); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
+	symlinkErr := os.Symlink(dir, link)
 	relParent := t.TempDir()
 	relName := "rel-target"
 	if err := os.Mkdir(filepath.Join(relParent, relName), 0o755); err != nil {
@@ -196,6 +194,9 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "directory symlink" && symlinkErr != nil {
+				t.Skipf("Symlink is unavailable: %v", symlinkErr)
+			}
 			if tc.chdir != "" {
 				t.Chdir(tc.chdir)
 			}
@@ -285,6 +286,21 @@ func TestRunValidSpecRecords(t *testing.T) {
 
 func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00000.yaml", `id: REQ-API-00000
+type: ubiquitous
+text: The service shall exist.
+status: retired
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall log requests.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
+type: ubiquitous
+text: The service shall expose metrics.
+status: active
+`)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -310,8 +326,169 @@ status: active
 	}
 }
 
+func TestRunAcceptsResolvedReferences(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\nkind: http\ndescription: Health check HTTP API.\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+status: retired
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+relationships:
+  - type: supersedes
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunRejectsDanglingReferences(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - undeclared-api
+relationships:
+  - type: depends-on
+    target: REQ-MISSING-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "undeclared-api") {
+		t.Fatalf("stderr %q omitted dangling interface", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-MISSING-00001") {
+		t.Fatalf("stderr %q omitted dangling relationship target", stderr)
+	}
+}
+
+func TestRunSuppressesReferenceDiagnosticWhenTargetFailsToParse(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for REQ-API-00001.yaml", stderr)
+	}
+	if strings.Contains(stderr, "is not declared") {
+		t.Fatalf("stderr %q unexpectedly reported cascading 'is not declared' for malformed target", stderr)
+	}
+}
+
+func TestRunCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/health-api.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+relationships:
+  - type: depends-on
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "spec/requirements/health-api.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for spec/requirements/health-api.yaml", stderr)
+	}
+	if !strings.Contains(stderr, "spec/requirements/REQ-API-00001.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for spec/requirements/REQ-API-00001.yaml", stderr)
+	}
+	if !strings.Contains(stderr, "Interface \"health-api\" at applies_to.interfaces[0] is not declared.") {
+		t.Fatalf("stderr %q omitted reference.not_found diagnostic for health-api", stderr)
+	}
+	if strings.Contains(stderr, "Requirement \"REQ-API-00001\" at relationships[0].target is not declared.") {
+		t.Fatalf("stderr %q unexpectedly reported cascading 'is not declared' for malformed target", stderr)
+	}
+}
+
+func TestRunRejectsAmbiguousInterfaceReference(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/interfaces/api-a.yaml", "name: health-api\nkind: http\ndescription: Health check.\n")
+	writeSpecFile(t, target, "spec/interfaces/api-b.yaml", "name: health-api\nkind: http\ndescription: Duplicate health check.\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  interfaces:
+    - health-api
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "health-api") || !strings.Contains(stderr, "ambiguous") {
+		t.Fatalf("stderr %q omitted ambiguous interface diagnostic", stderr)
+	}
+}
+
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall log requests.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
+type: ubiquitous
+text: The service shall expose metrics.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", `id: REQ-API-00004
+type: ubiquitous
+text: The service shall rate-limit clients.
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00005.yaml", `id: REQ-API-00005
+type: ubiquitous
+text: The service shall record audit events.
+status: active
+`)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -343,6 +520,10 @@ status: active
 	if !strings.Contains(stderr, "blocks") {
 		t.Fatalf("stderr %q omitted undeclared type", stderr)
 	}
+	wantPrefix := "validator: relationship.invalid_type: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
 }
 
 func TestRunTestTagReferenceResolution(t *testing.T) {
@@ -367,14 +548,14 @@ func TestRunTestTagReferenceResolution(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("unresolved tags code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "tests/unknown.feature:1:") {
-		t.Fatalf("stderr %q omitted unknown-tag path and line", stderr)
+	if !strings.Contains(stderr, "validator: testtags.unresolved: tests/unknown.feature:1:") {
+		t.Fatalf("stderr %q omitted testtags.unresolved code for unknown tag", stderr)
 	}
 	if !strings.Contains(stderr, "REQ-UNKNOWN") {
 		t.Fatalf("stderr %q omitted unknown requirement ID", stderr)
 	}
-	if !strings.Contains(stderr, "tests/misspelled.feature:1:") {
-		t.Fatalf("stderr %q omitted misspelled-tag path and line", stderr)
+	if !strings.Contains(stderr, "validator: testtags.unresolved: tests/misspelled.feature:1:") {
+		t.Fatalf("stderr %q omitted testtags.unresolved code for misspelled tag", stderr)
 	}
 	if !strings.Contains(stderr, "REQ-API-0000l") {
 		t.Fatalf("stderr %q omitted misspelled requirement ID", stderr)
@@ -426,14 +607,26 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
+	if !strings.Contains(stderr, "layout.unexpected_file") {
+		t.Fatalf("stderr %q omitted diagnostic code", stderr)
+	}
 	if !strings.Contains(stderr, "notes.txt") {
 		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	wantPrefix := "validator: layout.unexpected_file: spec/requirements/notes.txt:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
 }
 
 func TestRunReportsBothLayoutAndRelationshipDiagnostics(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", `id: REQ-API-00004
+type: ubiquitous
+text: The service shall rate-limit clients.
+status: active
+`)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
@@ -458,6 +651,14 @@ status: active
 	}
 	if !strings.Contains(stderr, "conflicts-with") {
 		t.Fatalf("stderr %q omitted legacy type", stderr)
+	}
+	wantLayoutPrefix := "validator: layout.unexpected_file: spec/requirements/notes.txt:"
+	if !strings.Contains(stderr, wantLayoutPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantLayoutPrefix)
+	}
+	wantRelPrefix := "validator: relationship.invalid_type: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantRelPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantRelPrefix)
 	}
 }
 
@@ -492,8 +693,85 @@ func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
-		t.Fatalf("stderr %q omitted offending path", stderr)
+	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+}
+
+func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [1]\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
+	}
+	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00001.yaml:"
+	if !strings.HasPrefix(lines[0], wantPrefix) {
+		t.Fatalf("stderr line %q omitted %q", lines[0], wantPrefix)
+	}
+}
+
+func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
+	target := t.TempDir()
+	reqDir := filepath.Join(target, "spec", "requirements")
+	if err := os.MkdirAll(reqDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	injectedName := "a\n::error::injected.yaml"
+	filePath := filepath.Join(reqDir, injectedName)
+	if err := os.WriteFile(filePath, []byte("status: active\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantStderr := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
+	target := t.TempDir()
+	testsDir := filepath.Join(target, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	injectedName := "a\n::error::injected.feature"
+	filePath := filepath.Join(testsDir, injectedName)
+	if err := os.WriteFile(filePath, []byte("@req:REQ-UNKNOWN\nFeature: Injected\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantStderr := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\"\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestPrintDiagnosticSanitizesLineBreaks(t *testing.T) {
+	var buf bytes.Buffer
+	printDiagnostic(&buf, "relationship.invalid_type", "spec/requirements/a\nb.yaml", "unsupported relationship type\nmulti line\r\nmessage")
+	got := buf.String()
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %q", len(lines), got)
+	}
+	want := "validator: relationship.invalid_type: spec/requirements/a b.yaml: unsupported relationship type multi line message\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
