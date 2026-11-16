@@ -11,13 +11,15 @@ an external daemon.
 `--target` must be the root of a Git working tree, `git` must be
 available on `PATH`, and `--base` must resolve to a commit already
 present in that checkout. The command operates locally and does not fetch.
+Git 2.45 or later is required for GIT_NO_LAZY_FETCH. Otherwise a partial clone
+can fetch a missing base object over the network.
 
-The design is the [ProtoBot V2 validator][design]. This module
-implements the command line, spec directory reader, record schema checks,
-relationship-type allowlist, relationship acyclicity, reference resolution,
+The design is the [ProtoBot V2 validator][design]. This module implements the
+command line, spec directory reader, record schema checks, relationship-type
+allowlist, relationship acyclicity, reference resolution, EARS shape checks,
 requirement identifier checks, and parsed-text immutability against comparison
-base (issues #381, #383, #385, #387, and #388, #390, #395, #397, #402). The
-command line accepts the checkout path and comparison base. It reads
+base (issues #381, #383, #385, #387, and #388, #390, #392, #395, #397, #402).
+The command line accepts the checkout path and comparison base. It reads
 requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
 empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
@@ -51,9 +53,7 @@ reformatting that preserves the parsed string passes, and metadata-only
 edits such as status transitions pass. A wording change under an
 existing ID fails.
 
-`--target` must point to the root of a Git checkout, `--base` must
-resolve to a commit in that checkout, and `git` must be available on
-`PATH`. `--target` is used as given; the command does not apply
+`--target` is used as given; the command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
 reported output. The command reports diagnostics in the format
 `validator: <code>: <path>: <message>` (or
@@ -96,7 +96,7 @@ usage:
   validator -h
 
   --target PATH   checkout directory to validate
-  --base REF      comparison base for identity checks
+  --base REF      comparison base for identity and immutability checks
 ```
 
 Target errors (exit status 1, such as a missing, unstattable, or
