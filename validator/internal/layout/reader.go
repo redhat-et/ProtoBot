@@ -47,6 +47,9 @@ type Diagnostic struct {
 }
 
 // Document is one YAML record loaded from the spec directory layout.
+// Fields records whether each field path was present in the YAML source.
+// A nil Fields map indicates presence is unknown (for example, in synthetic
+// test documents constructed directly rather than parsed from YAML).
 type Document[T any] struct {
 	Path   string
 	Record T
@@ -279,6 +282,9 @@ func inspectNode(node *yaml.Node, location string) error {
 			}
 			if key.Value == "<<" {
 				return fmt.Errorf("YAML merge key is not allowed at %s", location)
+			}
+			if strings.ContainsAny(key.Value, ".[]") {
+				return fmt.Errorf("YAML mapping key %q at %s must not contain '.', '[', or ']'", key.Value, location)
 			}
 			if _, exists := keys[key.Value]; exists {
 				return fmt.Errorf("duplicate YAML key %q at %s", key.Value, location)

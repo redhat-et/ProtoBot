@@ -6,26 +6,34 @@ deterministic, network-free Go command. It reads the checkout at
 not contact a tracker, a network service, or an external daemon.
 
 The design is the [ProtoBot V2 validator][design]. This module
-implements the command line and the spec directory reader (issues #381
-and #383). The command line accepts the checkout path and comparison
+implements the command line, spec directory reader, record schema
+checks, relationship-type allowlist, relationship acyclicity, and
+reference resolution (issues #381, #383, #385, #387, #388, #390,
+and #402). The command line accepts the checkout path and comparison
 base. It reads requirement and interface YAML records from
 `spec/requirements/` and `spec/interfaces/` in the target checkout.
 Missing directories are treated as empty. Unreadable files, non-YAML
 entries, `.yaml` records larger than 1 MiB, and malformed YAML produce
-diagnostics. Requirement relationship types are restricted to
+diagnostics. A mapping key that contains `.`, `[`, or `]` fails with
+`layout.parse_failed`. Requirement relationship types are restricted to
 `depends-on`, `supersedes`, and `related-to`; unsupported types,
 including legacy `conflicts-with`, fail validation. Directed
 `depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
 `relationship.cycle` and names the participating requirement IDs.
 `related-to` associations are exempt. Each `applies_to.interfaces` entry
-must equal an interface record's `name` (matching is case-sensitive), and
-requirement IDs in `relationships[].target` must resolve to declared
+must equal an interface record's `name` (matching is case-sensitive),
+and requirement IDs in `relationships[].target` must resolve to declared
 records; retired requirement targets satisfy resolution. It also scans
 Gherkin `.feature` files under `tests/` for `@req:<ID>` tags and fails
 when a tag does not resolve to a known requirement record. Active and
 retired IDs both count as known; unknown or misspelled IDs fail with
-line-level diagnostics. Schema, EARS, and identifier checks land in
-follow-on work.
+line-level diagnostics. Requirement records must include `id`, `type`,
+`text`, `applies_to`, `relationships`, and `status`. `applies_to` must
+name at least one interface or scope. Blank selectors count as absent.
+Interface records must include `name`, `kind`, and `description`. Status
+values are `active` or `retired`. Legacy metadata (`verification`,
+`provenance`, `created`) and other unparsed fields are rejected. EARS
+and identifier checks land in follow-on work.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the

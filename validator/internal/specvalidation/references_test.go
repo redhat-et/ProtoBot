@@ -311,6 +311,10 @@ description: Health check HTTP API.
 	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
 text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: retired
 `)
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
