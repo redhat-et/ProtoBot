@@ -2,12 +2,15 @@ package layout
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"gopkg.in/yaml.v3"
 )
 
 func TestReadValidRecords(t *testing.T) {
@@ -240,6 +243,166 @@ func TestReadMalformedYAML(t *testing.T) {
 	if len(snapshot.Requirements) != 1 {
 		t.Fatalf("valid requirement was dropped: %+v", snapshot.Requirements)
 	}
+
+	cases := []struct {
+		name     string
+		filename string
+		content  string
+		wantMsg  string
+	}{
+		{
+			name:     "utf8 bom",
+			filename: "spec/requirements/bom.yaml",
+			content:  "\xef\xbb\xbfid: REQ-API-00001\ntype: ubiquitous\ntext: The service shall exist.\nstatus: active\n",
+			wantMsg:  "UTF-8 BOM",
+		},
+		{
+			name:     "invalid utf8",
+			filename: "spec/requirements/invalid-utf8.yaml",
+			content:  "id: REQ-API-00001\ntype: ubiquitous\ntext: \xff\xfe invalid\nstatus: active\n",
+			wantMsg:  "not valid UTF-8",
+		},
+		{
+			name:     "non-string mapping key",
+			filename: "spec/requirements/non-string-key.yaml",
+			content:  "123: value\nstatus: active\n",
+			wantMsg:  "must be a string",
+		},
+		{
+			name:     "explicit yaml tag custom",
+			filename: "spec/requirements/tagged-custom.yaml",
+			content:  "id: !custom REQ-API-00001\nstatus: active\n",
+			wantMsg:  "unsafe YAML tag",
+		},
+		{
+			name:     "explicit yaml tag standard",
+			filename: "spec/requirements/tagged-standard.yaml",
+			content:  "id: !!str REQ-API-00001\nstatus: active\n",
+			wantMsg:  "unsafe YAML tag",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolated := t.TempDir()
+			writeFile(t, isolated, tc.filename, tc.content)
+			_, diags := Read(isolated)
+			if !hasDiagnostic(diags, CodeParseFailed, tc.filename) {
+				t.Fatalf("missing parse_failed diagnostic for %s: %v", tc.name, diags)
+			}
+			if !hasDiagnosticMessage(diags, CodeParseFailed, tc.filename, tc.wantMsg) {
+				t.Fatalf("diagnostic for %s does not contain %q: %v", tc.name, tc.wantMsg, diags)
+			}
+		})
+	}
+}
+
+func TestInspectNodeLocalTagWithoutTaggedStyle(t *testing.T) {
+	node := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!custom",
+		Value: "REQ-API-00001",
+	}
+	err := inspectNode(node, "root")
+	if err == nil {
+		t.Fatal("expected error for local tag without TaggedStyle, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsafe YAML tag \"!custom\" at root") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+
+	standardNode := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!!str",
+		Value: "REQ-API-00001",
+	}
+	if err := inspectNode(standardNode, "root"); err != nil {
+		t.Fatalf("standard tag without TaggedStyle should be accepted: %v", err)
+	}
+}
+
+func TestReadOversizedFile(t *testing.T) {
+	target := t.TempDir()
+	oversized := make([]byte, maxYAMLBytes+1)
+	for i := range oversized {
+		oversized[i] = ' '
+	}
+	copy(oversized, []byte("id: REQ-API-00001\ntext: "))
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", string(oversized))
+
+	snapshot, diagnostics := Read(target)
+	if !hasDiagnostic(diagnostics, CodeReadFailed, "spec/requirements/REQ-API-00001.yaml") {
+		t.Fatalf("missing oversized file diagnostic: %v", diagnostics)
+	}
+	if len(snapshot.Requirements) != 0 {
+		t.Fatalf("oversized file was parsed: %+v", snapshot.Requirements)
+	}
+}
+
+func TestReadExactLimitFile(t *testing.T) {
+	target := t.TempDir()
+	exact := make([]byte, maxYAMLBytes)
+	for i := range exact {
+		exact[i] = ' '
+	}
+	prefix := []byte("id: REQ-API-00001\ntype: ubiquitous\ntext: \"")
+	copy(exact, prefix)
+	suffix := []byte("\"\nstatus: active\n")
+	copy(exact[len(exact)-len(suffix):], suffix)
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", string(exact))
+
+	snapshot, diagnostics := Read(target)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics for exact limit file: %v", diagnostics)
+	}
+	if len(snapshot.Requirements) != 1 {
+		t.Fatalf("exact limit file was not parsed: %+v", snapshot.Requirements)
+	}
+}
+
+func TestReadDuplicateKeyPreservesInternalSpaces(t *testing.T) {
+	target := t.TempDir()
+	content := "\"a  b\": 1\n\"a  b\": 2\nstatus: active\n"
+	writeFile(t, target, "spec/requirements/dup-spaces.yaml", content)
+
+	_, diagnostics := Read(target)
+	if !hasDiagnostic(diagnostics, CodeParseFailed, "spec/requirements/dup-spaces.yaml") {
+		t.Fatalf("missing parse_failed diagnostic: %v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, CodeParseFailed, "spec/requirements/dup-spaces.yaml", `duplicate YAML key "a  b"`) {
+		t.Fatalf("diagnostic message collapsed spaces in key: %v", diagnostics)
+	}
+}
+
+func TestReadEntryWithControlCharRejected(t *testing.T) {
+	target := t.TempDir()
+	reqDir := filepath.Join(target, "spec", "requirements")
+	if err := os.MkdirAll(reqDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filename := "a\nb.yaml"
+	if err := os.WriteFile(filepath.Join(reqDir, filename), []byte("status: active\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	snapshot, diagnostics := Read(target)
+	if len(snapshot.Requirements) != 0 {
+		t.Fatalf("file with newline in name was parsed: %+v", snapshot.Requirements)
+	}
+	wantPath := path.Join("spec/requirements", strconv.Quote(filename))
+	if !hasDiagnostic(diagnostics, CodeUnexpectedFile, wantPath) {
+		t.Fatalf("missing unexpected_file diagnostic for %q: %v", wantPath, diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, CodeUnexpectedFile, wantPath, "has an unsafe name") {
+		t.Fatalf("missing unexpected_file diagnostic message %q for %q: %v", "has an unsafe name", wantPath, diagnostics)
+	}
+	for _, d := range diagnostics {
+		if strings.Contains(d.Path, "\n") || strings.Contains(d.Path, "\r") {
+			t.Fatalf("diagnostic path contains newline: %q", d.Path)
+		}
+		if strings.Contains(d.Message, "\n") || strings.Contains(d.Message, "\r") {
+			t.Fatalf("diagnostic message contains newline: %q", d.Message)
+		}
+	}
 }
 
 func TestReadFieldsMatchDecodedRecord(t *testing.T) {
@@ -344,7 +507,7 @@ func TestReadDoesNotFollowOutsideSymlink(t *testing.T) {
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", validRequirement)
 	link := filepath.Join(target, "spec", "requirements", "escape.yaml")
 	if err := os.Symlink(outside, link); err != nil {
-		t.Fatal(err)
+		t.Skipf("Symlink is unavailable: %v", err)
 	}
 
 	snapshot, diagnostics := Read(target)
@@ -370,7 +533,7 @@ func TestReadDoesNotFollowStoreSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outsideDir, filepath.Join(target, "spec", "requirements")); err != nil {
-		t.Fatal(err)
+		t.Skipf("Symlink is unavailable: %v", err)
 	}
 
 	snapshot, diagnostics := Read(target)
@@ -502,6 +665,15 @@ func abs(t *testing.T, path string) string {
 func hasDiagnostic(diagnostics []Diagnostic, code, path string) bool {
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == code && diagnostic.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDiagnosticMessage(diagnostics []Diagnostic, code, path, substr string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code && diagnostic.Path == path && strings.Contains(diagnostic.Message, substr) {
 			return true
 		}
 	}

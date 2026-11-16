@@ -13,7 +13,9 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/redhat-et/protobot/validator/internal/records"
@@ -32,6 +34,10 @@ const (
 	CodeUnexpectedFile = "layout.unexpected_file"
 	CodeParseFailed    = "layout.parse_failed"
 )
+
+// maxYAMLBytes is the maximum size of a requirement or interface YAML
+// record. Larger files are rejected before the contents are parsed.
+const maxYAMLBytes = 1 << 20
 
 // Diagnostic is a deterministic finding about one path in the checkout.
 type Diagnostic struct {
@@ -110,9 +116,13 @@ func loadDir[T any](root *os.Root, relative string, decode func([]byte) (T, map[
 	var diagnostics []Diagnostic
 	for _, entry := range entries {
 		name := entry.Name()
-		entryRel := path.Join(relative, name)
+		entryName := name
+		if hasControl(name) {
+			entryName = strconv.Quote(name)
+		}
+		entryRel := path.Join(relative, entryName)
 		if !safeEntryName(name) {
-			diagnostics = append(diagnostics, diagnostic(CodeUnexpectedFile, entryRel, "is not a regular YAML record"))
+			diagnostics = append(diagnostics, diagnostic(CodeUnexpectedFile, entryRel, "has an unsafe name"))
 			continue
 		}
 		document, failure := loadEntry(root, entryRel, decode)
@@ -144,10 +154,26 @@ func loadEntry[T any](root *os.Root, relative string, decode func([]byte) (T, ma
 		d := diagnostic(CodeUnexpectedFile, relative, "is not a YAML record")
 		return Document[T]{}, &d
 	}
+	if info.Size() > maxYAMLBytes {
+		d := diagnostic(CodeReadFailed, relative, "YAML file exceeds the 1 MiB limit")
+		return Document[T]{}, &d
+	}
 
-	data, err := root.ReadFile(osPath)
+	file, err := root.Open(osPath)
 	if err != nil {
 		d := diagnostic(CodeReadFailed, relative, fmt.Sprintf("cannot read file: %s", err))
+		return Document[T]{}, &d
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maxYAMLBytes+1))
+	if err != nil {
+		d := diagnostic(CodeReadFailed, relative, fmt.Sprintf("cannot read file: %s", err))
+		return Document[T]{}, &d
+	}
+	// Guard against files that grew between stat and read, or where stat
+	// reported an inaccurate size.
+	if int64(len(data)) > maxYAMLBytes {
+		d := diagnostic(CodeReadFailed, relative, "YAML file exceeds the 1 MiB limit")
 		return Document[T]{}, &d
 	}
 	value, fields, err := decode(data)
@@ -168,7 +194,19 @@ func safeEntryName(name string) bool {
 	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
 		return false
 	}
+	if hasControl(name) {
+		return false
+	}
 	return filepath.Base(name) == name
+}
+
+func hasControl(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeRecord[T any](data []byte) (T, map[string]bool, error) {
@@ -284,8 +322,17 @@ func collectFields(node *yaml.Node, location string, fields map[string]bool) {
 	}
 }
 
+var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
 func diagnostic(code, path, message string) Diagnostic {
-	return Diagnostic{Code: code, Path: path, Message: message}
+	if hasControl(path) {
+		path = strconv.Quote(path)
+	}
+	return Diagnostic{
+		Code:    code,
+		Path:    path,
+		Message: lineBreakReplacer.Replace(message),
+	}
 }
 
 func sortDiagnostics(diagnostics []Diagnostic) {
