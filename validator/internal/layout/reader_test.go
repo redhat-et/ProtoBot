@@ -671,13 +671,18 @@ func TestSafeEntryNameRejectsControlCharacters(t *testing.T) {
 		"bad\x00name.yaml",
 		"bad\x1fname.yaml",
 		"bad\x7fname.yaml",
+		"bad\x85name.yaml",
+		"bad\u2028name.yaml",
+		"bad\u2029name.yaml",
+		"bad\u200bname.yaml",
+		"bad\u202ename.yaml",
 	} {
-		if safeEntryName(name) {
-			t.Errorf("safeEntryName(%q) = true, want false", name)
+		if SafeEntryName(name) {
+			t.Errorf("SafeEntryName(%q) = true, want false", name)
 		}
 	}
-	if !safeEntryName("good-name.yaml") {
-		t.Errorf("safeEntryName(%q) = false, want true", "good-name.yaml")
+	if !SafeEntryName("good-name.yaml") {
+		t.Errorf("SafeEntryName(%q) = false, want true", "good-name.yaml")
 	}
 }
 

@@ -178,7 +178,7 @@ func tagsOnLine(relative string, line int, text string, knownIDs map[string]stru
 
 func hasControl(s string) bool {
 	for _, r := range s {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Cf, r) {
 			return true
 		}
 	}
