@@ -157,9 +157,7 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	dir := t.TempDir()
 	slash := dir + string(os.PathSeparator)
 	link := filepath.Join(t.TempDir(), "checkout")
-	if err := os.Symlink(dir, link); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
+	symlinkErr := os.Symlink(dir, link)
 	relParent := t.TempDir()
 	relName := "rel-target"
 	if err := os.Mkdir(filepath.Join(relParent, relName), 0o755); err != nil {
@@ -196,6 +194,9 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "directory symlink" && symlinkErr != nil {
+				t.Skipf("Symlink is unavailable: %v", symlinkErr)
+			}
 			if tc.chdir != "" {
 				t.Chdir(tc.chdir)
 			}
@@ -271,12 +272,8 @@ func TestRunTargetIsFile(t *testing.T) {
 
 func TestRunValidSpecRecords(t *testing.T) {
 	target := t.TempDir()
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-status: active
-`)
-	writeSpecFile(t, target, "spec/interfaces/cli.yaml", "name: cli\nkind: cli\ndescription: Validator command line.\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", completeRequirementYAML())
+	writeSpecFile(t, target, "spec/interfaces/cli.yaml", completeInterfaceYAML())
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -292,21 +289,36 @@ func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00000.yaml", `id: REQ-API-00000
 type: ubiquitous
 text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: retired
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
 text: The service shall log requests.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: active
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
 type: ubiquitous
 text: The service shall expose metrics.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: active
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: depends-on
     target: REQ-API-00001
@@ -332,6 +344,10 @@ func TestRunAcceptsResolvedReferences(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
 text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: retired
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
@@ -519,12 +535,60 @@ func TestRunEARSShapeDiagnostics(t *testing.T) {
 
 func TestRunValidEARSTypes(t *testing.T) {
 	target := t.TempDir()
-	writeSpecFile(t, target, "spec/requirements/REQ-UBI-00001.yaml", "id: REQ-UBI-00001\ntype: ubiquitous\ntext: The service shall exist.\nstatus: active\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-EVT-00001.yaml", "id: REQ-EVT-00001\ntype: event-driven\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-STA-00001.yaml", "id: REQ-STA-00001\ntype: state-driven\ntext: While maintenance mode is active, the service shall reject writes.\nstatus: active\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-UNW-00001.yaml", "id: REQ-UNW-00001\ntype: unwanted-behavior\ntext: If a token expires, then the service shall reject the request.\nstatus: active\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-OPT-00001.yaml", "id: REQ-OPT-00001\ntype: optional-feature\ntext: Where caching is enabled, the service shall use a cache.\nstatus: active\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-CPX-00001.yaml", "id: REQ-CPX-00001\ntype: complex\ntext: While maintenance mode is active, when a user writes, the service shall reject the request.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-UBI-00001.yaml", `id: REQ-UBI-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-EVT-00001.yaml", `id: REQ-EVT-00001
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-STA-00001.yaml", `id: REQ-STA-00001
+type: state-driven
+text: While maintenance mode is active, the service shall reject writes.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-UNW-00001.yaml", `id: REQ-UNW-00001
+type: unwanted-behavior
+text: If a token expires, then the service shall reject the request.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-OPT-00001.yaml", `id: REQ-OPT-00001
+type: optional-feature
+text: Where caching is enabled, the service shall use a cache.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-CPX-00001.yaml", `id: REQ-CPX-00001
+type: complex
+text: While maintenance mode is active, when a user writes, the service shall reject the request.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -540,6 +604,10 @@ func TestRunSkipsRetiredRequirementsFromEARSShapeCheck(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-RET-00001.yaml", `id: REQ-RET-00001
 type: ubiquitous
 text: Invalid text without any obligation.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: retired
 `)
 
@@ -577,6 +645,9 @@ status: active
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: depends-on
     target: REQ-API-00001
@@ -601,6 +672,10 @@ status: active
 	}
 	if !strings.Contains(stderr, "blocks") {
 		t.Fatalf("stderr %q omitted undeclared type", stderr)
+	}
+	wantPrefix := "validator: relationship.invalid_type: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
 }
 
@@ -643,14 +718,14 @@ func TestRunTestTagReferenceResolution(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("unresolved tags code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "tests/unknown.feature:1:") {
-		t.Fatalf("stderr %q omitted unknown-tag path and line", stderr)
+	if !strings.Contains(stderr, "validator: testtags.unresolved: tests/unknown.feature:1:") {
+		t.Fatalf("stderr %q omitted testtags.unresolved code for unknown tag", stderr)
 	}
 	if !strings.Contains(stderr, "REQ-UNKNOWN") {
 		t.Fatalf("stderr %q omitted unknown requirement ID", stderr)
 	}
-	if !strings.Contains(stderr, "tests/misspelled.feature:1:") {
-		t.Fatalf("stderr %q omitted misspelled-tag path and line", stderr)
+	if !strings.Contains(stderr, "validator: testtags.unresolved: tests/misspelled.feature:1:") {
+		t.Fatalf("stderr %q omitted testtags.unresolved code for misspelled tag", stderr)
 	}
 	if !strings.Contains(stderr, "REQ-API-0000l") {
 		t.Fatalf("stderr %q omitted misspelled requirement ID", stderr)
@@ -662,6 +737,9 @@ func TestRunRejectsRelationshipCycles(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: depends-on
     target: REQ-API-00002
@@ -670,6 +748,9 @@ status: active
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /ready, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: depends-on
     target: REQ-API-00001
@@ -696,8 +777,15 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
+	if !strings.Contains(stderr, "layout.unexpected_file") {
+		t.Fatalf("stderr %q omitted diagnostic code", stderr)
+	}
 	if !strings.Contains(stderr, "notes.txt") {
 		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	wantPrefix := "validator: layout.unexpected_file: spec/requirements/notes.txt:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
 }
 
@@ -712,6 +800,9 @@ status: active
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
 type: event-driven
 text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
 relationships:
   - type: conflicts-with
     target: REQ-API-00004
@@ -731,6 +822,37 @@ status: active
 	if !strings.Contains(stderr, "conflicts-with") {
 		t.Fatalf("stderr %q omitted legacy type", stderr)
 	}
+	wantLayoutPrefix := "validator: layout.unexpected_file: spec/requirements/notes.txt:"
+	if !strings.Contains(stderr, wantLayoutPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantLayoutPrefix)
+	}
+	wantRelPrefix := "validator: relationship.invalid_type: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantRelPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantRelPrefix)
+	}
+}
+
+func TestRunRejectsForgedNestedPathKey(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+relationships[0].type: depends-on
+status: active
+`)
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\nkind: http\ndescription: Health endpoint\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want exitFailure", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
 }
 
 func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
@@ -741,8 +863,85 @@ func TestRunLayoutDiagnosticsNullDocument(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
-		t.Fatalf("stderr %q omitted offending path", stderr)
+	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+}
+
+func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [1]\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
+	}
+	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00001.yaml:"
+	if !strings.HasPrefix(lines[0], wantPrefix) {
+		t.Fatalf("stderr line %q omitted %q", lines[0], wantPrefix)
+	}
+}
+
+func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
+	target := t.TempDir()
+	reqDir := filepath.Join(target, "spec", "requirements")
+	if err := os.MkdirAll(reqDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	injectedName := "a\n::error::injected.yaml"
+	filePath := filepath.Join(reqDir, injectedName)
+	if err := os.WriteFile(filePath, []byte("status: active\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantStderr := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
+	target := t.TempDir()
+	testsDir := filepath.Join(target, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	injectedName := "a\n::error::injected.feature"
+	filePath := filepath.Join(testsDir, injectedName)
+	if err := os.WriteFile(filePath, []byte("@req:REQ-UNKNOWN\nFeature: Injected\n"), 0o600); err != nil {
+		t.Skipf("filesystem does not support newlines in filenames: %v", err)
+	}
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantStderr := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\"\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestPrintDiagnosticSanitizesLineBreaks(t *testing.T) {
+	var buf bytes.Buffer
+	printDiagnostic(&buf, "relationship.invalid_type", "spec/requirements/a\nb.yaml", "unsupported relationship type\nmulti line\r\nmessage")
+	got := buf.String()
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %q", len(lines), got)
+	}
+	want := "validator: relationship.invalid_type: spec/requirements/a b.yaml: unsupported relationship type multi line message\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
@@ -808,6 +1007,105 @@ func moduleRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(file), "..", "..")
 }
 
+func TestRunRejectsMissingRequiredFields(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "id: REQ-API-00002\n")
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, field := range []string{"type", "text", "applies_to", "relationships", "status", "kind", "description"} {
+		if !strings.Contains(stderr, field) {
+			t.Errorf("stderr %q omitted missing field %q", stderr, field)
+		}
+	}
+}
+
+func TestRunRejectsInvalidStatus(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: implemented
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "implemented") {
+		t.Fatalf("stderr %q omitted invalid status", stderr)
+	}
+}
+
+func TestRunRejectsLegacyMetadata(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", completeRequirementYAML()+`verification:
+  mode: isolated-interface
+provenance: user-authored
+created: "2026-01-01T00:00:00Z"
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, field := range []string{"verification", "provenance", "created"} {
+		if !strings.Contains(stderr, field) {
+			t.Errorf("stderr %q omitted legacy field %q", stderr, field)
+		}
+	}
+}
+
+func TestRunReportsBothLayoutAndSchemaDiagnostics(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+status: draft
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted schema diagnostic path", stderr)
+	}
+	if !strings.Contains(stderr, "draft") {
+		t.Fatalf("stderr %q omitted invalid status", stderr)
+	}
+}
+
+func completeRequirementYAML() string {
+	return `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`
+}
+
+func completeInterfaceYAML() string {
+	return "name: cli\nkind: cli\ndescription: Validator command line.\n"
+}
+
 func writeSpecFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
@@ -820,5 +1118,5 @@ func writeSpecFile(t *testing.T, root, rel, content string) {
 }
 
 func requirementYAML(id, status string) string {
-	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\nstatus: " + status + "\n"
+	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\nstatus: " + status + "\napplies_to:\n  scopes:\n    - api\nrelationships: []\n"
 }

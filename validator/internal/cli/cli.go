@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/ears"
@@ -77,27 +76,25 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	snapshot, diagnostics := layout.Read(opts.target)
-	findings := make([]finding, 0, len(diagnostics)+len(snapshot.Requirements))
+	failed := len(diagnostics) > 0
 	for _, diagnostic := range diagnostics {
-		findings = append(findings, finding{path: diagnostic.Path, code: diagnostic.Code, message: diagnostic.Message})
-	}
-	for _, diagnostic := range ears.CheckAll(requirementStatements(snapshot)) {
-		findings = append(findings, finding{path: diagnostic.Path, code: diagnostic.Code, message: diagnostic.Message})
-	}
-	failed := len(findings) > 0
-	if len(findings) > 0 {
-		sortFindings(findings)
-		for _, item := range findings {
-			_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", item.path, item.message)
-		}
+		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 	}
 	for _, diagnostic := range specvalidation.Validate(snapshot, diagnostics...) {
 		failed = true
-		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
+		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+	}
+	for _, diagnostic := range ears.CheckAll(requirementStatements(snapshot)) {
+		failed = true
+		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 	}
 	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
 		failed = true
-		_, _ = io.WriteString(stderr, formatTagDiagnostic(finding))
+		targetPath := finding.Path
+		if finding.Line > 0 {
+			targetPath = fmt.Sprintf("%s:%d", finding.Path, finding.Line)
+		}
+		printDiagnostic(stderr, finding.Code, targetPath, finding.Message)
 	}
 	if failed {
 		return exitFailure
@@ -162,6 +159,16 @@ func optionValue(args []string, i int) (string, int, bool) {
 	return "", i + 1, false
 }
 
+var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+func sanitizeDiagnosticField(s string) string {
+	return lineBreakReplacer.Replace(s)
+}
+
+func printDiagnostic(w io.Writer, code, path, message string) {
+	_, _ = fmt.Fprintf(w, "validator: %s: %s: %s\n", code, sanitizeDiagnosticField(path), sanitizeDiagnosticField(message))
+}
+
 func usageError(stderr io.Writer, message string) int {
 	_, _ = fmt.Fprintf(stderr, "validator: %s\n\n%s", message, usage)
 	return exitUsage
@@ -182,20 +189,6 @@ func requirementIDs(snapshot layout.Snapshot) map[string]struct{} {
 	}
 	return ids
 }
-
-func formatTagDiagnostic(finding testtags.Diagnostic) string {
-	if finding.Line > 0 {
-		return fmt.Sprintf("validator: %s:%d: %s\n", finding.Path, finding.Line, finding.Message)
-	}
-	return fmt.Sprintf("validator: %s: %s\n", finding.Path, finding.Message)
-}
-
-type finding struct {
-	path    string
-	code    string
-	message string
-}
-
 func requirementStatements(snapshot layout.Snapshot) []ears.Statement {
 	statements := make([]ears.Statement, 0, len(snapshot.Requirements))
 	for _, document := range snapshot.Requirements {
@@ -209,17 +202,4 @@ func requirementStatements(snapshot layout.Snapshot) []ears.Statement {
 		})
 	}
 	return statements
-}
-
-func sortFindings(findings []finding) {
-	sort.SliceStable(findings, func(i, j int) bool {
-		left, right := findings[i], findings[j]
-		if left.path != right.path {
-			return left.path < right.path
-		}
-		if left.code != right.code {
-			return left.code < right.code
-		}
-		return left.message < right.message
-	})
 }

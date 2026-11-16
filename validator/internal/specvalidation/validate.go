@@ -21,7 +21,8 @@ type Diagnostic struct {
 // suppresses cascading reference diagnostics for target records that
 // failed to load.
 func Validate(snapshot layout.Snapshot, layoutDiagnostics ...layout.Diagnostic) []Diagnostic {
-	diagnostics := validateRelationshipTypes(snapshot.Requirements)
+	diagnostics := validateRecordSchema(snapshot)
+	diagnostics = append(diagnostics, validateRelationshipTypes(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateReferences(snapshot, layoutDiagnostics...)...)
 	sortDiagnostics(diagnostics)

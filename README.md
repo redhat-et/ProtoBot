@@ -86,7 +86,7 @@ validator/
   internal/ears/            # EARS shape and single-shall validation
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
-  internal/specvalidation/  # relationship types and reference resolution
+  internal/specvalidation/  # record schema, relationship types, and reference resolution
   internal/testtags/        # Gherkin @req:<ID> tag reference resolution
 wms/
   go.mod
