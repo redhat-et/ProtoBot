@@ -1411,4 +1411,3 @@ func requirementYAML(id string, status ...string) string {
 	}
 	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\napplies_to:\n  scopes:\n    - api\nrelationships: []\nstatus: " + st + "\n"
 }
-}

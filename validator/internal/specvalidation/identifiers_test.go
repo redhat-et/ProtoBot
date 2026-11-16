@@ -1,8 +1,6 @@
 package specvalidation
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -108,7 +106,7 @@ func TestCompareBaseRejectsDeletion(t *testing.T) {
 		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
 	})
 	target := snapshotFromIDs(nil)
-	diagnostics := CompareBase(target, base)
+	diagnostics := CompareBase(target, base, nil)
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostics=%v, want 1", diagnostics)
 	}
@@ -139,7 +137,7 @@ func TestCompareBaseAllowsRetirement(t *testing.T) {
 			},
 		},
 	}
-	if diagnostics := CompareBase(target, base); len(diagnostics) != 0 {
+	if diagnostics := CompareBase(target, base, nil); len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v, want none", diagnostics)
 	}
 }
@@ -151,7 +149,7 @@ func TestCompareBaseRejectsReuse(t *testing.T) {
 	target := snapshotFromIDs([]idPath{
 		{path: "spec/requirements/other.yaml", id: "REQ-API-00001"},
 	})
-	diagnostics := CompareBase(target, base)
+	diagnostics := CompareBase(target, base, nil)
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostics=%v, want 1", diagnostics)
 	}
@@ -178,7 +176,7 @@ func TestCompareBaseAllowsNewIDs(t *testing.T) {
 		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
 		{path: "spec/requirements/REQ-API-00002.yaml", id: "REQ-API-00002"},
 	})
-	if diagnostics := CompareBase(target, base); len(diagnostics) != 0 {
+	if diagnostics := CompareBase(target, base, nil); len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v, want none", diagnostics)
 	}
 }
@@ -198,7 +196,7 @@ func TestCompareBaseValidatesBaseIDs(t *testing.T) {
 		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
 		{path: "spec/requirements/valid.yaml", id: "REQ-VAL-00001"},
 	})
-	if diagnostics := CompareBase(target, base); len(diagnostics) != 0 {
+	if diagnostics := CompareBase(target, base, nil); len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v, want none (working-tree fixes should pass CompareBase)", diagnostics)
 	}
 
@@ -207,7 +205,7 @@ func TestCompareBaseValidatesBaseIDs(t *testing.T) {
 		{path: "spec/requirements/bad.yaml", id: "REQ-FIX-00001"},
 		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
 	})
-	delDiags := CompareBase(targetDeleted, base)
+	delDiags := CompareBase(targetDeleted, base, nil)
 	if len(delDiags) != 1 || delDiags[0].Code != CodeDeleted || delDiags[0].Path != "spec/requirements/valid.yaml" {
 		t.Fatalf("delDiags=%v, want CodeDeleted for valid.yaml", delDiags)
 	}
@@ -217,7 +215,7 @@ func TestCompareBaseValidatesBaseIDs(t *testing.T) {
 		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
 		{path: "spec/requirements/valid.yaml", id: "REQ-VAL-00001"},
 	})
-	delBadDiags := CompareBase(targetDeletedBad, base)
+	delBadDiags := CompareBase(targetDeletedBad, base, nil)
 	if len(delBadDiags) != 1 || delBadDiags[0].Code != CodeDeleted || delBadDiags[0].Path != "spec/requirements/bad.yaml" {
 		t.Fatalf("delBadDiags=%v, want CodeDeleted for bad.yaml", delBadDiags)
 	}
@@ -231,7 +229,7 @@ func TestCompareBaseValidatesBaseIDs(t *testing.T) {
 		{path: "spec/requirements/other.yaml", id: "REQ-VAL-00001"},
 		{path: "spec/requirements/dup1.yaml", id: "REQ-DUP-00001"},
 	})
-	reuseDiags := CompareBase(targetReused, base)
+	reuseDiags := CompareBase(targetReused, base, nil)
 	if len(reuseDiags) != 1 || reuseDiags[0].Code != CodeReusedID || reuseDiags[0].Path != "spec/requirements/other.yaml" {
 		t.Fatalf("reuseDiags=%v, want CodeReusedID for other.yaml", reuseDiags)
 	}
@@ -242,7 +240,7 @@ func TestCompareBaseRejectsDeletedInvalidBaseID(t *testing.T) {
 		{path: "spec/requirements/bad.yaml", id: "REQ-api-00001"},
 	})
 	target := snapshotFromIDs(nil)
-	diagnostics := CompareBase(target, base)
+	diagnostics := CompareBase(target, base, nil)
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostics=%v, want 1", diagnostics)
 	}
@@ -265,7 +263,7 @@ func TestCompareBaseRejectsInPlaceIDEdit(t *testing.T) {
 	target := snapshotFromIDs([]idPath{
 		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00002"},
 	})
-	diagnostics := CompareBase(target, base)
+	diagnostics := CompareBase(target, base, nil)
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostics=%v, want 1", diagnostics)
 	}
@@ -282,22 +280,52 @@ func TestCompareBaseRejectsInPlaceIDEdit(t *testing.T) {
 }
 
 func TestCompareBaseSuppressesDeletionWhenFileStillPresentOnDisk(t *testing.T) {
-	dir := t.TempDir()
-	reqPath := filepath.Join(dir, "spec", "requirements", "REQ-API-00001.yaml")
-	if err := os.MkdirAll(filepath.Dir(reqPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(reqPath, []byte("id: [\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	base := snapshotFromIDs([]idPath{
 		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
 	})
-	target := layout.Snapshot{Root: dir}
-	diagnostics := CompareBase(target, base)
+	target := layout.Snapshot{}
+	targetDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/REQ-API-00001.yaml", Message: "yaml: parse error"},
+	}
+	diagnostics := CompareBase(target, base, targetDiags)
 	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics=%v, want none (file still present on disk)", diagnostics)
+		t.Fatalf("diagnostics=%v, want none (file still present in target diagnostics)", diagnostics)
+	}
+}
+
+func TestCompareBaseRejectsDeletedUnparsedBaseFile(t *testing.T) {
+	base := layout.Snapshot{}
+	target := layout.Snapshot{}
+	baseDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken.yaml", Message: "yaml: malformed"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1 deleted diagnostic", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Code != CodeDeleted {
+		t.Errorf("code=%q, want %q", got.Code, CodeDeleted)
+	}
+	if got.Path != "spec/requirements/broken.yaml" {
+		t.Errorf("path=%q, want %q", got.Path, "spec/requirements/broken.yaml")
+	}
+	if !strings.Contains(got.Message, "removed") {
+		t.Errorf("message %q omitted 'removed'", got.Message)
+	}
+}
+
+func TestCompareBaseSuppressesDeletionForRepairedUnparsedBaseFile(t *testing.T) {
+	base := layout.Snapshot{}
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/broken.yaml", id: "REQ-FIX-00001"},
+	})
+	baseDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken.yaml", Message: "yaml: malformed"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v, want none (unparsed base file was repaired in target)", diagnostics)
 	}
 }
 
@@ -307,8 +335,8 @@ func TestCompareBaseIsDeterministic(t *testing.T) {
 		{path: "spec/requirements/REQ-A-00001.yaml", id: "REQ-A-00001"},
 	})
 	target := snapshotFromIDs(nil)
-	first := CompareBase(target, base)
-	second := CompareBase(target, base)
+	first := CompareBase(target, base, nil)
+	second := CompareBase(target, base, nil)
 	if len(first) != len(second) {
 		t.Fatalf("repeated comparison changed count: %d vs %d", len(first), len(second))
 	}

@@ -6,11 +6,11 @@ deterministic, network-free Go command. It reads the checkout at
 does not contact a tracker, a network service, or an external daemon.
 
 The design is the [ProtoBot V2 validator][design]. This module
-implements the command line, spec directory reader, record schema
-checks, relationship-type allowlist, relationship acyclicity,
-reference resolution, and requirement identifier checks (issues #381, #383, #385, #387, #388, #390,
-#395, and #402). The command line accepts the checkout path and comparison
-base. It reads requirement and interface YAML records from
+implements the command line, spec directory reader, record schema checks,
+relationship-type allowlist, relationship acyclicity, reference resolution,
+and requirement identifier checks (issues #381, #383, #385, #387,
+and #388, #390, #395, #402). The command line accepts the checkout path
+and comparison base. It reads requirement and interface YAML records from
 `spec/requirements/` and `spec/interfaces/` in the target checkout.
 Missing directories are treated as empty. Unreadable files, non-YAML
 entries, `.yaml` records larger than 1 MiB, and malformed YAML produce
@@ -86,6 +86,13 @@ non-directory `--target`) print an uncoded message to stderr:
 validator: <message>
 ```
 
+Revision-level diagnostics (exit status 1, such as an unresolvable
+comparison base or failed Git tree read) omit the path:
+
+```text
+validator: <code>: <message>
+```
+
 Layout, specification, and test-tag diagnostics (exit status 1) are
 written to stderr, one per line:
 
@@ -98,14 +105,21 @@ diagnostic applies to a specific line. Layout diagnostics quote entry
 names containing control characters (e.g.,
 `spec/requirements/"a\n::error::injected.yaml"`). At the CLI print
 boundary, line breaks in diagnostic paths and messages are replaced with
-spaces to ensure single-line output. Check the exit status first.
-A line without a `<code>` field is not a diagnostic.
+spaces to ensure single-line output. Informational notes regarding historical
+comparison base parse warnings (which do not cause a non-zero exit when the
+working tree repairs the file) are prefixed with
+`validator: note: comparison base <ref>: ...` and are not diagnostics.
+Check the exit status first. A line without a `<code>` field is not a
+diagnostic.
 
 This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
-`layout.parse_failed`), specification check codes (such as
-`relationship.invalid_type`, `relationship.cycle`), and test-tag codes
-(`testtags.read_failed`, `testtags.unexpected_file`,
+`layout.parse_failed`), revision check codes (`revision.not_found`,
+`revision.read_failed`), requirement check codes
+(`requirement.invalid_id`, `requirement.duplicate_id`,
+`requirement.deleted`, `requirement.reused_id`), specification check
+codes (such as `relationship.invalid_type`, `relationship.cycle`), and
+test-tag codes (`testtags.read_failed`, `testtags.unexpected_file`,
 `testtags.unresolved`). A `.yaml` record larger than 1 MiB produces
 `layout.read_failed`.
 

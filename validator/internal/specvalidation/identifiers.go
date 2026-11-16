@@ -2,8 +2,6 @@ package specvalidation
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -64,13 +62,18 @@ func validateRequirementIDs(requirements []layout.Document[records.Requirement])
 // CompareBase rejects deletion or reuse of requirement IDs that already
 // exist in the comparison base. Format and uniqueness of the target
 // snapshot are the caller's responsibility via Validate.
-func CompareBase(target, base layout.Snapshot) []Diagnostic {
-	diagnostics := validateDeletionAndReuse(target, base)
+// Target layout diagnostics are used to determine whether an unparsed file
+// still exists on disk without host I/O.
+// Base diagnostics represent comparison-base files that could not be parsed;
+// if any such file is absent from the target, a deletion diagnostic is emitted.
+func CompareBase(target, base layout.Snapshot, targetDiagnostics []layout.Diagnostic, baseDiagnostics ...layout.Diagnostic) []Diagnostic {
+	diagnostics := validateDeletionAndReuse(target, base, targetDiagnostics)
+	diagnostics = append(diagnostics, validateUnparsedBaseDeletions(target, targetDiagnostics, baseDiagnostics)...)
 	sortDiagnostics(diagnostics)
 	return diagnostics
 }
 
-func validateDeletionAndReuse(target, base layout.Snapshot) []Diagnostic {
+func validateDeletionAndReuse(target, base layout.Snapshot, targetDiagnostics []layout.Diagnostic) []Diagnostic {
 	targetDocByPath := make(map[string]layout.Document[records.Requirement], len(target.Requirements))
 	targetRawIDs := make(map[string][]string, len(target.Requirements))
 	for _, doc := range target.Requirements {
@@ -112,7 +115,7 @@ func validateDeletionAndReuse(target, base layout.Snapshot) []Diagnostic {
 					})
 					continue
 				}
-				if !targetPathExists(target, path, targetDocByPath) {
+				if !targetPathExists(targetDocByPath, targetDiagnostics, path) {
 					seenDeletedPaths[path] = true
 					diagnostics = append(diagnostics, Diagnostic{
 						Code:  CodeDeleted,
@@ -127,7 +130,7 @@ func validateDeletionAndReuse(target, base layout.Snapshot) []Diagnostic {
 				}
 				// Otherwise: path still exists in target tree (parsed or not),
 				// but did not parse with a different valid ID.
-				// Per Finding 2: do not emit requirement.deleted; leave layout parse diagnostic as the failure.
+				// If path exists in target tree, suppress requirement.deleted and let layout parse diagnostic report the error.
 			}
 			continue
 		}
@@ -165,7 +168,7 @@ func validateDeletionAndReuse(target, base layout.Snapshot) []Diagnostic {
 		// If the file still exists in the target tree (e.g. fixed in-place to
 		// a valid ID, left as-is, or unparseable), do not emit requirement.deleted.
 		// Existing tests require in-place format fixes to pass CompareBase.
-		if targetPathExists(target, path, targetDocByPath) {
+		if targetPathExists(targetDocByPath, targetDiagnostics, path) {
 			continue
 		}
 
@@ -189,12 +192,42 @@ func validateDeletionAndReuse(target, base layout.Snapshot) []Diagnostic {
 	return diagnostics
 }
 
-func targetPathExists(target layout.Snapshot, relPath string, targetDocByPath map[string]layout.Document[records.Requirement]) bool {
+func validateUnparsedBaseDeletions(target layout.Snapshot, targetDiagnostics []layout.Diagnostic, baseDiagnostics []layout.Diagnostic) []Diagnostic {
+	if len(baseDiagnostics) == 0 {
+		return nil
+	}
+	targetDocByPath := make(map[string]layout.Document[records.Requirement], len(target.Requirements))
+	for _, doc := range target.Requirements {
+		targetDocByPath[doc.Path] = doc
+	}
+	seen := make(map[string]bool)
+	var diagnostics []Diagnostic
+	for _, diag := range baseDiagnostics {
+		if diag.Path == "" || seen[diag.Path] {
+			continue
+		}
+		if !targetPathExists(targetDocByPath, targetDiagnostics, diag.Path) {
+			seen[diag.Path] = true
+			diagnostics = append(diagnostics, Diagnostic{
+				Code:  CodeDeleted,
+				Path:  diag.Path,
+				Field: "id",
+				Message: fmt.Sprintf(
+					"requirement ID could not be read from comparison base and file was removed (%s)",
+					diag.Message,
+				),
+			})
+		}
+	}
+	return diagnostics
+}
+
+func targetPathExists(targetDocByPath map[string]layout.Document[records.Requirement], targetDiagnostics []layout.Diagnostic, relPath string) bool {
 	if _, ok := targetDocByPath[relPath]; ok {
 		return true
 	}
-	if target.Root != "" {
-		if _, err := os.Stat(filepath.Join(target.Root, filepath.FromSlash(relPath))); err == nil {
+	for _, diag := range targetDiagnostics {
+		if diag.Path == relPath {
 			return true
 		}
 	}
