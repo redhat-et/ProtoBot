@@ -59,6 +59,7 @@ type Document[T any] struct {
 }
 
 // Snapshot is the requirement and interface records discovered in a checkout.
+// Root is the absolute path to the checkout directory.
 type Snapshot struct {
 	Root         string
 	Requirements []Document[records.Requirement]

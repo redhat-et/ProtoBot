@@ -15,7 +15,9 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 )
@@ -108,11 +110,16 @@ func walkDir(root *os.Root, relative string, knownIDs map[string]struct{}) []Dia
 	var diagnostics []Diagnostic
 	for _, entry := range entries {
 		name := entry.Name()
+		entryName := name
+		if hasControl(name) {
+			entryName = strconv.Quote(name)
+		}
+		child := path.Join(relative, entryName)
 		if !layout.SafeEntryName(name) {
+			diagnostics = append(diagnostics, diagnostic(CodeUnexpectedFile, child, 0, "has an unsafe name"))
 			continue
 		}
-		child := path.Join(relative, name)
-		diagnostics = append(diagnostics, walk(root, child, knownIDs, false)...)
+		diagnostics = append(diagnostics, walk(root, path.Join(relative, name), knownIDs, false)...)
 	}
 	return diagnostics
 }
@@ -167,6 +174,15 @@ func tagsOnLine(relative string, line int, text string, knownIDs map[string]stru
 		))
 	}
 	return diagnostics
+}
+
+func hasControl(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func diagnostic(code, path string, line int, message string) Diagnostic {

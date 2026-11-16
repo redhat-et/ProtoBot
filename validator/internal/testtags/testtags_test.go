@@ -329,3 +329,20 @@ func hasCodePath(diagnostics []Diagnostic, code, path string) bool {
 	}
 	return false
 }
+
+func TestCheckControlCharacterEntryNameRejected(t *testing.T) {
+	target := t.TempDir()
+	relFile := "tests/bad\x01.feature"
+	writeFile(t, target, relFile, "@req:NOPE-1\nFeature: Bad\n")
+
+	relDir := "tests/bad\x02dir/test.feature"
+	writeFile(t, target, relDir, "@req:NOPE-2\nFeature: InBadDir\n")
+
+	diagnostics := Check(target, known("REQ-API-00001"))
+	if !hasCodePath(diagnostics, CodeUnexpectedFile, "tests/\"bad\\x01.feature\"") {
+		t.Fatalf("missing unexpected_file diagnostic for bad feature file: %v", diagnostics)
+	}
+	if !hasCodePath(diagnostics, CodeUnexpectedFile, "tests/\"bad\\x02dir\"") {
+		t.Fatalf("missing unexpected_file diagnostic for bad directory: %v", diagnostics)
+	}
+}
