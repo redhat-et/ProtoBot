@@ -78,7 +78,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	for _, diagnostic := range diagnostics {
 		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
 	}
-	for _, diagnostic := range specvalidation.Validate(snapshot) {
+	for _, diagnostic := range specvalidation.Validate(snapshot, diagnostics...) {
 		failed = true
 		_, _ = fmt.Fprintf(stderr, "validator: %s: %s\n", diagnostic.Path, diagnostic.Message)
 	}
