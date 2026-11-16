@@ -5,9 +5,11 @@ package revision
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/gitcmd"
@@ -34,6 +36,7 @@ type treeEntry struct {
 	mode   string
 	object string
 	path   string
+	size   int64
 }
 
 const (
@@ -109,7 +112,7 @@ func resolveCommit(target, ref string) (string, error) {
 }
 
 func listRequirements(target, commit string) ([]treeEntry, error) {
-	out, err := gitOutput(target, "ls-tree", "-r", "--full-tree", "-z", commit, "--", layout.RequirementsDir)
+	out, err := gitOutput(target, "ls-tree", "-r", "--full-tree", "-z", "-l", commit, "--", layout.RequirementsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -147,13 +150,22 @@ func parseLsTree(rec []byte) (treeEntry, error) {
 		return treeEntry{}, fmt.Errorf("malformed ls-tree entry")
 	}
 	fields := bytes.Fields(meta)
-	if len(fields) != 3 {
+	if len(fields) != 4 {
 		return treeEntry{}, fmt.Errorf("malformed ls-tree entry")
+	}
+	var size int64
+	if string(fields[3]) != "-" {
+		var err error
+		size, err = strconv.ParseInt(string(fields[3]), 10, 64)
+		if err != nil {
+			return treeEntry{}, fmt.Errorf("malformed ls-tree entry size: %w", err)
+		}
 	}
 	return treeEntry{
 		mode:   string(fields[0]),
 		object: string(fields[2]),
 		path:   string(repoPath),
+		size:   size,
 	}, nil
 }
 
@@ -169,15 +181,68 @@ func materialize(repo, dest string, entries []treeEntry) error {
 		if err := root.MkdirAll(filepath.Dir(osPath), 0o700); err != nil {
 			return err
 		}
-		data, err := gitOutput(repo, "cat-file", "blob", entry.object)
+		if entry.size > layout.MaxYAMLBytes {
+			f, err := root.Create(osPath)
+			if err != nil {
+				return err
+			}
+			if err := f.Truncate(layout.MaxYAMLBytes + 1); err != nil {
+				_ = f.Close()
+				return err
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := catBlob(repo, entry.object)
 		if err != nil {
 			return err
+		}
+		if int64(len(data)) > layout.MaxYAMLBytes {
+			f, err := root.Create(osPath)
+			if err != nil {
+				return err
+			}
+			if err := f.Truncate(layout.MaxYAMLBytes + 1); err != nil {
+				_ = f.Close()
+				return err
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := root.WriteFile(osPath, data, 0o600); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func catBlob(repo, object string) ([]byte, error) {
+	cmd := gitcmd.Command("-C", repo, "cat-file", "blob", object)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(stdout, layout.MaxYAMLBytes+1))
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, err
+	}
+	if waitErr := cmd.Wait(); waitErr != nil {
+		if int64(len(data)) <= layout.MaxYAMLBytes {
+			return nil, fmt.Errorf("git cat-file failed: %s (%w)", stderr.String(), waitErr)
+		}
+	}
+	return data, nil
 }
 
 func safeRepoPath(p string) bool {

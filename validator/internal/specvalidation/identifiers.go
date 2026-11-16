@@ -223,7 +223,7 @@ func validateUnparsedBaseDeletions(target layout.Snapshot, targetDiagnostics []l
 				Path:  diag.Path,
 				Field: "id",
 				Message: fmt.Sprintf(
-					"requirement ID could not be read from comparison base and file was removed (%s)",
+					"Requirement ID could not be read from comparison base and file was removed (%s).",
 					diag.Message,
 				),
 			})

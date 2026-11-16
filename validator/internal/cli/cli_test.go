@@ -537,7 +537,7 @@ func TestRunEARSShapeDiagnostics(t *testing.T) {
 }
 
 func TestRunValidEARSTypes(t *testing.T) {
-	target := t.TempDir()
+	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-UBI-00001.yaml", `id: REQ-UBI-00001
 type: ubiquitous
 text: The service shall exist.

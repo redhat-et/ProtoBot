@@ -35,9 +35,11 @@ const (
 	CodeParseFailed    = "layout.parse_failed"
 )
 
-// maxYAMLBytes is the maximum size of a requirement or interface YAML
+// MaxYAMLBytes is the maximum size of a requirement or interface YAML
 // record. Larger files are rejected before the contents are parsed.
-const maxYAMLBytes = 1 << 20
+const MaxYAMLBytes = 1 << 20
+
+const maxYAMLBytes = MaxYAMLBytes
 
 // Diagnostic is a deterministic finding about one path in the checkout.
 type Diagnostic struct {

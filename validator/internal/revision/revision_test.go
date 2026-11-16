@@ -151,6 +151,27 @@ func TestGitOutputRejectsUnknownRef(t *testing.T) {
 	}
 }
 
+func TestReadOversizedBaseFile(t *testing.T) {
+	root := gitRepo(t)
+	oversized := make([]byte, layout.MaxYAMLBytes+10)
+	copy(oversized, "id: REQ-BIG-00001\ntext: ")
+	for i := len("id: REQ-BIG-00001\ntext: "); i < len(oversized)-1; i++ {
+		oversized[i] = 'a'
+	}
+	oversized[len(oversized)-1] = '\n'
+	writeFile(t, root, "spec/requirements/REQ-BIG-00001.yaml", string(oversized))
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "oversized")
+
+	_, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasCode(diagnostics, layout.CodeReadFailed) || !hasPath(diagnostics, "spec/requirements/REQ-BIG-00001.yaml") {
+		t.Fatalf("diagnostics=%v, want CodeReadFailed for oversized file", diagnostics)
+	}
+}
+
 func gitRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
