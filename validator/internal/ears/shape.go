@@ -35,17 +35,17 @@ type Statement struct {
 }
 
 var (
-	shallPattern = regexp.MustCompile(`\bshall\b`)
-	// Simple patterns follow the ADR-0002 templates with case-sensitive
-	// keywords so state-driven statements require "While" rather than
-	// "while" or undeclared aliases such as "During". (?s) lets a
-	// folded or literal YAML block that still contains newlines match.
+	shallPattern = regexp.MustCompile(`(?i)\bshall\b`)
+	// Simple patterns follow the ADR-0002 templates with case-insensitive
+	// regex matching. State-driven statements require "While" rather than
+	// undeclared aliases such as "During". (?s) lets a folded or literal
+	// YAML block that still contains newlines match.
 	earsPatterns = map[string]*regexp.Regexp{
-		records.TypeUbiquitous:       regexp.MustCompile(`(?s)^The .+ shall .+$`),
-		records.TypeEventDriven:      regexp.MustCompile(`(?s)^When .+, the .+ shall .+$`),
-		records.TypeStateDriven:      regexp.MustCompile(`(?s)^While .+, the .+ shall .+$`),
-		records.TypeUnwantedBehavior: regexp.MustCompile(`(?s)^If .+, then the .+ shall .+$`),
-		records.TypeOptionalFeature:  regexp.MustCompile(`(?s)^Where .+, the .+ shall .+$`),
+		records.TypeUbiquitous:       regexp.MustCompile(`(?is)^The .+ shall .+$`),
+		records.TypeEventDriven:      regexp.MustCompile(`(?is)^When .+, the .+ shall .+$`),
+		records.TypeStateDriven:      regexp.MustCompile(`(?is)^While .+, the .+ shall .+$`),
+		records.TypeUnwantedBehavior: regexp.MustCompile(`(?is)^If .+, then the .+ shall .+$`),
+		records.TypeOptionalFeature:  regexp.MustCompile(`(?is)^Where .+, the .+ shall .+$`),
 	}
 	// Complex trigger forms are case-insensitive: the canonical complex
 	// template places "when" mid-sentence. Each form counts once.
@@ -54,6 +54,14 @@ var (
 		regexp.MustCompile(`(?i)\bwhile\b`),
 		regexp.MustCompile(`(?i)\bwhere\b`),
 		regexp.MustCompile(`(?is)\bif\b.*\bthen\b`),
+	}
+	expectedForms = map[string]string{
+		records.TypeUbiquitous:       `"The <system> shall <response>"`,
+		records.TypeEventDriven:      `"When <trigger>, the <system> shall <response>"`,
+		records.TypeStateDriven:      `"While <state>, the <system> shall <response>"`,
+		records.TypeUnwantedBehavior: `"If <trigger>, then the <system> shall <response>"`,
+		records.TypeOptionalFeature:  `"Where <feature>, the <system> shall <response>"`,
+		records.TypeComplex:          `at least two distinct trigger keywords`,
 	}
 )
 
@@ -80,10 +88,14 @@ func Check(path, declaredType, text string) []Diagnostic {
 		return diagnostics
 	}
 	if !matchesPattern(declaredType, text) {
+		message := fmt.Sprintf("requirement text does not match the declared %s pattern", declaredType)
+		if expected, ok := expectedForms[declaredType]; ok {
+			message = fmt.Sprintf("%s; expected %s", message, expected)
+		}
 		diagnostics = append(diagnostics, Diagnostic{
 			Code:    CodePatternMismatch,
 			Path:    path,
-			Message: fmt.Sprintf("requirement text does not match the declared %s pattern", declaredType),
+			Message: message,
 		})
 	}
 	return diagnostics

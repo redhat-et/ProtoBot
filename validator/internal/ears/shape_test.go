@@ -21,6 +21,9 @@ func TestCheckAcceptsValidPatterns(t *testing.T) {
 		{name: "complex while-when", kind: records.TypeComplex, text: "While maintenance mode is active, when a user writes, the system shall reject the request."},
 		{name: "complex where-if", kind: records.TypeComplex, text: "Where auditing is enabled, if a token expires, then the service shall reject the request."},
 		{name: "event-driven folded newline", kind: records.TypeEventDriven, text: "When an unauthenticated client sends GET /health, the service shall return\nHTTP 200 with a JSON body whose status field is \"ok\"."},
+		{name: "event-driven CRLF newline", kind: records.TypeEventDriven, text: "When an unauthenticated client sends GET /health, the service shall return\r\nHTTP 200 with a JSON body whose status field is \"ok\"."},
+		{name: "capitalized Shall", kind: records.TypeUbiquitous, text: "The system Shall provide authentication."},
+		{name: "all-caps SHALL", kind: records.TypeUbiquitous, text: "The system SHALL provide authentication."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,12 +59,6 @@ func TestCheckRejectsShallCount(t *testing.T) {
 			kind: records.TypeUbiquitous,
 			text: "The system shall start and shall stop.",
 			want: 2,
-		},
-		{
-			name: "capitalized Shall does not count",
-			kind: records.TypeUbiquitous,
-			text: "The system Shall provide authentication.",
-			want: 0,
 		},
 		{
 			name: "shallot is not shall",
@@ -119,6 +116,9 @@ func TestCheckRejectsTypeMismatch(t *testing.T) {
 			if !strings.Contains(finding.Message, tc.kind) {
 				t.Fatalf("message %q omitted declared type", finding.Message)
 			}
+			if !strings.Contains(finding.Message, "expected") {
+				t.Fatalf("message %q omitted expected form", finding.Message)
+			}
 		})
 	}
 }
@@ -135,7 +135,6 @@ func TestCheckStateDrivenRequiresWhile(t *testing.T) {
 		text string
 	}{
 		{name: "During alias", text: "During maintenance mode, the system shall reject writes."},
-		{name: "lowercase while", text: "while maintenance mode is active, the system shall reject writes."},
 		{name: "WHEN alias of While", text: "When maintenance mode is active, the system shall reject writes."},
 	}
 	for _, tc := range cases {
@@ -176,7 +175,7 @@ func TestCheckRejectsUnrecognizedType(t *testing.T) {
 	}
 }
 
-func TestCheckSimplePatternsAreCaseSensitive(t *testing.T) {
+func TestCheckSimplePatternsAreCaseInsensitive(t *testing.T) {
 	cases := []struct {
 		name string
 		kind string
@@ -184,16 +183,33 @@ func TestCheckSimplePatternsAreCaseSensitive(t *testing.T) {
 	}{
 		{name: "lowercase the", kind: records.TypeUbiquitous, text: "the system shall provide authentication."},
 		{name: "lowercase when", kind: records.TypeEventDriven, text: "when a user logs in, the system shall issue a token."},
+		{name: "lowercase while", kind: records.TypeStateDriven, text: "while maintenance mode is active, the system shall reject writes."},
 		{name: "lowercase if", kind: records.TypeUnwantedBehavior, text: "if a token expires, then the system shall reject the request."},
 		{name: "lowercase where", kind: records.TypeOptionalFeature, text: "where caching is enabled, the system shall use a cache."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			diagnostics := Check("spec/requirements/REQ-CASE-00001.yaml", tc.kind, tc.text)
-			if lookup(diagnostics, CodePatternMismatch) == nil {
-				t.Fatalf("lowercase keyword was accepted: %+v", diagnostics)
+			if len(diagnostics) != 0 {
+				t.Fatalf("case-insensitive keyword was rejected: %+v", diagnostics)
 			}
 		})
+	}
+}
+
+func TestCheckEmptyText(t *testing.T) {
+	path := "spec/requirements/REQ-EMPTY-00001.yaml"
+	diagnostics := Check(path, records.TypeUbiquitous, "")
+	shallDiag := lookup(diagnostics, CodeShallCount)
+	if shallDiag == nil {
+		t.Fatalf("missing %s diagnostic: %+v", CodeShallCount, diagnostics)
+	}
+	if !strings.Contains(shallDiag.Message, "contains 0 occurrences") {
+		t.Fatalf("message %q omitted 0 occurrences", shallDiag.Message)
+	}
+	patternDiag := lookup(diagnostics, CodePatternMismatch)
+	if patternDiag == nil {
+		t.Fatalf("missing %s diagnostic: %+v", CodePatternMismatch, diagnostics)
 	}
 }
 

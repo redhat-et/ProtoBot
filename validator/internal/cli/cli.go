@@ -18,6 +18,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/ears"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/records"
 	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 	"github.com/redhat-et/protobot/validator/internal/testtags"
 )
@@ -198,6 +199,9 @@ type finding struct {
 func requirementStatements(snapshot layout.Snapshot) []ears.Statement {
 	statements := make([]ears.Statement, 0, len(snapshot.Requirements))
 	for _, document := range snapshot.Requirements {
+		if document.Record.Status == records.StatusRetired {
+			continue
+		}
 		statements = append(statements, ears.Statement{
 			Path: document.Path,
 			Type: document.Record.Type,

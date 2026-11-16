@@ -27,7 +27,8 @@ as known; unknown or misspelled IDs fail with line-level diagnostics.
 Requirement text is checked for exactly one `shall` and for a match
 against the declared EARS type (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
-State-driven statements require the keyword `While`. Schema,
+State-driven statements require the keyword `While`. Retired
+requirements are exempt from the EARS shape check. Schema,
 identifier, and remaining reference checks land in follow-on work.
 
 `--target` is used as given. The command does not apply

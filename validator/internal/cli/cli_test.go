@@ -476,12 +476,12 @@ func TestRunEARSShapeDiagnostics(t *testing.T) {
 		{
 			name:    "zero shall",
 			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service must return HTTP 200.\nstatus: active\n",
-			want:    "shall",
+			want:    "contains 0 occurrences",
 		},
 		{
 			name:    "multiple shall",
 			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service shall start and shall stop.\nstatus: active\n",
-			want:    "shall",
+			want:    "contains 2 occurrences",
 		},
 		{
 			name:    "type mismatch",
@@ -534,6 +534,24 @@ func TestRunValidEARSTypes(t *testing.T) {
 		t.Fatalf("stdout %q does not report ok", stdout)
 	}
 }
+
+func TestRunSkipsRetiredRequirementsFromEARSShapeCheck(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-RET-00001.yaml", `id: REQ-RET-00001
+type: ubiquitous
+text: Invalid text without any obligation.
+status: retired
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
