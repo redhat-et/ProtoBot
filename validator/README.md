@@ -21,10 +21,10 @@ accepts the checkout path and comparison base. It reads requirement and
 interface YAML records from `spec/requirements/` and `spec/interfaces/` in
 the target checkout. Missing directories are treated as empty. Unreadable
 files, non-YAML entries, `.yaml` records larger than 1 MiB, and malformed
-YAML produce diagnostics. A mapping key that contains `.`, `[`, or `]` fails with
-`layout.parse_failed`. Requirement relationship types are restricted to
-`depends-on`, `supersedes`, and `related-to`; unsupported types,
-including legacy `conflicts-with`, fail validation. Directed
+YAML produce diagnostics. A mapping key that contains `.`, `[`, or `]`
+fails with `layout.parse_failed`. Requirement relationship types are
+restricted to `depends-on`, `supersedes`, and `related-to`; unsupported
+types, including legacy `conflicts-with`, fail validation. Directed
 `depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
 `relationship.cycle` and names the participating requirement IDs.
 `related-to` associations are exempt. Each `applies_to.interfaces` entry
