@@ -67,13 +67,14 @@ func validateRequirementIDs(requirements []layout.Document[records.Requirement])
 // Base diagnostics represent comparison-base files that could not be parsed;
 // if any such file is absent from the target, a deletion diagnostic is emitted.
 func CompareBase(target, base layout.Snapshot, targetDiagnostics []layout.Diagnostic, baseDiagnostics ...layout.Diagnostic) []Diagnostic {
-	diagnostics := validateDeletionAndReuse(target, base, targetDiagnostics)
+	diagnostics := validateDeletion(target, base, targetDiagnostics)
+	diagnostics = append(diagnostics, validateReuse(target, base)...)
 	diagnostics = append(diagnostics, validateUnparsedBaseDeletions(target, targetDiagnostics, baseDiagnostics)...)
 	sortDiagnostics(diagnostics)
 	return diagnostics
 }
 
-func validateDeletionAndReuse(target, base layout.Snapshot, targetDiagnostics []layout.Diagnostic) []Diagnostic {
+func validateDeletion(target, base layout.Snapshot, targetDiagnostics []layout.Diagnostic) []Diagnostic {
 	targetDocByPath := make(map[string]layout.Document[records.Requirement], len(target.Requirements))
 	targetRawIDs := make(map[string][]string, len(target.Requirements))
 	for _, doc := range target.Requirements {
@@ -97,41 +98,87 @@ func validateDeletionAndReuse(target, base layout.Snapshot, targetDiagnostics []
 	seenDeletedPaths := make(map[string]bool)
 	var diagnostics []Diagnostic
 	for _, id := range sortedKeys(baseValidPaths) {
+		if _, exists := targetValidPaths[id]; exists {
+			continue
+		}
+		for _, path := range baseValidPaths[id] {
+			targetDoc, hasTargetDoc := targetDocByPath[path]
+			if hasTargetDoc && records.ValidateRequirementID(targetDoc.Record.ID) == nil && targetDoc.Record.ID != id {
+				// In-place ID change: path exists and parsed with a different valid ID.
+				seenDeletedPaths[path] = true
+				diagnostics = append(diagnostics, Diagnostic{
+					Code:  CodeDeleted,
+					Path:  path,
+					Field: "id",
+					Message: fmt.Sprintf(
+						"Requirement ID %q was deleted. Retire the record instead of removing it.",
+						id,
+					),
+				})
+				continue
+			}
+			if !TargetPathExists(target, targetDiagnostics, path) {
+				seenDeletedPaths[path] = true
+				diagnostics = append(diagnostics, Diagnostic{
+					Code:  CodeDeleted,
+					Path:  path,
+					Field: "id",
+					Message: fmt.Sprintf(
+						"Requirement ID %q was deleted. Retire the record instead of removing it.",
+						id,
+					),
+				})
+				continue
+			}
+			// Otherwise: path still exists in target tree (parsed or not),
+			// but did not parse with a different valid ID.
+			// If path exists in target tree, suppress requirement.deleted and let layout parse diagnostic report the error.
+		}
+	}
+
+	for _, doc := range baseInvalidDocs {
+		path := doc.Path
+		rawID := doc.Record.ID
+
+		if seenDeletedPaths[path] {
+			continue
+		}
+
+		// If the file still exists in the target tree (e.g. fixed in-place to
+		// a valid ID, left as-is, or unparseable), do not emit requirement.deleted.
+		// Existing tests require in-place format fixes to pass CompareBase.
+		if TargetPathExists(target, targetDiagnostics, path) {
+			continue
+		}
+
+		// If rawID is still present elsewhere in target, path was not deleted without rawID.
+		if len(targetRawIDs[rawID]) > 0 {
+			continue
+		}
+
+		seenDeletedPaths[path] = true
+		diagnostics = append(diagnostics, Diagnostic{
+			Code:  CodeDeleted,
+			Path:  path,
+			Field: "id",
+			Message: fmt.Sprintf(
+				"Requirement ID %q was deleted. Retire the record instead of removing it.",
+				rawID,
+			),
+		})
+	}
+
+	return diagnostics
+}
+
+func validateReuse(target, base layout.Snapshot) []Diagnostic {
+	targetValidPaths := validIDPaths(target.Requirements)
+	baseValidPaths := validIDPaths(base.Requirements)
+
+	var diagnostics []Diagnostic
+	for _, id := range sortedKeys(baseValidPaths) {
 		current, exists := targetValidPaths[id]
 		if !exists {
-			for _, path := range baseValidPaths[id] {
-				targetDoc, hasTargetDoc := targetDocByPath[path]
-				if hasTargetDoc && records.ValidateRequirementID(targetDoc.Record.ID) == nil && targetDoc.Record.ID != id {
-					// In-place ID change: path exists and parsed with a different valid ID.
-					seenDeletedPaths[path] = true
-					diagnostics = append(diagnostics, Diagnostic{
-						Code:  CodeDeleted,
-						Path:  path,
-						Field: "id",
-						Message: fmt.Sprintf(
-							"Requirement ID %q was deleted. Retire the record instead of removing it.",
-							id,
-						),
-					})
-					continue
-				}
-				if !targetPathExists(targetDocByPath, targetDiagnostics, path) {
-					seenDeletedPaths[path] = true
-					diagnostics = append(diagnostics, Diagnostic{
-						Code:  CodeDeleted,
-						Path:  path,
-						Field: "id",
-						Message: fmt.Sprintf(
-							"Requirement ID %q was deleted. Retire the record instead of removing it.",
-							id,
-						),
-					})
-					continue
-				}
-				// Otherwise: path still exists in target tree (parsed or not),
-				// but did not parse with a different valid ID.
-				// If path exists in target tree, suppress requirement.deleted and let layout parse diagnostic report the error.
-			}
 			continue
 		}
 
@@ -156,39 +203,6 @@ func validateDeletionAndReuse(target, base layout.Snapshot, targetDiagnostics []
 			})
 		}
 	}
-
-	for _, doc := range baseInvalidDocs {
-		path := doc.Path
-		rawID := doc.Record.ID
-
-		if seenDeletedPaths[path] {
-			continue
-		}
-
-		// If the file still exists in the target tree (e.g. fixed in-place to
-		// a valid ID, left as-is, or unparseable), do not emit requirement.deleted.
-		// Existing tests require in-place format fixes to pass CompareBase.
-		if targetPathExists(targetDocByPath, targetDiagnostics, path) {
-			continue
-		}
-
-		// If rawID is still present elsewhere in target, path was not deleted without rawID.
-		if len(targetRawIDs[rawID]) > 0 {
-			continue
-		}
-
-		seenDeletedPaths[path] = true
-		diagnostics = append(diagnostics, Diagnostic{
-			Code:  CodeDeleted,
-			Path:  path,
-			Field: "id",
-			Message: fmt.Sprintf(
-				"Requirement ID %q was deleted. Retire the record instead of removing it.",
-				rawID,
-			),
-		})
-	}
-
 	return diagnostics
 }
 
@@ -196,17 +210,13 @@ func validateUnparsedBaseDeletions(target layout.Snapshot, targetDiagnostics []l
 	if len(baseDiagnostics) == 0 {
 		return nil
 	}
-	targetDocByPath := make(map[string]layout.Document[records.Requirement], len(target.Requirements))
-	for _, doc := range target.Requirements {
-		targetDocByPath[doc.Path] = doc
-	}
 	seen := make(map[string]bool)
 	var diagnostics []Diagnostic
 	for _, diag := range baseDiagnostics {
 		if diag.Path == "" || seen[diag.Path] {
 			continue
 		}
-		if !targetPathExists(targetDocByPath, targetDiagnostics, diag.Path) {
+		if !TargetPathExists(target, targetDiagnostics, diag.Path) {
 			seen[diag.Path] = true
 			diagnostics = append(diagnostics, Diagnostic{
 				Code:  CodeDeleted,
@@ -222,9 +232,13 @@ func validateUnparsedBaseDeletions(target layout.Snapshot, targetDiagnostics []l
 	return diagnostics
 }
 
-func targetPathExists(targetDocByPath map[string]layout.Document[records.Requirement], targetDiagnostics []layout.Diagnostic, relPath string) bool {
-	if _, ok := targetDocByPath[relPath]; ok {
-		return true
+// TargetPathExists reports whether relPath is present in target requirements
+// or in target layout diagnostics.
+func TargetPathExists(target layout.Snapshot, targetDiagnostics []layout.Diagnostic, relPath string) bool {
+	for _, doc := range target.Requirements {
+		if doc.Path == relPath {
+			return true
+		}
 	}
 	for _, diag := range targetDiagnostics {
 		if diag.Path == relPath {

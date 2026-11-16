@@ -939,15 +939,27 @@ func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
 
 func TestPrintDiagnosticSanitizesLineBreaks(t *testing.T) {
 	var buf bytes.Buffer
-	printDiagnostic(&buf, "relationship.invalid_type", "spec/requirements/a\nb.yaml", "unsupported relationship type\nmulti line\r\nmessage")
+	printDiagnostic(&buf, "relationship.\ninvalid_type", "spec/requirements/a\nb.yaml", "unsupported relationship type\nmulti line\r\nmessage")
 	got := buf.String()
 	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line, got %d: %q", len(lines), got)
 	}
-	want := "validator: relationship.invalid_type: spec/requirements/a b.yaml: unsupported relationship type multi line message\n"
+	want := "validator: relationship. invalid_type: spec/requirements/a b.yaml: unsupported relationship type multi line message\n"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	buf.Reset()
+	printDiagnostic(&buf, "revision.\nnot_found", "", "comparison base not found\nerror details")
+	gotPathless := buf.String()
+	pathlessLines := strings.Split(strings.TrimRight(gotPathless, "\n"), "\n")
+	if len(pathlessLines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %q", len(pathlessLines), gotPathless)
+	}
+	wantPathless := "validator: revision. not_found: comparison base not found error details\n"
+	if gotPathless != wantPathless {
+		t.Fatalf("got %q, want %q", gotPathless, wantPathless)
 	}
 }
 

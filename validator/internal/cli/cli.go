@@ -10,6 +10,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -88,14 +89,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	baseSnapshot, baseParseDiagnostics, revErr := revision.Read(opts.target, opts.base)
 	if revErr != nil {
 		failed = true
-		if rErr, ok := revErr.(*revision.Error); ok {
+		var rErr *revision.Error
+		if errors.As(revErr, &rErr) {
 			printDiagnostic(stderr, rErr.Code, "", rErr.Message)
 		} else {
 			printDiagnostic(stderr, revision.CodeReadFailed, "", revErr.Error())
 		}
 	} else {
 		for _, diagnostic := range baseParseDiagnostics {
-			if targetHasFile(snapshot, diagnostics, diagnostic.Path) {
+			if specvalidation.TargetPathExists(snapshot, diagnostics, diagnostic.Path) {
 				reportBaseLayout(stderr, opts.base, diagnostic)
 			}
 		}
@@ -139,20 +141,6 @@ func reportBaseLayout(stderr io.Writer, base string, diagnostic layout.Diagnosti
 		return
 	}
 	_, _ = fmt.Fprintf(stderr, "validator: note: comparison base %s: %s: %s: %s\n", cleanBase, cleanCode, cleanPath, cleanMsg)
-}
-
-func targetHasFile(snapshot layout.Snapshot, targetDiagnostics []layout.Diagnostic, relPath string) bool {
-	for _, doc := range snapshot.Requirements {
-		if doc.Path == relPath {
-			return true
-		}
-	}
-	for _, diag := range targetDiagnostics {
-		if diag.Path == relPath {
-			return true
-		}
-	}
-	return false
 }
 
 func reportSpec(stderr io.Writer, diagnostic specvalidation.Diagnostic) {
@@ -221,11 +209,12 @@ func sanitizeDiagnosticField(s string) string {
 }
 
 func printDiagnostic(w io.Writer, code, path, message string) {
+	cleanCode := sanitizeDiagnosticField(code)
 	if path == "" {
-		_, _ = fmt.Fprintf(w, "validator: %s: %s\n", code, sanitizeDiagnosticField(message))
+		_, _ = fmt.Fprintf(w, "validator: %s: %s\n", cleanCode, sanitizeDiagnosticField(message))
 		return
 	}
-	_, _ = fmt.Fprintf(w, "validator: %s: %s: %s\n", code, sanitizeDiagnosticField(path), sanitizeDiagnosticField(message))
+	_, _ = fmt.Fprintf(w, "validator: %s: %s: %s\n", cleanCode, sanitizeDiagnosticField(path), sanitizeDiagnosticField(message))
 }
 
 func usageError(stderr io.Writer, message string) int {

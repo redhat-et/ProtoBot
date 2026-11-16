@@ -347,6 +347,25 @@ func TestCompareBaseIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestTargetPathExists(t *testing.T) {
+	snapshot := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
+	})
+	diagnostics := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/REQ-API-00002.yaml", Message: "parse error"},
+	}
+
+	if !TargetPathExists(snapshot, diagnostics, "spec/requirements/REQ-API-00001.yaml") {
+		t.Fatalf("expected TargetPathExists to return true for parsed document path")
+	}
+	if !TargetPathExists(snapshot, diagnostics, "spec/requirements/REQ-API-00002.yaml") {
+		t.Fatalf("expected TargetPathExists to return true for unparsed diagnostic path")
+	}
+	if TargetPathExists(snapshot, diagnostics, "spec/requirements/REQ-API-00003.yaml") {
+		t.Fatalf("expected TargetPathExists to return false for absent path")
+	}
+}
+
 type idPath struct {
 	path string
 	id   string
