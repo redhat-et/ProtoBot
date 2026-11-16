@@ -289,16 +289,28 @@ func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00000.yaml", `id: REQ-API-00000
 type: ubiquitous
 text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: retired
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
 text: The service shall log requests.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: active
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
 type: ubiquitous
 text: The service shall expose metrics.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: active
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
@@ -332,6 +344,10 @@ func TestRunAcceptsResolvedReferences(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
 text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: retired
 `)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002

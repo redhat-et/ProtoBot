@@ -42,6 +42,9 @@ func validateRecordSchema(snapshot layout.Snapshot) []Diagnostic {
 }
 
 func validateRequirementSchema(document layout.Document[records.Requirement]) []Diagnostic {
+	if document.Fields == nil {
+		return nil
+	}
 	var diagnostics []Diagnostic
 	record := document.Record
 	values := map[string]string{
@@ -99,6 +102,9 @@ func validateRequirementSchema(document layout.Document[records.Requirement]) []
 }
 
 func validateInterfaceSchema(document layout.Document[records.InterfaceRecord]) []Diagnostic {
+	if document.Fields == nil {
+		return nil
+	}
 	var diagnostics []Diagnostic
 	record := document.Record
 	values := map[string]string{

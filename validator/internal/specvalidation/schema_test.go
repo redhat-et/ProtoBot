@@ -25,6 +25,25 @@ func TestValidateRecordSchema(t *testing.T) {
 			snapshot: schemaSnapshot(validRequirementDocument(), validInterfaceDocument()),
 		},
 		{
+			name: "synthetic requirement and interface with nil fields produce no missing field diagnostics",
+			snapshot: layout.Snapshot{
+				Requirements: []layout.Document[records.Requirement]{
+					{
+						Path:   reqPath,
+						Record: records.Requirement{},
+						Fields: nil,
+					},
+				},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					{
+						Path:   ifacePath,
+						Record: records.InterfaceRecord{},
+						Fields: nil,
+					},
+				},
+			},
+		},
+		{
 			name:     "retired status is allowed",
 			snapshot: schemaSnapshot(requirementWithStatus(records.StatusRetired), validInterfaceDocument()),
 		},

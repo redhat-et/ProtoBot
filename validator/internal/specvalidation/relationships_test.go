@@ -159,11 +159,19 @@ func TestValidateRelationshipTypesAfterLayoutRead(t *testing.T) {
 	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
 type: ubiquitous
 text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: active
 `)
 	writeFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
 type: ubiquitous
 text: The service shall log health checks.
+applies_to:
+  scopes:
+    - api
+relationships: []
 status: active
 `)
 	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
