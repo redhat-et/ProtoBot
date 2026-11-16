@@ -454,6 +454,80 @@ func TestValidateRelationshipAcyclicityIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestGraphValidatorDeterministicLeafHandling(t *testing.T) {
+	wantVertices := []string{
+		"REQ-API-00001",
+		"REQ-API-00002",
+		"REQ-API-00003",
+		"REQ-API-00097",
+		"REQ-API-00098",
+		"REQ-API-00099",
+	}
+	const iterations = 100
+	for i := range iterations {
+		v := graphValidator{
+			graph: map[string][]string{
+				"REQ-API-00003": {"REQ-API-00099", "REQ-API-00098"},
+				"REQ-API-00001": {"REQ-API-00097", "REQ-API-00099"},
+				"REQ-API-00002": {"REQ-API-00098", "REQ-API-00097"},
+			},
+		}
+		vertices := v.collectVertices()
+		if dup := firstDuplicate(vertices); dup != "" {
+			t.Fatalf("iteration %d: duplicate vertex %q in %v", i, dup, vertices)
+		}
+		if len(vertices) != len(wantVertices) {
+			t.Fatalf("iteration %d: vertices=%v, want %v", i, vertices, wantVertices)
+		}
+		for j, want := range wantVertices {
+			if vertices[j] != want {
+				t.Fatalf("iteration %d: vertices=%v, want %v", i, vertices, wantVertices)
+			}
+		}
+		for _, leaf := range []string{"REQ-API-00097", "REQ-API-00098", "REQ-API-00099"} {
+			if _, exists := v.graph[leaf]; !exists {
+				t.Fatalf("iteration %d: missing leaf %q was not merged into the graph", i, leaf)
+			}
+		}
+	}
+}
+
+func TestValidateRelationshipAcyclicityMissingLeavesIsDeterministic(t *testing.T) {
+	snapshot := snapshotFromDocs(
+		requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+			{Type: records.RelDependsOn, Target: "REQ-API-00099"},
+			{Type: records.RelDependsOn, Target: "REQ-API-00097"},
+		}),
+		requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+			{Type: records.RelDependsOn, Target: "REQ-API-00098"},
+		}),
+		requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00097"},
+			{Type: records.RelDependsOn, Target: "REQ-API-00098"},
+			{Type: records.RelDependsOn, Target: "REQ-API-00099"},
+		}),
+	)
+	first := Validate(snapshot)
+	cycles := cycleDiagnostics(first)
+	if len(cycles) != 1 {
+		t.Fatalf("cycle diagnostics=%v, want 1", cycles)
+	}
+	const iterations = 100
+	for i := range iterations {
+		got := Validate(snapshot)
+		if len(got) != len(first) {
+			t.Fatalf("iteration %d: diagnostic count %d vs %d", i, len(got), len(first))
+		}
+		for j := range first {
+			if got[j] != first[j] {
+				t.Fatalf("iteration %d: diagnostics changed: %+v vs %+v", i, got, first)
+			}
+		}
+	}
+}
+
 func TestValidateRelationshipAcyclicityAfterLayoutRead(t *testing.T) {
 	target := t.TempDir()
 	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
@@ -498,6 +572,17 @@ status: active
 	if !identifiesIDs(got.Message, "REQ-API-00001", "REQ-API-00002") {
 		t.Errorf("message %q omitted participating IDs", got.Message)
 	}
+}
+
+func firstDuplicate(values []string) string {
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if seen[value] {
+			return value
+		}
+		seen[value] = true
+	}
+	return ""
 }
 
 func cycleDiagnostics(diagnostics []Diagnostic) []Diagnostic {
