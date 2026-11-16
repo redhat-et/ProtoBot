@@ -84,9 +84,11 @@ validator/
   cmd/validator/            # V2 specification validator CLI
   internal/cli/             # checkout path and comparison-base arguments
   internal/ears/            # EARS shape and single-shall validation
+  internal/gitcmd/          # managed Git child process execution
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
-  internal/specvalidation/  # record schema, relationship types, and reference resolution
+  internal/revision/        # Git revision reader for comparison-base records
+  internal/specvalidation/  # record schema, identifier checks, relationship types, and reference resolution
   internal/testtags/        # Gherkin @req:<ID> tag reference resolution
 wms/
   go.mod

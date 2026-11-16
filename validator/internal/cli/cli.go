@@ -5,11 +5,12 @@
 //	validator -h
 //
 // The process is deterministic and network-free. It reads the checkout at
-// --target and records --base as the comparison argument. It does not
-// contact a tracker, open a network connection, or start a daemon.
+// --target and compares requirement identifiers against --base. It does
+// not contact a tracker, open a network connection, or start a daemon.
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/ears"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 	"github.com/redhat-et/protobot/validator/internal/specvalidation"
 	"github.com/redhat-et/protobot/validator/internal/testtags"
 )
@@ -34,7 +36,7 @@ const usage = `usage:
   validator -h
 
   --target PATH   checkout directory to validate
-  --base REF      comparison base for identity and immutability checks
+  --base REF      comparison base for identity checks
 `
 
 type options struct {
@@ -77,11 +79,33 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	snapshot, diagnostics := layout.Read(opts.target)
 	failed := len(diagnostics) > 0
 	for _, diagnostic := range diagnostics {
-		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+		reportLayout(stderr, diagnostic)
 	}
 	for _, diagnostic := range specvalidation.Validate(snapshot, diagnostics...) {
 		failed = true
-		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+		reportSpec(stderr, diagnostic)
+	}
+
+	baseSnapshot, baseParseDiagnostics, revErr := revision.Read(opts.target, opts.base)
+	if revErr != nil {
+		failed = true
+		var rErr *revision.Error
+		if errors.As(revErr, &rErr) {
+			printDiagnostic(stderr, rErr.Code, "", rErr.Message)
+		} else {
+			printDiagnostic(stderr, revision.CodeReadFailed, "", revErr.Error())
+		}
+	} else {
+		for _, diagnostic := range baseParseDiagnostics {
+			if specvalidation.TargetPathExists(snapshot, diagnostics, diagnostic.Path) {
+				reportBaseLayout(stderr, opts.base, diagnostic)
+			}
+		}
+
+		for _, diagnostic := range specvalidation.CompareBase(snapshot, baseSnapshot, diagnostics, baseParseDiagnostics...) {
+			failed = true
+			reportSpec(stderr, diagnostic)
+		}
 	}
 	for _, diagnostic := range ears.CheckAll(requirementStatements(snapshot)) {
 		failed = true
@@ -101,6 +125,26 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 	_, _ = fmt.Fprintf(stdout, "validator: ok\ntarget: %s\nbase: %s\n", opts.target, opts.base)
 	return exitOK
+}
+
+func reportLayout(stderr io.Writer, diagnostic layout.Diagnostic) {
+	printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
+}
+
+func reportBaseLayout(stderr io.Writer, base string, diagnostic layout.Diagnostic) {
+	cleanBase := sanitizeDiagnosticField(base)
+	cleanCode := sanitizeDiagnosticField(diagnostic.Code)
+	cleanPath := sanitizeDiagnosticField(diagnostic.Path)
+	cleanMsg := sanitizeDiagnosticField(diagnostic.Message)
+	if cleanPath == "" {
+		_, _ = fmt.Fprintf(stderr, "validator: note: comparison base %s: %s: %s\n", cleanBase, cleanCode, cleanMsg)
+		return
+	}
+	_, _ = fmt.Fprintf(stderr, "validator: note: comparison base %s: %s: %s: %s\n", cleanBase, cleanCode, cleanPath, cleanMsg)
+}
+
+func reportSpec(stderr io.Writer, diagnostic specvalidation.Diagnostic) {
+	printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 }
 
 func parseArgs(args []string) (options, error) {
@@ -165,7 +209,12 @@ func sanitizeDiagnosticField(s string) string {
 }
 
 func printDiagnostic(w io.Writer, code, path, message string) {
-	_, _ = fmt.Fprintf(w, "validator: %s: %s: %s\n", code, sanitizeDiagnosticField(path), sanitizeDiagnosticField(message))
+	cleanCode := sanitizeDiagnosticField(code)
+	if path == "" {
+		_, _ = fmt.Fprintf(w, "validator: %s: %s\n", cleanCode, sanitizeDiagnosticField(message))
+		return
+	}
+	_, _ = fmt.Fprintf(w, "validator: %s: %s: %s\n", cleanCode, sanitizeDiagnosticField(path), sanitizeDiagnosticField(message))
 }
 
 func usageError(stderr io.Writer, message string) int {

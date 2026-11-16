@@ -2,15 +2,21 @@
 
 `validator` is the ProtoBot V2 specification validator. It is a
 deterministic, network-free Go command. It reads the checkout at
-`--target` and records `--base` as the comparison argument; it does
-not contact a tracker, a network service, or an external daemon.
+`--target` and compares requirement identifiers against `--base`; it
+does not contact a tracker, a network service, or an external daemon.
+
+## Prerequisites
+
+`--target` must be the root of a Git working tree, `git` must be
+available on `PATH`, and `--base` must resolve to a commit already
+present in that checkout. The command operates locally and does not fetch.
 
 The design is the [ProtoBot V2 validator][design]. This module
-implements the command line, spec directory reader, record schema
-checks, relationship-type allowlist, relationship acyclicity, and
-reference resolution (issues #381, #383, #385, #387, #388, #390,
-and #402). The command line accepts the checkout path and comparison
-base. It reads requirement and interface YAML records from
+implements the command line, spec directory reader, record schema checks,
+relationship-type allowlist, relationship acyclicity, reference resolution,
+and requirement identifier checks (issues #381, #383, #385, #387,
+and #388, #390, #395, #402). The command line accepts the checkout path
+and comparison base. It reads requirement and interface YAML records from
 `spec/requirements/` and `spec/interfaces/` in the target checkout.
 Missing directories are treated as empty. Unreadable files, non-YAML
 entries, `.yaml` records larger than 1 MiB, and malformed YAML produce
@@ -23,7 +29,9 @@ including legacy `conflicts-with`, fail validation. Directed
 `related-to` associations are exempt. Each `applies_to.interfaces` entry
 must equal an interface record's `name` (matching is case-sensitive),
 and requirement IDs in `relationships[].target` must resolve to declared
-records; retired requirement targets satisfy resolution. It also scans
+records; retired requirement targets satisfy resolution. Requirement IDs must
+match `REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must not be
+deleted or reused relative to the comparison base. It also scans
 Gherkin `.feature` files under `tests/` for `@req:<ID>` tags and fails
 when a tag does not resolve to a known requirement record. Active and
 retired IDs both count as known; unknown or misspelled IDs fail with
@@ -36,8 +44,7 @@ values are `active` or `retired`. Legacy metadata (`verification`,
 Requirement text is checked for exactly one `shall` and for a match
 against the declared EARS type (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
-State-driven statements require the keyword `While`. Identifier checks
-land in follow-on work.
+State-driven statements require the keyword `While`.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
@@ -47,7 +54,9 @@ reported output.
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
 or interface basenames to match the in-record name. No current check
 covers basename-to-record-ID or basename-to-name matching; that matching
-is not implemented yet.
+is not implemented yet. Requirement identity is path-keyed: moving a
+record to a new file path counts as a deletion at the old path and a reuse
+at the new path.
 
 ```text
 validator --target PATH --base REF
@@ -75,7 +84,7 @@ usage:
   validator -h
 
   --target PATH   checkout directory to validate
-  --base REF      comparison base for identity and immutability checks
+  --base REF      comparison base for identity checks
 ```
 
 Target errors (exit status 1, such as a missing, unstattable, or
@@ -83,6 +92,13 @@ non-directory `--target`) print an uncoded message to stderr:
 
 ```text
 validator: <message>
+```
+
+Revision-level diagnostics (exit status 1, such as an unresolvable
+comparison base or failed Git tree read) omit the path:
+
+```text
+validator: <code>: <message>
 ```
 
 Layout, specification, and test-tag diagnostics (exit status 1) are
@@ -97,13 +113,26 @@ diagnostic applies to a specific line. Layout diagnostics quote entry
 names containing control characters (e.g.,
 `spec/requirements/"a\n::error::injected.yaml"`). At the CLI print
 boundary, line breaks in diagnostic paths and messages are replaced with
-spaces to ensure single-line output. Check the exit status first.
-A line without a `<code>` field is not a diagnostic.
+spaces to ensure single-line output. Informational notes regarding historical
+comparison base parse warnings (which do not cause a non-zero exit when the
+working tree repairs the file) are prefixed with
+`validator: note: comparison base <ref>: ...` and are not diagnostics.
+Check the exit status first. A line without a `<code>` field is not a
+diagnostic.
 
 This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
-`layout.parse_failed`), specification check codes (such as
-`relationship.invalid_type`, `relationship.cycle`), and test-tag codes
+`layout.parse_failed`), revision check codes (`revision.not_found`,
+`revision.read_failed`), requirement check codes
+(`requirement.missing_field`, `requirement.invalid_status`,
+`requirement.unexpected_field`, `requirement.invalid_id`,
+`requirement.duplicate_id`, `requirement.deleted`,
+`requirement.reused_id`), interface check codes
+(`interface.missing_field`, `interface.unexpected_field`), reference
+check codes (`reference.not_found`, `reference.ambiguous`),
+specification check codes (`relationship.invalid_type`,
+`relationship.cycle`), EARS check codes (`ears.shall_count`,
+`ears.pattern_mismatch`, `ears.invalid_type`), and test-tag codes
 (`testtags.read_failed`, `testtags.unexpected_file`,
 `testtags.unresolved`). A `.yaml` record larger than 1 MiB produces
 `layout.read_failed`.
