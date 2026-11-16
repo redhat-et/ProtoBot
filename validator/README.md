@@ -5,6 +5,12 @@ deterministic, network-free Go command. It reads the checkout at
 `--target` and compares requirement identifiers against `--base`; it
 does not contact a tracker, a network service, or an external daemon.
 
+## Prerequisites
+
+`--target` must be the root of a Git working tree, `git` must be
+available on `PATH`, and `--base` must resolve to a commit already
+present in that checkout. The command operates locally and does not fetch.
+
 The design is the [ProtoBot V2 validator][design]. This module
 implements the command line, spec directory reader, record schema checks,
 relationship-type allowlist, relationship acyclicity, reference resolution,
@@ -48,7 +54,9 @@ reported output.
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
 or interface basenames to match the in-record name. No current check
 covers basename-to-record-ID or basename-to-name matching; that matching
-is not implemented yet.
+is not implemented yet. Requirement identity is path-keyed: moving a
+record to a new file path counts as a deletion at the old path and a reuse
+at the new path.
 
 ```text
 validator --target PATH --base REF
@@ -76,7 +84,7 @@ usage:
   validator -h
 
   --target PATH   checkout directory to validate
-  --base REF      comparison base for identity and immutability checks
+  --base REF      comparison base for identity checks
 ```
 
 Target errors (exit status 1, such as a missing, unstattable, or
@@ -116,10 +124,16 @@ This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
 `layout.parse_failed`), revision check codes (`revision.not_found`,
 `revision.read_failed`), requirement check codes
-(`requirement.invalid_id`, `requirement.duplicate_id`,
-`requirement.deleted`, `requirement.reused_id`), specification check
-codes (such as `relationship.invalid_type`, `relationship.cycle`), and
-test-tag codes (`testtags.read_failed`, `testtags.unexpected_file`,
+(`requirement.missing_field`, `requirement.invalid_status`,
+`requirement.unexpected_field`, `requirement.invalid_id`,
+`requirement.duplicate_id`, `requirement.deleted`,
+`requirement.reused_id`), interface check codes
+(`interface.missing_field`, `interface.unexpected_field`), reference
+check codes (`reference.not_found`, `reference.ambiguous`),
+specification check codes (`relationship.invalid_type`,
+`relationship.cycle`), EARS check codes (`ears.shall_count`,
+`ears.pattern_mismatch`, `ears.invalid_type`), and test-tag codes
+(`testtags.read_failed`, `testtags.unexpected_file`,
 `testtags.unresolved`). A `.yaml` record larger than 1 MiB produces
 `layout.read_failed`.
 

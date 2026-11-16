@@ -36,7 +36,7 @@ const usage = `usage:
   validator -h
 
   --target PATH   checkout directory to validate
-  --base REF      comparison base for identity and immutability checks
+  --base REF      comparison base for identity checks
 `
 
 type options struct {
