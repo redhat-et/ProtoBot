@@ -699,17 +699,9 @@ func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
-	}
-	for _, line := range lines {
-		if strings.HasPrefix(line, "::") {
-			t.Fatalf("stderr line starts with workflow command: %q", line)
-		}
-		if !strings.HasPrefix(line, "validator: layout.unexpected_file:") {
-			t.Fatalf("stderr line has unexpected prefix: %q", line)
-		}
+	wantStderr := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}
 }
 
@@ -729,17 +721,9 @@ func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
-	}
-	for _, line := range lines {
-		if strings.HasPrefix(line, "::") {
-			t.Fatalf("stderr line starts with workflow command: %q", line)
-		}
-		if !strings.HasPrefix(line, "validator: testtags.unresolved:") {
-			t.Fatalf("stderr line has unexpected prefix: %q", line)
-		}
+	wantStderr := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\"\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}
 }
 

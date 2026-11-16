@@ -35,11 +35,7 @@ reported output.
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
 or interface basenames to match the in-record name. No current check
 covers basename-to-record-ID or basename-to-name matching; that matching
-is not implemented yet and remains with follow-on check groups
-[#385](https://github.com/redhat-et/ProtoBot/issues/385) and
-[#395](https://github.com/redhat-et/ProtoBot/issues/395), which also
-enforce requirement ID format, uniqueness, and related in-record
-identifier checks.
+is not implemented yet.
 
 ```text
 validator --target PATH --base REF
@@ -85,7 +81,11 @@ validator: <code>: <path>: <message>
 ```
 
 `<path>` identifies the affected file, including `:line` when the
-diagnostic applies to a specific line. Check the exit status first.
+diagnostic applies to a specific line. Layout diagnostics quote entry
+names containing control characters (e.g.,
+`spec/requirements/"a\n::error::injected.yaml"`). At the CLI print
+boundary, line breaks in diagnostic paths and messages are replaced with
+spaces to ensure single-line output. Check the exit status first.
 A line without a `<code>` field is not a diagnostic.
 
 This line format is stable for external tool integration. Current codes
