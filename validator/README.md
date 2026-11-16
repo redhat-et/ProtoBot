@@ -2,8 +2,9 @@
 
 `validator` is the ProtoBot V2 specification validator. It is a
 deterministic, network-free Go command. It reads the checkout at
-`--target` and compares requirement identifiers against `--base`; it
-does not contact a tracker, a network service, or an external daemon.
+`--target` and compares requirement identifiers and parsed requirement
+text against `--base`; it does not contact a tracker, a network service, or
+an external daemon.
 
 ## Prerequisites
 
@@ -14,13 +15,13 @@ present in that checkout. The command operates locally and does not fetch.
 The design is the [ProtoBot V2 validator][design]. This module
 implements the command line, spec directory reader, record schema checks,
 relationship-type allowlist, relationship acyclicity, reference resolution,
-and requirement identifier checks (issues #381, #383, #385, #387,
-and #388, #390, #395, #402). The command line accepts the checkout path
-and comparison base. It reads requirement and interface YAML records from
-`spec/requirements/` and `spec/interfaces/` in the target checkout.
-Missing directories are treated as empty. Unreadable files, non-YAML
-entries, `.yaml` records larger than 1 MiB, and malformed YAML produce
-diagnostics. A mapping key that contains `.`, `[`, or `]` fails with
+requirement identifier checks, and parsed-text immutability against comparison base
+(issues #381, #383, #385, #387, and #388, #390, #395, #397, #402). The command line
+accepts the checkout path and comparison base. It reads requirement and
+interface YAML records from `spec/requirements/` and `spec/interfaces/` in
+the target checkout. Missing directories are treated as empty. Unreadable
+files, non-YAML entries, `.yaml` records larger than 1 MiB, and malformed
+YAML produce diagnostics. A mapping key that contains `.`, `[`, or `]` fails with
 `layout.parse_failed`. Requirement relationship types are restricted to
 `depends-on`, `supersedes`, and `related-to`; unsupported types,
 including legacy `conflicts-with`, fail validation. Directed
@@ -50,9 +51,16 @@ reformatting that preserves the parsed string passes, and metadata-only
 edits such as status transitions pass. A wording change under an
 existing ID fails.
 
-`--target` is used as given. The command does not apply
+`--target` must point to the root of a Git checkout, `--base` must
+resolve to a commit in that checkout, and `git` must be available on
+`PATH`. `--target` is used as given; the command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
-reported output.
+reported output. The command reports diagnostics in the format
+`validator: <code>: <path>: <message>` (or
+`validator: <code>: <message>` when no path applies) on standard error.
+On success, it prints `validator: ok` along with the target and base
+arguments on standard output and exits with status 0. Validation failures
+exit with status 1; command-line usage errors exit with status 2.
 
 `layout.Read` discovers `*.yaml` files in those directories. It does
 not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`

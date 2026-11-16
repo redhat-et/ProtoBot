@@ -23,6 +23,9 @@ func TestReadLoadsCommittedRequirements(t *testing.T) {
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
+	if snapshot.Root != root {
+		t.Fatalf("snapshot.Root=%q, want %q", snapshot.Root, root)
+	}
 	if len(snapshot.Requirements) != 1 || snapshot.Requirements[0].Record.ID != "REQ-API-00001" {
 		t.Fatalf("requirements=%+v", snapshot.Requirements)
 	}
@@ -122,6 +125,31 @@ func TestReadLayoutDiagnosticsForMalformedBase(t *testing.T) {
 	}
 	if !hasPath(diagnostics, "spec/requirements/bad.yaml") {
 		t.Fatalf("diagnostics=%v", diagnostics)
+	}
+	if !hasCode(diagnostics, "revision.parse_failed") {
+		t.Fatalf("expected revision.parse_failed, got %v", diagnostics)
+	}
+	if len(diagnostics) > 0 && !strings.Contains(diagnostics[0].Message, `comparison base "HEAD"`) {
+		t.Fatalf("diagnostic message %q does not contain comparison base ref", diagnostics[0].Message)
+	}
+}
+
+func TestReadRejectsUnsupportedEntryInBase(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "spec/requirements/target.yaml", requirementYAML("REQ-API-00001", "The service shall exist."))
+	linkPath := filepath.Join(root, "spec", "requirements", "LINK-00001.yaml")
+	if err := os.Symlink("target.yaml", linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "base with symlink")
+
+	_, diagnostics := Read(root, "HEAD")
+	if !hasCode(diagnostics, CodeUnsupportedEntry) {
+		t.Fatalf("expected %s, got diagnostics=%v", CodeUnsupportedEntry, diagnostics)
+	}
+	if !hasPath(diagnostics, "spec/requirements/LINK-00001.yaml") {
+		t.Fatalf("expected path spec/requirements/LINK-00001.yaml, got %v", diagnostics)
 	}
 }
 

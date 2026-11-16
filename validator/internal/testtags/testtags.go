@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/redhat-et/protobot/validator/internal/layout"
 )
 
 // TestsDir is the checkout-relative directory that holds derived tests.
@@ -106,7 +108,7 @@ func walkDir(root *os.Root, relative string, knownIDs map[string]struct{}) []Dia
 	var diagnostics []Diagnostic
 	for _, entry := range entries {
 		name := entry.Name()
-		if !safeEntryName(name) {
+		if !layout.SafeEntryName(name) {
 			continue
 		}
 		child := path.Join(relative, name)
@@ -165,16 +167,6 @@ func tagsOnLine(relative string, line int, text string, knownIDs map[string]stru
 		))
 	}
 	return diagnostics
-}
-
-func safeEntryName(name string) bool {
-	if name == "" || name == "." || name == ".." {
-		return false
-	}
-	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
-		return false
-	}
-	return filepath.Base(name) == name
 }
 
 func diagnostic(code, path string, line int, message string) Diagnostic {

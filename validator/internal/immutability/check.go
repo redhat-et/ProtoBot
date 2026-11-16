@@ -14,7 +14,10 @@ import (
 const CodeTextImmutable = "requirement.text_immutable"
 
 // Check compares parsed requirement text for each ID present in both
-// snapshots. New IDs are ignored. Comparison uses the decoded string,
+// snapshots. When the comparison base contains multiple records with the
+// same requirement ID, the first record encountered is used (first-wins).
+// Duplicate identifier detection is deferred to follow-on identity
+// validation. New IDs are ignored. Comparison uses the decoded string,
 // so YAML scalar reformatting that preserves the parsed value passes.
 func Check(target, base layout.Snapshot) []layout.Diagnostic {
 	baseText := make(map[string]string, len(base.Requirements))

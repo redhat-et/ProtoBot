@@ -179,6 +179,29 @@ func snapshot(documents ...layout.Document[records.Requirement]) layout.Snapshot
 	return layout.Snapshot{Requirements: documents}
 }
 
+func TestCheckBaseDuplicateIDUsesFirstWins(t *testing.T) {
+	base := snapshot(
+		document("spec/requirements/a.yaml", "REQ-API-00001", "Text 1", records.StatusActive),
+		document("spec/requirements/b.yaml", "REQ-API-00001", "Text 2", records.StatusActive),
+	)
+	// Target matches the first base record ("Text 1") -> passes
+	targetMatchingFirst := snapshot(
+		document("spec/requirements/b.yaml", "REQ-API-00001", "Text 1", records.StatusActive),
+	)
+	if diagnostics := Check(targetMatchingFirst, base); len(diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics for first-wins match, got %v", diagnostics)
+	}
+
+	// Target matches the second base record ("Text 2") -> fails because first-wins kept "Text 1"
+	targetMatchingSecond := snapshot(
+		document("spec/requirements/b.yaml", "REQ-API-00001", "Text 2", records.StatusActive),
+	)
+	diagnostics := Check(targetMatchingSecond, base)
+	if len(diagnostics) != 1 || diagnostics[0].Code != CodeTextImmutable {
+		t.Fatalf("expected CodeTextImmutable, got %v", diagnostics)
+	}
+}
+
 func document(path, id, text, status string) layout.Document[records.Requirement] {
 	return layout.Document[records.Requirement]{
 		Path: path,

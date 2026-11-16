@@ -192,7 +192,10 @@ func loadEntry[T any](root *os.Root, relative string, decode func([]byte) (T, ma
 	return Document[T]{Path: relative, Record: value, Fields: fields}, nil
 }
 
-func safeEntryName(name string) bool {
+// SafeEntryName reports whether name is a safe single-component path name.
+// It rejects empty names, dot, dot-dot, directory separators, and control
+// characters (C0 controls and DEL).
+func SafeEntryName(name string) bool {
 	if name == "" || name == "." || name == ".." {
 		return false
 	}
@@ -203,6 +206,10 @@ func safeEntryName(name string) bool {
 		return false
 	}
 	return filepath.Base(name) == name
+}
+
+func safeEntryName(name string) bool {
+	return SafeEntryName(name)
 }
 
 func hasControl(s string) bool {
