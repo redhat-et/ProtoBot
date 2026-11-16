@@ -483,6 +483,146 @@ status: active
 	}
 }
 
+func TestRunEARSShapeDiagnostics(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "zero shall",
+			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service must return HTTP 200.\nstatus: active\n",
+			want:    "contains 0 occurrences",
+		},
+		{
+			name:    "multiple shall",
+			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service shall start and shall stop.\nstatus: active\n",
+			want:    "contains 2 occurrences",
+		},
+		{
+			name:    "type mismatch",
+			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n",
+			want:    "ubiquitous",
+		},
+		{
+			name:    "state-driven During alias",
+			content: "id: REQ-API-00002\ntype: state-driven\ntext: During maintenance, the service shall reject writes.\nstatus: active\n",
+			want:    "state-driven",
+		},
+		{
+			name:    "unrecognized type",
+			content: "id: REQ-API-00002\ntype: feature\ntext: The service shall return HTTP 200.\nstatus: active\n",
+			want:    "feature",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := t.TempDir()
+			writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", tc.content)
+			code, stdout, stderr := runCLI("--target", target, "--base", "main")
+			if code != exitFailure || stdout != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+				t.Fatalf("stderr %q omitted offending path", stderr)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Fatalf("stderr %q does not contain %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunValidEARSTypes(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-UBI-00001.yaml", `id: REQ-UBI-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-EVT-00001.yaml", `id: REQ-EVT-00001
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-STA-00001.yaml", `id: REQ-STA-00001
+type: state-driven
+text: While maintenance mode is active, the service shall reject writes.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-UNW-00001.yaml", `id: REQ-UNW-00001
+type: unwanted-behavior
+text: If a token expires, then the service shall reject the request.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-OPT-00001.yaml", `id: REQ-OPT-00001
+type: optional-feature
+text: Where caching is enabled, the service shall use a cache.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	writeSpecFile(t, target, "spec/requirements/REQ-CPX-00001.yaml", `id: REQ-CPX-00001
+type: complex
+text: While maintenance mode is active, when a user writes, the service shall reject the request.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunValidatesRetiredRequirementsEARSShape(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-RET-00001.yaml", `id: REQ-RET-00001
+type: ubiquitous
+text: Invalid text without any obligation.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: retired
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-RET-00001.yaml") {
+		t.Fatalf("stderr %q omitted offending path", stderr)
+	}
+	if !strings.Contains(stderr, "contains 0 occurrences") {
+		t.Fatalf("stderr %q does not contain 0 occurrences", stderr)
+	}
+}
+
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
@@ -539,6 +679,23 @@ status: active
 	wantPrefix := "validator: relationship.invalid_type: spec/requirements/REQ-API-00002.yaml:"
 	if !strings.Contains(stderr, wantPrefix) {
 		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+}
+
+func TestRunLayoutAndEARSDiagnosticsTogether(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "id: REQ-API-00002\ntype: ubiquitous\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout path", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00002.yaml") {
+		t.Fatalf("stderr %q omitted EARS path", stderr)
 	}
 }
 
@@ -800,6 +957,23 @@ func TestRunIsDeterministic(t *testing.T) {
 	code2, stdout2, stderr2 := runCLI("--target", target, "--base", "main")
 	if code1 != code2 || stdout1 != stdout2 || stderr1 != stderr2 {
 		t.Fatalf("repeated invocation differed: (%d, %q, %q) vs (%d, %q, %q)", code1, stdout1, stderr1, code2, stdout2, stderr2)
+	}
+}
+
+func TestRunEARSDiagnosticsAreDeterministic(t *testing.T) {
+	target := t.TempDir()
+	writeSpecFile(t, target, "spec/requirements/REQ-Z-00001.yaml", "id: REQ-Z-00001\ntype: ubiquitous\ntext: When a client acts, the service shall respond.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-A-00001.yaml", "id: REQ-A-00001\ntype: feature\ntext: no obligation\nstatus: active\n")
+
+	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")
+	code2, stdout2, stderr2 := runCLI("--target", target, "--base", "main")
+	if code1 != exitFailure || code1 != code2 || stdout1 != stdout2 || stderr1 != stderr2 {
+		t.Fatalf("repeated invocation differed: (%d, %q, %q) vs (%d, %q, %q)", code1, stdout1, stderr1, code2, stdout2, stderr2)
+	}
+	aIndex := strings.Index(stderr1, "REQ-A-00001.yaml")
+	zIndex := strings.Index(stderr1, "REQ-Z-00001.yaml")
+	if aIndex < 0 || zIndex < 0 || aIndex > zIndex {
+		t.Fatalf("stderr %q is not sorted by path", stderr1)
 	}
 }
 

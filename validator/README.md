@@ -32,8 +32,12 @@ line-level diagnostics. Requirement records must include `id`, `type`,
 name at least one interface or scope. Blank selectors count as absent.
 Interface records must include `name`, `kind`, and `description`. Status
 values are `active` or `retired`. Legacy metadata (`verification`,
-`provenance`, `created`) and other unparsed fields are rejected. EARS
-and identifier checks land in follow-on work.
+`provenance`, `created`) and other unparsed fields are rejected.
+Requirement text is checked for exactly one `shall` and for a match
+against the declared EARS type (`ubiquitous`, `event-driven`,
+`state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
+State-driven statements require the keyword `While`. Identifier checks
+land in follow-on work.
 
 `--target` is used as given. The command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
