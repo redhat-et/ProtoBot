@@ -237,10 +237,13 @@ func catBlob(repo, object string) ([]byte, error) {
 		_ = cmd.Wait()
 		return nil, err
 	}
+	if int64(len(data)) > layout.MaxYAMLBytes {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return data, nil
+	}
 	if waitErr := cmd.Wait(); waitErr != nil {
-		if int64(len(data)) <= layout.MaxYAMLBytes {
-			return nil, fmt.Errorf("git cat-file failed: %s (%w)", stderr.String(), waitErr)
-		}
+		return nil, fmt.Errorf("git cat-file failed: %s (%w)", stderr.String(), waitErr)
 	}
 	return data, nil
 }

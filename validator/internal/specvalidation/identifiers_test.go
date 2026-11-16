@@ -310,8 +310,9 @@ func TestCompareBaseRejectsDeletedUnparsedBaseFile(t *testing.T) {
 	if got.Path != "spec/requirements/broken.yaml" {
 		t.Errorf("path=%q, want %q", got.Path, "spec/requirements/broken.yaml")
 	}
-	if !strings.Contains(got.Message, "removed") {
-		t.Errorf("message %q omitted 'removed'", got.Message)
+	wantMsg := "Requirement ID could not be read from comparison base and file was removed (yaml: malformed)."
+	if got.Message != wantMsg {
+		t.Errorf("got message %q, want %q", got.Message, wantMsg)
 	}
 }
 
