@@ -85,6 +85,7 @@ validator/
   internal/cli/             # checkout path and comparison-base arguments
   internal/ears/            # EARS shape and single-shall validation
   internal/gitcmd/          # managed Git child process execution
+  internal/immutability/    # parsed requirement text immutability check
   internal/layout/          # spec/requirements and spec/interfaces reader
   internal/records/         # V2 requirement and interface structures
   internal/revision/        # Git revision reader for comparison-base records

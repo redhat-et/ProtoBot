@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/redhat-et/protobot/validator/internal/gitcmd"
+	"github.com/redhat-et/protobot/validator/internal/immutability"
+	"github.com/redhat-et/protobot/validator/internal/layout"
 )
 
 func TestRunValidTargetAndBase(t *testing.T) {
@@ -162,7 +164,8 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 	symlinkErr := os.Symlink(dir, link)
 	relParent := t.TempDir()
 	relName := "rel-target"
-	if err := os.Mkdir(filepath.Join(relParent, relName), 0o755); err != nil {
+	relTarget := filepath.Join(relParent, relName)
+	if err := os.Mkdir(relTarget, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	initGitRepo(t, filepath.Join(relParent, relName))
@@ -277,6 +280,8 @@ func TestRunValidSpecRecords(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", completeRequirementYAML())
 	writeSpecFile(t, target, "spec/interfaces/cli.yaml", completeInterfaceYAML())
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -331,6 +336,8 @@ relationships:
     target: REQ-API-00003
 status: active
 `)
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -364,6 +371,8 @@ relationships:
     target: REQ-API-00001
 status: active
 `)
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -701,13 +710,14 @@ func TestRunLayoutAndEARSDiagnosticsTogether(t *testing.T) {
 		t.Fatalf("stderr %q omitted EARS path", stderr)
 	}
 }
-
 func TestRunTestTagReferenceResolution(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "active"))
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", requirementYAML("REQ-API-00002", "retired"))
 	writeSpecFile(t, target, "tests/active.feature", "@req:REQ-API-00001\nFeature: Active obligation\n")
 	writeSpecFile(t, target, "tests/retired.feature", "@req:REQ-API-00002\nFeature: Historical obligation\n")
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -989,6 +999,150 @@ func TestRunEARSDiagnosticsAreDeterministic(t *testing.T) {
 	zIndex := strings.Index(stderr1, "REQ-Z-00001.yaml")
 	if aIndex < 0 || zIndex < 0 || aIndex > zIndex {
 		t.Fatalf("stderr %q is not sorted by path", stderr1)
+	}
+}
+
+func TestRunUnchangedTextPasses(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist."))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunYAMLFormattingVariationPasses(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: event-driven
+text: >-
+  When a client sends GET /health, the service
+  shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunModifiedRequirementTextFails(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist."))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist now."))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, immutability.CodeTextImmutable) {
+		t.Fatalf("stderr %q omitted %s", stderr, immutability.CodeTextImmutable)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001") {
+		t.Fatalf("stderr %q omitted requirement id", stderr)
+	}
+}
+
+func TestRunReportsEarlierDiagnosticsAndTextImmutabilityTogether(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist."))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+
+	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist now."))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "notes.txt") {
+		t.Fatalf("stderr %q omitted layout diagnostic", stderr)
+	}
+	if !strings.Contains(stderr, immutability.CodeTextImmutable) {
+		t.Fatalf("stderr %q omitted text immutability diagnostic", stderr)
+	}
+}
+
+func TestReportDiagnosticsDelegatesToPrintDiagnostic(t *testing.T) {
+	var buf bytes.Buffer
+	reportDiagnostics(&buf, []layout.Diagnostic{
+		{Code: "test.code", Path: "spec/requirements/a\nb.yaml", Message: "multi\nline"},
+		{Code: "test.pathless", Path: "", Message: "message\r\ntext"},
+	})
+	got := buf.String()
+	want := "validator: test.code: spec/requirements/a b.yaml: multi line\nvalidator: test.pathless: message text\n"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestRunMetadataOnlyTransitionPasses(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: active
+`)
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
+type: ubiquitous
+text: The service shall exist.
+applies_to:
+  scopes:
+    - api
+relationships: []
+status: retired
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestRunNewlyAddedIDsPass(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAMLWithText("REQ-API-00001", "The service shall exist."))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", requirementYAMLWithText("REQ-API-00002", "The service shall log health checks."))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 
@@ -1422,4 +1576,8 @@ func requirementYAML(id string, status ...string) string {
 		st = status[0]
 	}
 	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\napplies_to:\n  scopes:\n    - api\nrelationships: []\nstatus: " + st + "\n"
+}
+
+func requirementYAMLWithText(id, text string) string {
+	return "id: " + id + "\ntype: ubiquitous\ntext: " + text + "\napplies_to:\n  scopes:\n    - api\nrelationships: []\nstatus: active\n"
 }

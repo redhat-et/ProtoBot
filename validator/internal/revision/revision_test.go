@@ -23,6 +23,9 @@ func TestReadLoadsCommittedRequirements(t *testing.T) {
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
+	if snapshot.Root != root {
+		t.Fatalf("snapshot.Root=%q, want %q", snapshot.Root, root)
+	}
 	if len(snapshot.Requirements) != 1 || snapshot.Requirements[0].Record.ID != "REQ-API-00001" {
 		t.Fatalf("requirements=%+v", snapshot.Requirements)
 	}
@@ -123,6 +126,97 @@ func TestReadLayoutDiagnosticsForMalformedBase(t *testing.T) {
 	if !hasPath(diagnostics, "spec/requirements/bad.yaml") {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
+	if !hasCode(diagnostics, CodeParseFailed) {
+		t.Fatalf("expected revision.parse_failed, got %v", diagnostics)
+	}
+	if len(diagnostics) > 0 && !strings.Contains(diagnostics[0].Message, `comparison base "HEAD"`) {
+		t.Fatalf("diagnostic message %q does not contain comparison base ref", diagnostics[0].Message)
+	}
+}
+
+func TestReadRejectsUnsupportedEntryInBase(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "spec/requirements/target.yaml", requirementYAML("REQ-API-00001"))
+	linkPath := filepath.Join(root, "spec", "requirements", "LINK-00001.yaml")
+	if err := os.Symlink("target.yaml", linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "base with symlink")
+
+	_, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasCode(diagnostics, CodeUnsupportedEntry) {
+		t.Fatalf("expected %s, got diagnostics=%v", CodeUnsupportedEntry, diagnostics)
+	}
+	if !hasPath(diagnostics, "spec/requirements/LINK-00001.yaml") {
+		t.Fatalf("expected path spec/requirements/LINK-00001.yaml, got %v", diagnostics)
+	}
+}
+
+func TestReadRejectsNestedDirectoryInBase(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "spec/requirements/sub/nested.yaml", requirementYAML("REQ-API-00001"))
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "base with nested directory")
+
+	_, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasPath(diagnostics, "spec/requirements/sub") {
+		t.Fatalf("expected path spec/requirements/sub, got %v", diagnostics)
+	}
+	if !hasCode(diagnostics, CodeUnexpectedFile) {
+		t.Fatalf("expected %s, got %v", CodeUnexpectedFile, diagnostics)
+	}
+}
+
+func TestReadBaseSpecSymlinkFailsUnsupportedEntry(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "other/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	if err := os.Symlink("other", filepath.Join(root, "spec")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "base with spec symlink")
+
+	_, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasCode(diagnostics, CodeUnsupportedEntry) {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeUnsupportedEntry)
+	}
+	if !hasPath(diagnostics, "spec") {
+		t.Fatalf("diagnostics=%v, want path 'spec'", diagnostics)
+	}
+}
+
+func TestReadBaseSpecRequirementsSymlinkFailsUnsupportedEntry(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "other/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	if err := os.MkdirAll(filepath.Join(root, "spec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../other", filepath.Join(root, "spec", "requirements")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "base with spec/requirements symlink")
+
+	_, diagnostics, err := Read(root, "HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasCode(diagnostics, CodeUnsupportedEntry) {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeUnsupportedEntry)
+	}
+	if !hasPath(diagnostics, "spec/requirements") {
+		t.Fatalf("diagnostics=%v, want path 'spec/requirements'", diagnostics)
+	}
 }
 
 func TestSafeRepoPath(t *testing.T) {
@@ -167,7 +261,7 @@ func TestReadOversizedBaseFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !hasCode(diagnostics, layout.CodeReadFailed) || !hasPath(diagnostics, "spec/requirements/REQ-BIG-00001.yaml") {
+	if !hasCode(diagnostics, CodeReadFailed) || !hasPath(diagnostics, "spec/requirements/REQ-BIG-00001.yaml") {
 		t.Fatalf("diagnostics=%v, want CodeReadFailed for oversized file", diagnostics)
 	}
 }

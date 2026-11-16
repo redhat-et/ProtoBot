@@ -18,8 +18,11 @@ import (
 
 // Diagnostic codes for comparison-base reads.
 const (
-	CodeNotFound   = "revision.not_found"
-	CodeReadFailed = "revision.read_failed"
+	CodeNotFound         = "revision.not_found"
+	CodeReadFailed       = "revision.read_failed"
+	CodeUnsupportedEntry = "revision.unsupported_entry"
+	CodeUnexpectedFile   = "revision.unexpected_file"
+	CodeParseFailed      = "revision.parse_failed"
 )
 
 // Error represents a revision-level failure preventing reading the base tree.
@@ -42,6 +45,7 @@ type treeEntry struct {
 const (
 	treeModeRegular    = "100644"
 	treeModeExecutable = "100755"
+	treeModeTree       = "040000"
 )
 
 // Read loads requirement records from the Git tree of ref as resolved in
@@ -65,7 +69,23 @@ func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic, error) {
 		return layout.Snapshot{}, nil, &Error{Code: CodeNotFound, Message: fmt.Sprintf("comparison base %q is not a commit in the checkout", ref)}
 	}
 
-	entries, err := listRequirements(absolute, commit)
+	exists, diags := checkTreeContainer(absolute, commit, ref, "spec")
+	if len(diags) > 0 {
+		return layout.Snapshot{}, diags, nil
+	}
+	if !exists {
+		return layout.Snapshot{Root: absolute}, nil, nil
+	}
+
+	exists, diags = checkTreeContainer(absolute, commit, ref, layout.RequirementsDir)
+	if len(diags) > 0 {
+		return layout.Snapshot{}, diags, nil
+	}
+	if !exists {
+		return layout.Snapshot{Root: absolute}, nil, nil
+	}
+
+	entries, listDiags, err := listRequirements(absolute, commit, ref)
 	if err != nil {
 		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q", ref)}
 	}
@@ -79,7 +99,24 @@ func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic, error) {
 	if err := materialize(absolute, tmp, entries); err != nil {
 		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q", ref)}
 	}
-	snapshot, parseDiagnostics := layout.Read(tmp)
+	snapshot, layoutDiags := layout.Read(tmp)
+	snapshot.Root = absolute
+
+	var parseDiagnostics []layout.Diagnostic
+	parseDiagnostics = append(parseDiagnostics, listDiags...)
+	for _, d := range layoutDiags {
+		code := d.Code
+		if strings.HasPrefix(code, "layout.") {
+			code = "revision." + strings.TrimPrefix(code, "layout.")
+		} else if !strings.HasPrefix(code, "revision.") {
+			code = "revision." + code
+		}
+		parseDiagnostics = append(parseDiagnostics, layout.Diagnostic{
+			Code:    code,
+			Path:    d.Path,
+			Message: fmt.Sprintf("comparison base %q: %s", ref, d.Message),
+		})
+	}
 	return snapshot, parseDiagnostics, nil
 }
 
@@ -111,37 +148,75 @@ func resolveCommit(target, ref string) (string, error) {
 	return commit, nil
 }
 
-func listRequirements(target, commit string) ([]treeEntry, error) {
+func checkTreeContainer(target, commit, ref, repoPath string) (bool, []layout.Diagnostic) {
+	out, err := gitOutput(target, "ls-tree", "-z", commit, repoPath)
+	if err != nil {
+		return false, []layout.Diagnostic{{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q: %s", ref, err)}}
+	}
+	trimmed := bytes.TrimRight(out, "\x00")
+	if len(trimmed) == 0 {
+		return false, nil
+	}
+	entry, err := parseLsTree(trimmed)
+	if err != nil {
+		return false, []layout.Diagnostic{{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q: %s", ref, err)}}
+	}
+	if entry.mode != treeModeTree {
+		return false, []layout.Diagnostic{{Code: CodeUnsupportedEntry, Path: entry.path, Message: fmt.Sprintf("comparison base %q: unsupported entry mode %s", ref, entry.mode)}}
+	}
+	return true, nil
+}
+
+func listRequirements(target, commit, ref string) ([]treeEntry, []layout.Diagnostic, error) {
 	out, err := gitOutput(target, "ls-tree", "-r", "--full-tree", "-z", "-l", commit, "--", layout.RequirementsDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var entries []treeEntry
+	var diags []layout.Diagnostic
+	seenDirs := make(map[string]struct{})
 	for _, rec := range bytes.Split(out, []byte{0}) {
 		if len(rec) == 0 {
 			continue
 		}
 		entry, err := parseLsTree(rec)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !safeRepoPath(entry.path) {
-			return nil, fmt.Errorf("unsafe path %q", entry.path)
+			return nil, []layout.Diagnostic{{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q: unsafe path %q", ref, entry.path)}}, nil
 		}
-		if path.Dir(entry.path) != layout.RequirementsDir {
-			continue
-		}
-		if path.Ext(entry.path) != ".yaml" {
+		dir := path.Dir(entry.path)
+		if dir != layout.RequirementsDir {
+			rel := strings.TrimPrefix(dir, layout.RequirementsDir+"/")
+			firstPart := strings.Split(rel, "/")[0]
+			nestedDir := path.Join(layout.RequirementsDir, firstPart)
+			if _, seen := seenDirs[nestedDir]; !seen {
+				seenDirs[nestedDir] = struct{}{}
+				diags = append(diags, layout.Diagnostic{
+					Code:    CodeUnexpectedFile,
+					Path:    nestedDir,
+					Message: fmt.Sprintf("comparison base %q: is a directory", ref),
+				})
+			}
 			continue
 		}
 		switch entry.mode {
 		case treeModeRegular, treeModeExecutable:
 		default:
+			diags = append(diags, layout.Diagnostic{
+				Code:    CodeUnsupportedEntry,
+				Path:    entry.path,
+				Message: fmt.Sprintf("comparison base %q: unsupported entry mode %s", ref, entry.mode),
+			})
+			continue
+		}
+		if path.Ext(entry.path) != ".yaml" {
 			continue
 		}
 		entries = append(entries, entry)
 	}
-	return entries, nil
+	return entries, diags, nil
 }
 
 func parseLsTree(rec []byte) (treeEntry, error) {
@@ -150,11 +225,11 @@ func parseLsTree(rec []byte) (treeEntry, error) {
 		return treeEntry{}, fmt.Errorf("malformed ls-tree entry")
 	}
 	fields := bytes.Fields(meta)
-	if len(fields) != 4 {
+	if len(fields) < 3 {
 		return treeEntry{}, fmt.Errorf("malformed ls-tree entry")
 	}
 	var size int64
-	if string(fields[3]) != "-" {
+	if len(fields) >= 4 && string(fields[3]) != "-" {
 		var err error
 		size, err = strconv.ParseInt(string(fields[3]), 10, 64)
 		if err != nil {

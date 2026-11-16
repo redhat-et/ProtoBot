@@ -59,6 +59,7 @@ type Document[T any] struct {
 }
 
 // Snapshot is the requirement and interface records discovered in a checkout.
+// Root is the absolute path to the checkout directory.
 type Snapshot struct {
 	Root         string
 	Requirements []Document[records.Requirement]
@@ -126,7 +127,7 @@ func loadDir[T any](root *os.Root, relative string, decode func([]byte) (T, map[
 			entryName = strconv.Quote(name)
 		}
 		entryRel := path.Join(relative, entryName)
-		if !safeEntryName(name) {
+		if !SafeEntryName(name) {
 			diagnostics = append(diagnostics, diagnostic(CodeUnexpectedFile, entryRel, "has an unsafe name"))
 			continue
 		}
@@ -192,7 +193,11 @@ func loadEntry[T any](root *os.Root, relative string, decode func([]byte) (T, ma
 	return Document[T]{Path: relative, Record: value, Fields: fields}, nil
 }
 
-func safeEntryName(name string) bool {
+// SafeEntryName reports whether name is a safe single-component path name.
+// It rejects empty names, dot, dot-dot, directory separators, control
+// characters (C0, DEL, and C1), line and paragraph separators (U+2028,
+// U+2029), and Unicode format characters (Cf).
+func SafeEntryName(name string) bool {
 	if name == "" || name == "." || name == ".." {
 		return false
 	}
@@ -206,10 +211,28 @@ func safeEntryName(name string) bool {
 }
 
 func hasControl(s string) bool {
-	for _, r := range s {
-		if unicode.IsControl(r) {
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
 			return true
 		}
+		if isControlOrDangerous(r) {
+			return true
+		}
+		i += size
+	}
+	return false
+}
+
+func isControlOrDangerous(r rune) bool {
+	if unicode.IsControl(r) {
+		return true
+	}
+	if r == 0x2028 || r == 0x2029 {
+		return true
+	}
+	if unicode.Is(unicode.Cf, r) {
+		return true
 	}
 	return false
 }
