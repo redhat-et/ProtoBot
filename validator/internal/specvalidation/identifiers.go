@@ -2,6 +2,7 @@ package specvalidation
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -186,6 +187,9 @@ func validateReuse(target, base layout.Snapshot) []Diagnostic {
 		for _, path := range baseValidPaths[id] {
 			baseSet[path] = true
 		}
+		if isBasenameCorrection(id, current, baseSet) {
+			continue
+		}
 		joined := strings.Join(baseValidPaths[id], ", ")
 		for _, path := range current {
 			if baseSet[path] {
@@ -204,6 +208,15 @@ func validateReuse(target, base layout.Snapshot) []Diagnostic {
 		}
 	}
 	return diagnostics
+}
+
+func isBasenameCorrection(id string, current []string, baseSet map[string]bool) bool {
+	canonical := canonicalRequirementPath(id)
+	return len(current) == 1 && current[0] == canonical && !baseSet[canonical]
+}
+
+func canonicalRequirementPath(id string) string {
+	return path.Join(layout.RequirementsDir, id+".yaml")
 }
 
 func validateUnparsedBaseDeletions(target layout.Snapshot, targetDiagnostics []layout.Diagnostic, baseDiagnostics []layout.Diagnostic) []Diagnostic {

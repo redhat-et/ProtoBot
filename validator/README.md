@@ -77,7 +77,9 @@ fails with `spec.id_basename_mismatch`. An interface basename that does not
 equal the declared `name` fails with `layout.invalid_basename`. Parsed
 records remain in the snapshot so other checks still run. Requirement
 identity is path-keyed: moving a record to a new file path counts as a
-deletion at the old path and a reuse at the new path.
+deletion at the old path and a reuse at the new path, except when moving
+a record from a non-canonical path to its canonical
+`spec/requirements/{id}.yaml` path to correct its basename.
 
 ```text
 validator --target PATH --base REF

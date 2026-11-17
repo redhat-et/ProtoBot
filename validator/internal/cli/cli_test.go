@@ -1591,6 +1591,26 @@ func TestRunRepairedBaseInvalidAndDuplicateIDsExitsZero(t *testing.T) {
 	}
 }
 
+func TestRunRepairedBaseBasenameCorrectionExitsZero(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/notes.yaml", requirementYAML("REQ-CORE-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "commit with non-canonical requirement path")
+
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "notes.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	writeSpecFile(t, target, "spec/requirements/REQ-CORE-00001.yaml", requirementYAML("REQ-CORE-00001"))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitOK {
+		t.Fatalf("code=%d, want %d; stderr=%q", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
 func TestRunDeletedBaseInvalidIDFails(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/bad.yaml", requirementYAML("REQ-api-00001"))

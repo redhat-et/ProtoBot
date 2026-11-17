@@ -168,6 +168,31 @@ func TestCompareBaseRejectsReuse(t *testing.T) {
 	}
 }
 
+func TestCompareBaseAllowsBasenameCorrection(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/notes.yaml", id: "REQ-CORE-00001"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-CORE-00001.yaml", id: "REQ-CORE-00001"},
+	})
+	if diagnostics := CompareBase(target, base, nil); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v, want none (basename correction should pass CompareBase)", diagnostics)
+	}
+}
+
+func TestCompareBaseRejectsNonCanonicalMove(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/notes.yaml", id: "REQ-CORE-00001"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/other.yaml", id: "REQ-CORE-00001"},
+	})
+	diagnostics := CompareBase(target, base, nil)
+	if len(diagnostics) != 1 || diagnostics[0].Code != CodeReusedID {
+		t.Fatalf("diagnostics=%v, want CodeReusedID for other.yaml", diagnostics)
+	}
+}
+
 func TestCompareBaseAllowsNewIDs(t *testing.T) {
 	base := snapshotFromIDs([]idPath{
 		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
