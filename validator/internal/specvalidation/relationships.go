@@ -15,12 +15,6 @@ const (
 	CodeCycle       = "relationship.cycle"
 )
 
-const (
-	vertexUnvisited = iota
-	vertexVisiting
-	vertexVisited
-)
-
 var allowedRelationshipTypes = map[string]bool{
 	records.RelDependsOn:  true,
 	records.RelSupersedes: true,
@@ -96,8 +90,6 @@ func validateAcyclicGraph(relationType string, graph map[string][]string, paths 
 		relationType: relationType,
 		graph:        graph,
 		paths:        paths,
-		state:        make(map[string]int),
-		reported:     make(map[string]bool),
 	}
 	validator.run()
 	return validator.diagnostics
@@ -107,17 +99,15 @@ type graphValidator struct {
 	relationType string
 	graph        map[string][]string
 	paths        map[string]string
-	state        map[string]int
-	stack        []string
-	reported     map[string]bool
 	diagnostics  []Diagnostic
 }
 
 func (v *graphValidator) run() {
-	for _, vertex := range v.collectVertices() {
-		if v.state[vertex] == vertexUnvisited {
-			v.visit(vertex)
+	for _, component := range stronglyConnectedComponents(v.graph, v.collectVertices()) {
+		if !v.componentHasCycle(component) {
+			continue
 		}
+		v.reportCycle(component)
 	}
 }
 
@@ -145,40 +135,92 @@ func (v *graphValidator) collectVertices() []string {
 	return vertices
 }
 
-func (v *graphValidator) visit(vertex string) {
-	v.state[vertex] = vertexVisiting
-	v.stack = append(v.stack, vertex)
+func (v *graphValidator) componentHasCycle(component []string) bool {
+	if len(component) > 1 {
+		return true
+	}
+	if len(component) == 0 {
+		return false
+	}
+	vertex := component[0]
 	for _, target := range v.graph[vertex] {
-		switch v.state[target] {
-		case vertexUnvisited:
-			v.visit(target)
-		case vertexVisiting:
-			v.reportCycle(vertex, target)
+		if target == vertex {
+			return true
 		}
 	}
-	v.stack = v.stack[:len(v.stack)-1]
-	v.state[vertex] = vertexVisited
+	return false
 }
 
-func (v *graphValidator) reportCycle(vertex, target string) {
-	start := 0
-	for index, item := range v.stack {
-		if item == target {
-			start = index
+func (v *graphValidator) reportCycle(component []string) {
+	members := append([]string(nil), component...)
+	sort.Strings(members)
+	path := ""
+	for _, id := range members {
+		if candidate := v.paths[id]; candidate != "" {
+			path = candidate
 			break
 		}
 	}
-	cycle := append([]string(nil), v.stack[start:]...)
-	cycle = append(cycle, target)
-	key := strings.Join(cycle, "->")
-	if v.reported[key] {
-		return
-	}
-	v.reported[key] = true
 	v.diagnostics = append(v.diagnostics, Diagnostic{
 		Code:    CodeCycle,
-		Path:    v.paths[vertex],
+		Path:    path,
 		Field:   "relationships",
-		Message: fmt.Sprintf("The %s relationship graph contains a cycle: %s.", v.relationType, key),
+		Message: fmt.Sprintf("The %s relationship graph contains a cycle: %s.", v.relationType, strings.Join(members, ", ")),
 	})
+}
+
+func stronglyConnectedComponents(graph map[string][]string, vertices []string) [][]string {
+	indexOf := make(map[string]int, len(vertices))
+	lowlink := make(map[string]int, len(vertices))
+	onStack := make(map[string]bool, len(vertices))
+	var stack []string
+	var components [][]string
+	index := 0
+
+	var visit func(string)
+	visit = func(vertex string) {
+		indexOf[vertex] = index
+		lowlink[vertex] = index
+		index++
+		stack = append(stack, vertex)
+		onStack[vertex] = true
+
+		for _, target := range graph[vertex] {
+			if _, seen := indexOf[target]; !seen {
+				visit(target)
+				if lowlink[target] < lowlink[vertex] {
+					lowlink[vertex] = lowlink[target]
+				}
+				continue
+			}
+			if onStack[target] && indexOf[target] < lowlink[vertex] {
+				lowlink[vertex] = indexOf[target]
+			}
+		}
+
+		if lowlink[vertex] != indexOf[vertex] {
+			return
+		}
+		start := len(stack) - 1
+		for start > 0 && stack[start] != vertex {
+			start--
+		}
+		component := append([]string(nil), stack[start:]...)
+		stack = stack[:start]
+		for _, item := range component {
+			onStack[item] = false
+		}
+		sort.Strings(component)
+		components = append(components, component)
+	}
+
+	for _, vertex := range vertices {
+		if _, seen := indexOf[vertex]; !seen {
+			visit(vertex)
+		}
+	}
+	sort.Slice(components, func(i, j int) bool {
+		return components[i][0] < components[j][0]
+	})
+	return components
 }
