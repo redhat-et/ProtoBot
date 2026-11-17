@@ -1,6 +1,6 @@
 // Package cli is the command line of validator:
 //
-//	validator --target PATH --base REF
+//	validator --target PATH --base REF [--allow-self-comparison]
 //	validator --help
 //	validator -h
 //
@@ -35,18 +35,20 @@ const (
 )
 
 const usage = `usage:
-  validator --target PATH --base REF
+  validator --target PATH --base REF [--allow-self-comparison]
   validator --help
   validator -h
 
-  --target PATH   checkout directory to validate
-  --base REF      comparison base for identity and immutability checks
+  --target PATH              checkout directory to validate
+  --base REF                 comparison base for identity and immutability checks
+  --allow-self-comparison    allow --base to resolve to the target checkout HEAD
 `
 
 type options struct {
-	target string
-	base   string
-	help   bool
+	target              string
+	base                string
+	allowSelfComparison bool
+	help                bool
 }
 
 // Run executes the validator command line and returns the exit status.
@@ -90,7 +92,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		reportSpec(stderr, diagnostic)
 	}
 
-	baseSnapshot, baseParseDiagnostics, revErr := revision.Read(opts.target, opts.base)
+	baseSnapshot, baseParseDiagnostics, revErr := revision.Read(opts.target, opts.base, revision.Options{AllowSelfComparison: opts.allowSelfComparison})
 	if revErr != nil {
 		failed = true
 		var rErr *revision.Error
@@ -101,7 +103,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 	} else {
 		for _, diagnostic := range baseParseDiagnostics {
-			if specvalidation.TargetPathExists(snapshot, diagnostics, diagnostic.Path) || specvalidation.IsRepairedBaseRequirement(diagnostic.Path, snapshot, baseSnapshot, diagnostics, baseParseDiagnostics...) {
+			if diagnostic.Code == revision.CodeEmptyBase || specvalidation.TargetPathExists(snapshot, diagnostics, diagnostic.Path) || specvalidation.IsRepairedBaseRequirement(diagnostic.Path, snapshot, baseSnapshot, diagnostics, baseParseDiagnostics...) {
 				reportBaseLayout(stderr, opts.base, diagnostic)
 			}
 		}
@@ -203,6 +205,11 @@ func parseArgs(args []string) (options, error) {
 			}
 			opts.base = value
 			i = next - 1
+		case arg == "--allow-self-comparison":
+			if opts.allowSelfComparison {
+				return options{}, fmt.Errorf("--allow-self-comparison may be specified once")
+			}
+			opts.allowSelfComparison = true
 		default:
 			return options{}, fmt.Errorf("unexpected argument %q", arg)
 		}

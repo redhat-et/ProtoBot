@@ -12,13 +12,17 @@ import (
 	"github.com/redhat-et/protobot/validator/internal/gitcmd"
 	"github.com/redhat-et/protobot/validator/internal/immutability"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 )
 
 func TestRunValidTargetAndBase(t *testing.T) {
 	target := gitRepo(t)
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
-	if code != exitOK || stderr != "" {
+	if code != exitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("stderr %q omitted empty-base note", stderr)
 	}
 	if !strings.Contains(stdout, "validator: ok") {
 		t.Fatalf("stdout %q does not report ok", stdout)
@@ -34,8 +38,11 @@ func TestRunValidTargetAndBase(t *testing.T) {
 func TestRunEqualsForm(t *testing.T) {
 	target := gitRepo(t)
 	code, stdout, stderr := runCLI("--target="+target, "--base=main")
-	if code != exitOK || stderr != "" {
+	if code != exitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("stderr %q omitted empty-base note", stderr)
 	}
 	if !strings.Contains(stdout, "base: main") {
 		t.Fatalf("stdout %q does not include equals-form base", stdout)
@@ -108,6 +115,7 @@ func TestRunMalformedFlags(t *testing.T) {
 		{name: "empty base", args: []string{"--target", target, "--base="}, want: "--base takes a comparison-base argument"},
 		{name: "duplicate target", args: []string{"--target", target, "--target", target, "--base", "main"}, want: "--target may be specified once"},
 		{name: "duplicate base", args: []string{"--target", target, "--base", "main", "--base", "other"}, want: "--base may be specified once"},
+		{name: "duplicate self-comparison", args: []string{"--target", target, "--base", "main", "--allow-self-comparison", "--allow-self-comparison"}, want: "--allow-self-comparison may be specified once"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,8 +215,11 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 				t.Chdir(tc.chdir)
 			}
 			code, stdout, stderr := runCLI(tc.args...)
-			if code != exitOK || stderr != "" {
+			if code != exitOK {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if !strings.Contains(stderr, revision.CodeEmptyBase) {
+				t.Fatalf("stderr %q omitted empty-base note", stderr)
 			}
 			if !strings.Contains(stdout, "target: "+tc.target) {
 				t.Fatalf("stdout %q does not include target %q", stdout, tc.target)
@@ -601,6 +612,8 @@ applies_to:
 relationships: []
 status: active
 `)
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -932,8 +945,8 @@ func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
+	if len(lines) < 1 {
+		t.Fatalf("stderr had %d lines, want at least 1: %q", len(lines), stderr)
 	}
 	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00001.yaml:"
 	if !strings.HasPrefix(lines[0], wantPrefix) {
@@ -957,9 +970,9 @@ func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantStderr := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name\n"
-	if stderr != wantStderr {
-		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	wantLine := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name"
+	if !strings.Contains(stderr, wantLine) {
+		t.Fatalf("stderr = %q, want to contain %q", stderr, wantLine)
 	}
 }
 
@@ -979,9 +992,9 @@ func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantStderr := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\"\n"
-	if stderr != wantStderr {
-		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	wantLine := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\""
+	if !strings.Contains(stderr, wantLine) {
+		t.Fatalf("stderr = %q, want to contain %q", stderr, wantLine)
 	}
 }
 
@@ -1203,6 +1216,35 @@ func TestModuleDoesNotDependOnNetworkPackages(t *testing.T) {
 }
 
 func runCLI(args ...string) (int, string, string) {
+	// Existing tests compare a working tree against the checkout HEAD
+	// commit. That is self-comparison under the SHA rule and requires
+	// the opt-in; dedicated tests below exercise the default rejection.
+	// Help and usage-error cases must not receive the extra flag, because
+	// --help short-circuits only when it appears in the original argv.
+	if !needsSelfComparisonOptIn(args) {
+		return runCLIRaw(args...)
+	}
+	return runCLIRaw(append(append([]string{}, args...), "--allow-self-comparison")...)
+}
+
+func needsSelfComparisonOptIn(args []string) bool {
+	hasTarget := false
+	hasBase := false
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" || arg == "--allow-self-comparison" {
+			return false
+		}
+		if arg == "--target" || strings.HasPrefix(arg, "--target=") {
+			hasTarget = true
+		}
+		if arg == "--base" || strings.HasPrefix(arg, "--base=") {
+			hasBase = true
+		}
+	}
+	return hasTarget && hasBase
+}
+
+func runCLIRaw(args ...string) (int, string, string) {
 	var stdout, stderr bytes.Buffer
 	code := Run(args, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
@@ -1566,6 +1608,69 @@ func TestRunUnknownBaseFails(t *testing.T) {
 	if !strings.Contains(stderr, "not-a-ref") {
 		t.Fatalf("stderr %q omitted unknown base", stderr)
 	}
+}
+
+func TestRunRejectsSelfComparisonAgainstHEAD(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, revision.CodeSelfComparison) {
+		t.Fatalf("stderr %q omitted %s", stderr, revision.CodeSelfComparison)
+	}
+	if !strings.Contains(stderr, "distinct revision required") {
+		t.Fatalf("stderr %q omitted distinct-revision guidance", stderr)
+	}
+}
+
+func TestRunAllowSelfComparisonAcceptsHEAD(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", "HEAD", "--allow-self-comparison")
+	if code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunEmptyBaseTreeEmitsNote(t *testing.T) {
+	target := gitRepo(t)
+	emptyBase := gitRevParse(t, target, "HEAD")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", emptyBase)
+	if code != exitOK {
+		t.Fatalf("expected exit 0 for valid tree with empty base, got %d; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+	if !strings.Contains(stderr, "validator: note: comparison base") ||
+		!strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("expected note diagnostic on stderr, got: %s", stderr)
+	}
+}
+
+func gitRevParse(t *testing.T, root, ref string) string {
+	t.Helper()
+	command := gitcmd.Command("-C", root, "rev-parse", ref)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("rev-parse %s failed: %v", ref, err)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func TestRunRepairedBaseMalformedYAMLExitsZero(t *testing.T) {

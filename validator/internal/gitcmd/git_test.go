@@ -22,6 +22,9 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_SSH=/custom/ssh",
 		"GIT_SSH_COMMAND=ssh -i id_rsa",
 		"LC_ALL=en_US.UTF-8",
+		"GIT_CONFIG=/custom/gitconfig",
+		"GIT_CONFIG_GLOBAL=/custom/global",
+		"GIT_CONFIG_SYSTEM=/custom/system",
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/tmp/hooks",
@@ -41,6 +44,9 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_SSH=/custom/ssh",
 		"GIT_SSH_COMMAND=ssh -i id_rsa",
 		"LC_ALL=en_US.UTF-8",
+		"GIT_CONFIG=/custom/gitconfig",
+		"GIT_CONFIG_GLOBAL=/custom/global",
+		"GIT_CONFIG_SYSTEM=/custom/system",
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/tmp/hooks",
@@ -62,10 +68,31 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_NO_LAZY_FETCH=1",
 		"GIT_TERMINAL_PROMPT=0",
 		"SSH_ASKPASS_REQUIRE=never",
+		"GIT_CONFIG_NOSYSTEM=1",
 	} {
 		if !slices.Contains(env, fixed) {
 			t.Fatalf("env missing %s: %q", fixed, env)
 		}
+	}
+}
+
+func TestEnvironStripsGitConfigAndSetsNoSystem(t *testing.T) {
+	input := []string{
+		"PATH=/usr/bin",
+		"GIT_CONFIG=/custom/gitconfig",
+		"GIT_CONFIG_GLOBAL=/custom/global",
+		"GIT_CONFIG_SYSTEM=/custom/system",
+	}
+	env := Environ(input)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "GIT_CONFIG=") ||
+			strings.HasPrefix(entry, "GIT_CONFIG_GLOBAL=") ||
+			strings.HasPrefix(entry, "GIT_CONFIG_SYSTEM=") {
+			t.Errorf("expected %q to be stripped from environment", entry)
+		}
+	}
+	if !slices.Contains(env, "GIT_CONFIG_NOSYSTEM=1") {
+		t.Errorf("expected GIT_CONFIG_NOSYSTEM=1 to be present in environment")
 	}
 }
 
