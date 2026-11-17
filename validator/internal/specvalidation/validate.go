@@ -18,7 +18,8 @@ type Diagnostic struct {
 // Validate runs specification checks on successfully parsed records.
 // Layout diagnostics remain the caller's responsibility; passing them
 // suppresses cascading reference diagnostics for target records that
-// failed to load.
+// failed to load. Suppression is keyed on <store>/<target>.yaml and
+// assumes an interface file stem matches the declared name.
 func Validate(snapshot layout.Snapshot, layoutDiagnostics ...layout.Diagnostic) []Diagnostic {
 	diagnostics := validateRecordSchema(snapshot)
 	diagnostics = append(diagnostics, validateRequirementIDs(snapshot.Requirements)...)

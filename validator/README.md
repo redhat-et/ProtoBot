@@ -20,8 +20,9 @@ allowlist, relationship acyclicity, replacement and retirement rules,
 reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
-(issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402, #459,
-and #463). The command line accepts the checkout path and comparison base.
+(issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
+and #459, #462, and #463). The command line accepts the checkout path and
+comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
 empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
@@ -38,10 +39,16 @@ without a successor is allowed. Retired records must not be deleted. Each
 `applies_to.interfaces` entry must equal an interface record's `name`
 (matching is case-sensitive), and requirement IDs in `relationships[].target`
 must resolve to declared records; retired requirement targets satisfy
-resolution. Requirement IDs must match `REQ-<SCOPE>-<NNNNN>`, be unique in the
-working tree, and must not be deleted or reused relative to the comparison
-base. Requirement file basenames must use that same identifier pattern and
-equal the in-record `id`. Interface file basenames must equal the declared
+resolution. A missing interface name or requirement target fails with
+`reference.not_found`. An interface name declared by more than one
+interface record fails with `reference.ambiguous` when a requirement
+attaches that name. Duplicate requirement IDs fail with
+`requirement.duplicate_id` on the declaring records, not with
+`reference.ambiguous`. Requirement IDs must match `REQ-<SCOPE>-<NNNNN>`, be
+unique in the working tree, and must not be deleted or reused relative to
+the comparison base. Requirement file basenames must use that same identifier
+pattern and equal the in-record `id`. Interface file basenames must equal the
+declared
 `name`. It also scans Gherkin `.feature` files under `tests/` for `@req:<ID>`
 tags and fails when a tag does not resolve to a known requirement record.
 Active and retired IDs both count as known; unknown or misspelled IDs fail
@@ -77,8 +84,13 @@ with `requirement.invalid_basename`. When `id` is non-empty, a valid basename
 that does not equal `id` fails with `requirement.id_basename_mismatch`.
 When `name` is non-empty, an interface basename that does not equal the declared
 `name` fails with `interface.name_basename_mismatch`. Parsed records remain in
-the snapshot so other checks still run. Requirement identity is path-keyed:
-moving a record to a new file path with the same ID emits
+the snapshot so other checks still run. When a target record fails to load,
+referring records do not receive a cascading `reference.not_found`; the layout
+diagnostic remains the actionable error. Parse-failure suppression looks up
+`<store>/<target>.yaml` in the same store directory, so interface suppression
+assumes the file stem matches the declared `name`. A target that contains `/`,
+`\`, or `..` is not eligible for suppression. Requirement identity is
+path-keyed: moving a record to a new file path with the same ID emits
 `requirement.reused_id` at the new path and no `requirement.deleted`. Two
 exceptions apply: moving a record from a non-canonical path to its canonical
 `spec/requirements/{id}.yaml` path to correct its basename suppresses
