@@ -4,8 +4,8 @@ package immutability
 
 import (
 	"fmt"
-	"sort"
 
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/layout"
 )
 
@@ -51,19 +51,10 @@ func Check(target, base layout.Snapshot) []layout.Diagnostic {
 			Message: fmt.Sprintf("parsed text for %q differs from the comparison base", id),
 		})
 	}
-	sortDiagnostics(diagnostics)
+	diag.Sort(diagnostics, diagnosticKey)
 	return diagnostics
 }
 
-func sortDiagnostics(diagnostics []layout.Diagnostic) {
-	sort.Slice(diagnostics, func(i, j int) bool {
-		left, right := diagnostics[i], diagnostics[j]
-		if left.Path != right.Path {
-			return left.Path < right.Path
-		}
-		if left.Code != right.Code {
-			return left.Code < right.Code
-		}
-		return left.Message < right.Message
-	})
+func diagnosticKey(d layout.Diagnostic) diag.Key {
+	return diag.Key{Path: d.Path, Code: d.Code, Message: d.Message}
 }

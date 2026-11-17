@@ -16,8 +16,8 @@ import (
 	"io"
 	"os"
 	"strings"
-	"unicode/utf8"
 
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/ears"
 	"github.com/redhat-et/protobot/validator/internal/immutability"
 	"github.com/redhat-et/protobot/validator/internal/layout"
@@ -168,59 +168,7 @@ func reportDiagnostics(stderr io.Writer, diagnostics []layout.Diagnostic) {
 }
 
 func writeLine(w io.Writer, line string) {
-	_, _ = fmt.Fprintf(w, "%s\n", sanitize(line))
-}
-
-func sanitize(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 1 {
-			fmt.Fprintf(&b, "\\x%02x", s[i])
-			i++
-			continue
-		}
-		if isControlOrDangerous(r) {
-			if r < 0x100 {
-				fmt.Fprintf(&b, "\\x%02x", r)
-			} else {
-				for _, bt := range []byte(string(r)) {
-					fmt.Fprintf(&b, "\\x%02x", bt)
-				}
-			}
-		} else {
-			b.WriteRune(r)
-		}
-		i += size
-	}
-	return b.String()
-}
-
-func isControlOrDangerous(r rune) bool {
-	if r < 0x20 || r == 0x7f {
-		return true // C0 controls and DEL
-	}
-	if r >= 0x80 && r <= 0x9f {
-		return true // C1 controls
-	}
-	if r == 0x2028 || r == 0x2029 {
-		return true // Line and paragraph separators
-	}
-	// Bidirectional text controls:
-	// U+061C (Arabic letter mark)
-	// U+200E (LRM), U+200F (RLM)
-	// U+202A..U+202E (LRE, RLE, PDF, LRO, RLO)
-	// U+2066..U+2069 (LRI, RLI, FSI, PDI)
-	if r == 0x061c || r == 0x200e || r == 0x200f {
-		return true
-	}
-	if r >= 0x202a && r <= 0x202e {
-		return true
-	}
-	if r >= 0x2066 && r <= 0x2069 {
-		return true
-	}
-	return false
+	_, _ = fmt.Fprintf(w, "%s\n", diag.SanitizeField(line))
 }
 
 func parseArgs(args []string) (options, error) {

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
 	"github.com/redhat-et/protobot/validator/internal/revision"
@@ -73,7 +74,7 @@ func CompareBase(target, base layout.Snapshot, targetDiagnostics []layout.Diagno
 	diagnostics := validateDeletion(target, base, targetDiagnostics, repaired)
 	diagnostics = append(diagnostics, validateReuse(target, base)...)
 	diagnostics = append(diagnostics, validateUnparsedBaseDeletions(target, targetDiagnostics, baseDiagnostics, repaired)...)
-	sortDiagnostics(diagnostics)
+	diag.Sort(diagnostics, diagnosticKey)
 	return diagnostics
 }
 

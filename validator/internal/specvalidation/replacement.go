@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
 )
@@ -86,7 +87,7 @@ func CompareReplacement(target, base layout.Snapshot) []Diagnostic {
 			})
 		}
 	}
-	sortDiagnostics(diagnostics)
+	diag.Sort(diagnostics, diagnosticKey)
 	return diagnostics
 }
 

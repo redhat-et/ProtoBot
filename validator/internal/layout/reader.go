@@ -15,9 +15,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/records"
 	"gopkg.in/yaml.v3"
 )
@@ -90,7 +90,7 @@ func Read(target string) (Snapshot, []Diagnostic) {
 	interfaces, interfaceDiagnostics := loadDir(root, InterfacesDir, decodeRecord[records.InterfaceRecord])
 	snapshot.Interfaces = interfaces
 	diagnostics = append(diagnostics, interfaceDiagnostics...)
-	sortDiagnostics(diagnostics)
+	diag.Sort(diagnostics, diagnosticKey)
 	return snapshot, diagnostics
 }
 
@@ -123,7 +123,7 @@ func loadDir[T any](root *os.Root, relative string, decode func([]byte) (T, map[
 	for _, entry := range entries {
 		name := entry.Name()
 		entryName := name
-		if hasControl(name) {
+		if diag.HasControl(name) {
 			entryName = strconv.Quote(name)
 		}
 		entryRel := path.Join(relative, entryName)
@@ -204,37 +204,10 @@ func SafeEntryName(name string) bool {
 	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
 		return false
 	}
-	if hasControl(name) {
+	if diag.HasControl(name) {
 		return false
 	}
 	return filepath.Base(name) == name
-}
-
-func hasControl(s string) bool {
-	for i := 0; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 1 {
-			return true
-		}
-		if isControlOrDangerous(r) {
-			return true
-		}
-		i += size
-	}
-	return false
-}
-
-func isControlOrDangerous(r rune) bool {
-	if unicode.IsControl(r) {
-		return true
-	}
-	if r == 0x2028 || r == 0x2029 {
-		return true
-	}
-	if unicode.Is(unicode.Cf, r) {
-		return true
-	}
-	return false
 }
 
 func decodeRecord[T any](data []byte) (T, map[string]bool, error) {
@@ -356,7 +329,7 @@ func collectFields(node *yaml.Node, location string, fields map[string]bool) {
 var lineBreakReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
 func diagnostic(code, path, message string) Diagnostic {
-	if hasControl(path) {
+	if diag.HasControl(path) {
 		path = strconv.Quote(path)
 	}
 	return Diagnostic{
@@ -366,15 +339,6 @@ func diagnostic(code, path, message string) Diagnostic {
 	}
 }
 
-func sortDiagnostics(diagnostics []Diagnostic) {
-	sort.Slice(diagnostics, func(i, j int) bool {
-		left, right := diagnostics[i], diagnostics[j]
-		if left.Path != right.Path {
-			return left.Path < right.Path
-		}
-		if left.Code != right.Code {
-			return left.Code < right.Code
-		}
-		return left.Message < right.Message
-	})
+func diagnosticKey(d Diagnostic) diag.Key {
+	return diag.Key{Path: d.Path, Code: d.Code, Message: d.Message}
 }

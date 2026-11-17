@@ -8,8 +8,8 @@ package ears
 import (
 	"fmt"
 	"regexp"
-	"sort"
 
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/records"
 )
 
@@ -108,7 +108,7 @@ func CheckAll(statements []Statement) []Diagnostic {
 	for _, statement := range statements {
 		diagnostics = append(diagnostics, Check(statement.Path, statement.Type, statement.Text)...)
 	}
-	sortDiagnostics(diagnostics)
+	diag.Sort(diagnostics, diagnosticKey)
 	return diagnostics
 }
 
@@ -140,15 +140,6 @@ func matchesPattern(declaredType, text string) bool {
 	return exists && pattern.MatchString(text)
 }
 
-func sortDiagnostics(diagnostics []Diagnostic) {
-	sort.SliceStable(diagnostics, func(i, j int) bool {
-		left, right := diagnostics[i], diagnostics[j]
-		if left.Path != right.Path {
-			return left.Path < right.Path
-		}
-		if left.Code != right.Code {
-			return left.Code < right.Code
-		}
-		return left.Message < right.Message
-	})
+func diagnosticKey(d Diagnostic) diag.Key {
+	return diag.Key{Path: d.Path, Code: d.Code, Message: d.Message}
 }

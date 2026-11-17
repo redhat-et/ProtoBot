@@ -3,8 +3,7 @@
 package specvalidation
 
 import (
-	"sort"
-
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/layout"
 )
 
@@ -28,22 +27,10 @@ func Validate(snapshot layout.Snapshot, layoutDiagnostics ...layout.Diagnostic) 
 	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateReplacement(snapshot)...)
 	diagnostics = append(diagnostics, validateReferences(snapshot, layoutDiagnostics...)...)
-	sortDiagnostics(diagnostics)
+	diag.Sort(diagnostics, diagnosticKey)
 	return diagnostics
 }
 
-func sortDiagnostics(diagnostics []Diagnostic) {
-	sort.Slice(diagnostics, func(i, j int) bool {
-		left, right := diagnostics[i], diagnostics[j]
-		if left.Path != right.Path {
-			return left.Path < right.Path
-		}
-		if left.Code != right.Code {
-			return left.Code < right.Code
-		}
-		if left.Field != right.Field {
-			return left.Field < right.Field
-		}
-		return left.Message < right.Message
-	})
+func diagnosticKey(d Diagnostic) diag.Key {
+	return diag.Key{Path: d.Path, Code: d.Code, Field: d.Field, Message: d.Message}
 }
