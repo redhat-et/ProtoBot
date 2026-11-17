@@ -77,6 +77,19 @@ func TestValidateBasenames(t *testing.T) {
 			wantField: "name",
 			wantInMsg: []string{"service", "billing-api"},
 		},
+		{
+			name: "interface name cannot be one path segment",
+			snapshot: layout.Snapshot{
+				Interfaces: []layout.Document[records.InterfaceRecord]{{
+					Path:   "spec/interfaces/service.yaml",
+					Record: records.InterfaceRecord{Name: "billing/api"},
+				}},
+			},
+			wantCode:  CodeInterfaceNameBasenameMismatch,
+			wantPath:  "spec/interfaces/service.yaml",
+			wantField: "name",
+			wantInMsg: []string{"service", "billing/api", "path separator"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -110,19 +123,31 @@ func TestValidateBasenames(t *testing.T) {
 }
 
 func TestValidateBasenamesSkipsEmptyIdentifiers(t *testing.T) {
-	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path:   "spec/requirements/REQ-CORE-00001.yaml",
-			Record: records.Requirement{ID: ""},
-		}},
-		Interfaces: []layout.Document[records.InterfaceRecord]{{
-			Path:   "spec/interfaces/billing-api.yaml",
-			Record: records.InterfaceRecord{Name: ""},
-		}},
-	}
-	got := basenameDiagnostics(Validate(snapshot))
-	if len(got) != 0 {
-		t.Fatalf("diagnostics=%v, want none when id or name is empty", got)
+	for _, tc := range []struct {
+		name      string
+		reqID     string
+		ifaceName string
+	}{
+		{name: "empty strings", reqID: "", ifaceName: ""},
+		{name: "spaces only", reqID: "   ", ifaceName: "   "},
+		{name: "tabs and newlines", reqID: "\t\n", ifaceName: "\t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := layout.Snapshot{
+				Requirements: []layout.Document[records.Requirement]{{
+					Path:   "spec/requirements/REQ-CORE-00001.yaml",
+					Record: records.Requirement{ID: tc.reqID},
+				}},
+				Interfaces: []layout.Document[records.InterfaceRecord]{{
+					Path:   "spec/interfaces/billing-api.yaml",
+					Record: records.InterfaceRecord{Name: tc.ifaceName},
+				}},
+			}
+			got := basenameDiagnostics(Validate(snapshot))
+			if len(got) != 0 {
+				t.Fatalf("diagnostics=%v, want none when id or name is empty or whitespace", got)
+			}
+		})
 	}
 }
 

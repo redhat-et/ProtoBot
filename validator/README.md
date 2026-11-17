@@ -18,8 +18,8 @@ The design is the [ProtoBot V2 validator][design]. This module implements the
 command line, spec directory reader, record schema checks, relationship-type
 allowlist, relationship acyclicity, replacement and retirement rules,
 reference resolution, EARS shape checks, requirement identifier checks,
-basename-to-identifier matching, and parsed-text immutability against
-comparison base
+basename-to-id and basename-to-name matching, and parsed-text
+immutability against comparison base
 (issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
 and #463). The command line accepts the checkout path and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
@@ -73,17 +73,18 @@ exit with status 1; command-line usage errors exit with status 2.
 parses, specification checks require a requirement basename to match
 `REQ-<SCOPE>-<NNNNN>.yaml` using the same identifier pattern as in-record
 `id` values, and to equal that `id`. A malformed requirement basename fails
-with `requirement.invalid_basename`. A valid basename that does not equal `id`
-fails with `requirement.id_basename_mismatch`. An interface basename that
-does not equal the declared `name` fails with
-`interface.name_basename_mismatch`. Parsed records remain in the snapshot
-so other checks still run. Requirement identity is path-keyed: moving a
-record to a new file path counts as a deletion at the old path and a reuse
-at the new path, except when moving a record from a non-canonical path to its
-canonical `spec/requirements/{id}.yaml` path to correct its basename, or when
-replacing a non-canonical unparsed or invalid-ID requirement file from the
-comparison base with a single canonical `spec/requirements/{valid-id}.yaml`
-record.
+with `requirement.invalid_basename`. When `id` is non-empty, a valid basename
+that does not equal `id` fails with `requirement.id_basename_mismatch`.
+When `name` is non-empty, an interface basename that does not equal the declared
+`name` fails with `interface.name_basename_mismatch`. Parsed records remain in
+the snapshot so other checks still run. Requirement identity is path-keyed:
+moving a record to a new file path with the same ID emits
+`requirement.reused_id` at the new path and no `requirement.deleted`. Two
+exceptions apply: moving a record from a non-canonical path to its canonical
+`spec/requirements/{id}.yaml` path to correct its basename suppresses
+`requirement.reused_id`, and replacing exactly one non-canonical unparsed or
+invalid-ID requirement file from the comparison base with exactly one canonical
+`spec/requirements/{valid-id}.yaml` record suppresses `requirement.deleted`.
 
 ```text
 validator --target PATH --base REF

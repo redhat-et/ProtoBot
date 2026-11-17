@@ -663,6 +663,7 @@ The validator reads the plain `spec/` layout and reduced records in
   `optional-feature`, `complex`) and contains exactly one `shall`; a
   statement that does not match its declared pattern fails validation;
 - identifier format, uniqueness, no deletion, and no reuse;
+- basename-to-id and basename-to-name matching;
 - referential integrity: `applies_to.interfaces`, relationship targets, and
   test `@req:<ID>` tags all resolve;
 - relationship types restricted to `depends-on`, `supersedes`, and `related-to`;

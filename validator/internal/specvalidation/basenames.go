@@ -40,7 +40,7 @@ func validateRequirementBasename(document layout.Document[records.Requirement]) 
 		}}
 	}
 	id := document.Record.ID
-	if id == "" || id == base {
+	if strings.TrimSpace(id) == "" || id == base {
 		return nil
 	}
 	return []Diagnostic{{
@@ -58,18 +58,26 @@ func validateRequirementBasename(document layout.Document[records.Requirement]) 
 func validateInterfaceBasename(document layout.Document[records.InterfaceRecord]) []Diagnostic {
 	base := yamlBasename(document.Path)
 	name := document.Record.Name
-	if name == "" || name == base {
+	if strings.TrimSpace(name) == "" || name == base {
 		return nil
 	}
-	return []Diagnostic{{
-		Code:  CodeInterfaceNameBasenameMismatch,
-		Path:  document.Path,
-		Field: "name",
-		Message: fmt.Sprintf(
-			"Interface name %q does not match file basename %q.",
+	message := fmt.Sprintf(
+		"Interface name %q does not match file basename %q.",
+		name,
+		base,
+	)
+	if strings.Contains(name, "/") || strings.Contains(name, `\`) || path.Base(name) != name {
+		message = fmt.Sprintf(
+			"Interface name %q does not match file basename %q; interface name cannot contain path separators and must be a single path segment.",
 			name,
 			base,
-		),
+		)
+	}
+	return []Diagnostic{{
+		Code:    CodeInterfaceNameBasenameMismatch,
+		Path:    document.Path,
+		Field:   "name",
+		Message: message,
 	}}
 }
 

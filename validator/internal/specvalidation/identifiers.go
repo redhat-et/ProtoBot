@@ -290,6 +290,9 @@ func repairedBaseRequirements(target, base layout.Snapshot, targetDiagnostics []
 		if diag.Path == "" || seen[diag.Path] {
 			continue
 		}
+		if !isUnreadableRequirementCode(diag.Code) {
+			continue
+		}
 		seen[diag.Path] = true
 		if path.Dir(diag.Path) == layout.RequirementsDir && !isCanonicalRequirementPath(diag.Path) && !TargetPathExists(target, targetDiagnostics, diag.Path) {
 			removedNonCanonical = append(removedNonCanonical, diag.Path)
@@ -310,15 +313,11 @@ func repairedBaseRequirements(target, base layout.Snapshot, targetDiagnostics []
 	}
 
 	removedNonCanonical = uniqueSorted(removedNonCanonical)
-	if len(removedNonCanonical) == 0 {
+	if len(removedNonCanonical) != 1 || len(candidateReplacements) != 1 {
 		return nil
 	}
 
-	repaired := make(map[string]bool)
-	for i := 0; i < len(removedNonCanonical) && i < len(candidateReplacements); i++ {
-		repaired[removedNonCanonical[i]] = true
-	}
-	return repaired
+	return map[string]bool{removedNonCanonical[0]: true}
 }
 
 // IsRepairedBaseRequirement reports whether a non-canonical base requirement path
@@ -413,4 +412,14 @@ func uniqueSorted(paths []string) []string {
 		previous = path
 	}
 	return out
+}
+
+func isUnreadableRequirementCode(code string) bool {
+	switch code {
+	case layout.CodeReadFailed, layout.CodeParseFailed,
+		"revision.read_failed", "revision.parse_failed":
+		return true
+	default:
+		return false
+	}
 }

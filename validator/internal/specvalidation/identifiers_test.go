@@ -401,9 +401,10 @@ func TestCompareBaseRejectsDeletionWhenNonCanonicalBaseFileRemovedWithoutReplace
 	}
 }
 
-func TestCompareBaseRejectsUnreplacedNonCanonicalWhenReplacementsExhausted(t *testing.T) {
+func TestCompareBaseRejectsMultipleNonCanonicalWhenReplacementsDoNotMatchExactlyOne(t *testing.T) {
 	// Base has two non-canonical files needing repair (one unparsed, one invalid ID).
-	// Target only provides one canonical replacement record.
+	// Because repair is restricted to exactly one removed file and one replacement,
+	// neither is repaired and both emit requirement.deleted.
 	base := snapshotFromIDs([]idPath{
 		{path: "spec/requirements/bad.yaml", id: "not-an-id"},
 	})
@@ -414,14 +415,34 @@ func TestCompareBaseRejectsUnreplacedNonCanonicalWhenReplacementsExhausted(t *te
 		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken.yaml", Message: "yaml: malformed"},
 	}
 	diagnostics := CompareBase(target, base, nil, baseDiags...)
-	if len(diagnostics) != 1 {
-		t.Fatalf("diagnostics count=%d, want 1 (one repaired, one deleted)", len(diagnostics))
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics count=%d, want 2 (neither repaired)", len(diagnostics))
 	}
-	if diagnostics[0].Code != CodeDeleted {
-		t.Errorf("code=%q, want %q", diagnostics[0].Code, CodeDeleted)
+	for _, diag := range diagnostics {
+		if diag.Code != CodeDeleted {
+			t.Errorf("code=%q, want %q", diag.Code, CodeDeleted)
+		}
 	}
-	if diagnostics[0].Path != "spec/requirements/broken.yaml" {
-		t.Errorf("path=%q, want broken.yaml", diagnostics[0].Path)
+}
+
+func TestCompareBaseRejectsTwoRemovedFilesWithTwoAddedRecords(t *testing.T) {
+	base := snapshotFromIDs(nil)
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-FIX-00001.yaml", id: "REQ-FIX-00001"},
+		{path: "spec/requirements/REQ-FIX-00002.yaml", id: "REQ-FIX-00002"},
+	})
+	baseDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken1.yaml", Message: "yaml: malformed"},
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken2.yaml", Message: "yaml: malformed"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics count=%d, want 2", len(diagnostics))
+	}
+	for _, diag := range diagnostics {
+		if diag.Code != CodeDeleted {
+			t.Errorf("diagnostic code=%q, want %q", diag.Code, CodeDeleted)
+		}
 	}
 }
 
