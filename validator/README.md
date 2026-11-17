@@ -19,18 +19,19 @@ command line, spec directory reader, record schema checks, relationship-type
 allowlist, relationship acyclicity, replacement and retirement rules,
 reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-identifier matching, and parsed-text immutability against
-comparison base (issues #381, #383, #385, #387, #388, #390, #392, #395, #397,
-#399, #402, and #463). The command line accepts the checkout path and
-comparison base. It reads requirement and interface YAML records from
-`spec/requirements/` and `spec/interfaces/` in the target checkout. Missing
-directories are treated as empty. Unreadable files, non-YAML entries, `.yaml`
-records larger than 1 MiB, and malformed YAML produce diagnostics. A mapping
-key that contains `.`, `[`, or `]` fails with `layout.parse_failed`.
-Requirement relationship types are restricted to `depends-on`, `supersedes`,
-and `related-to`; unsupported types, including legacy `conflicts-with`, fail
-validation. Directed `depends-on` and `supersedes` graphs must be acyclic;
-a cycle fails with `relationship.cycle` and names the participating requirement
-IDs. `related-to` associations are exempt. A `supersedes` target must have
+comparison base
+(issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
+and #463). The command line accepts the checkout path and comparison base.
+It reads requirement and interface YAML records from `spec/requirements/` and
+`spec/interfaces/` in the target checkout. Missing directories are treated as
+empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
+and malformed YAML produce diagnostics. A mapping key that contains `.`, `[`,
+or `]` fails with `layout.parse_failed`. Requirement relationship types are
+restricted to `depends-on`, `supersedes`, and `related-to`; unsupported
+types, including legacy `conflicts-with`, fail validation. Directed
+`depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
+`relationship.cycle` and names the participating requirement IDs.
+`related-to` associations are exempt. A `supersedes` target must have
 `status: retired`. A newly introduced `supersedes` edge must retire that
 predecessor in the same specification change relative to `--base`. Retirement
 without a successor is allowed. Retired records must not be deleted. Each
@@ -38,13 +39,13 @@ without a successor is allowed. Retired records must not be deleted. Each
 (matching is case-sensitive), and requirement IDs in `relationships[].target`
 must resolve to declared records; retired requirement targets satisfy
 resolution. Requirement IDs must match `REQ-<SCOPE>-<NNNNN>`, be unique in the
-working tree, and must not be deleted or reused relative to the comparison base.
-Requirement file basenames must use that same identifier pattern and equal the
-in-record `id`. Interface file basenames must equal the declared `name`. It
-also scans Gherkin `.feature` files under `tests/` for `@req:<ID>` tags and fails
-when a tag does not resolve to a known requirement record. Active and
-retired IDs both count as known; unknown or misspelled IDs fail with
-line-level diagnostics. Requirement records must include `id`, `type`,
+working tree, and must not be deleted or reused relative to the comparison
+base. Requirement file basenames must use that same identifier pattern and
+equal the in-record `id`. Interface file basenames must equal the declared
+`name`. It also scans Gherkin `.feature` files under `tests/` for `@req:<ID>`
+tags and fails when a tag does not resolve to a known requirement record.
+Active and retired IDs both count as known; unknown or misspelled IDs fail
+with line-level diagnostics. Requirement records must include `id`, `type`,
 `text`, `applies_to`, `relationships`, and `status`. `applies_to` must
 name at least one interface or scope. Blank selectors count as absent.
 Interface records must include `name`, `kind`, and `description`. Status
@@ -79,7 +80,10 @@ does not equal the declared `name` fails with
 so other checks still run. Requirement identity is path-keyed: moving a
 record to a new file path counts as a deletion at the old path and a reuse
 at the new path, except when moving a record from a non-canonical path to its
-canonical `spec/requirements/{id}.yaml` path to correct its basename.
+canonical `spec/requirements/{id}.yaml` path to correct its basename, or when
+replacing a non-canonical unparsed or invalid-ID requirement file from the
+comparison base with a single canonical `spec/requirements/{valid-id}.yaml`
+record.
 
 ```text
 validator --target PATH --base REF

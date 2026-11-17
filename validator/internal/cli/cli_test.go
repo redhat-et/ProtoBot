@@ -1532,10 +1532,13 @@ func TestRunUnknownBaseFails(t *testing.T) {
 
 func TestRunRepairedBaseMalformedYAMLExitsZero(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/broken.yaml", "id: [\n")
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "commit with malformed base yaml")
 
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "broken.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", requirementYAML("REQ-FIX-00001"))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
@@ -1571,12 +1574,15 @@ func TestRunDeletedBaseMalformedYAMLFailsClosed(t *testing.T) {
 
 func TestRunRepairedBaseInvalidAndDuplicateIDsExitsZero(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", requirementYAML("not-an-id"))
+	writeSpecFile(t, target, "spec/requirements/bad.yaml", requirementYAML("not-an-id"))
 	writeSpecFile(t, target, "spec/requirements/REQ-DUP-00001.yaml", requirementYAML("REQ-DUP-00001"))
 	writeSpecFile(t, target, "spec/requirements/REQ-DUP-00002.yaml", requirementYAML("REQ-DUP-00001"))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "commit with bad and duplicate ids")
 
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "bad.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", requirementYAML("REQ-FIX-00001"))
 	if err := os.Remove(filepath.Join(target, "spec", "requirements", "REQ-DUP-00002.yaml")); err != nil {
 		t.Fatal(err)
