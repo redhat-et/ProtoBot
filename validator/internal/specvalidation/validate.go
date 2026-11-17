@@ -23,6 +23,7 @@ type Diagnostic struct {
 func Validate(snapshot layout.Snapshot, layoutDiagnostics ...layout.Diagnostic) []Diagnostic {
 	diagnostics := validateRecordSchema(snapshot)
 	diagnostics = append(diagnostics, validateRequirementIDs(snapshot.Requirements)...)
+	diagnostics = append(diagnostics, validateBasenames(snapshot)...)
 	diagnostics = append(diagnostics, validateRelationshipTypes(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateReplacement(snapshot)...)

@@ -195,17 +195,32 @@ func TestValidateResolvesInterfaceByNameNotFilename(t *testing.T) {
 			},
 		}},
 	}
-	if diagnostics := Validate(snapshot); len(diagnostics) != 0 {
-		t.Fatalf("diagnostics=%v, want none", diagnostics)
+	diagnostics := Validate(snapshot)
+	if !hasCodePath(diagnostics, CodeInvalidBasename, "spec/interfaces/foo.yaml") {
+		t.Fatalf("diagnostics=%v, want layout.invalid_basename for foo.yaml", diagnostics)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == CodeReferenceNotFound || diagnostic.Code == CodeReferenceAmbiguous {
+			t.Fatalf("name-based resolution failed: %v", diagnostics)
+		}
 	}
 
 	snapshot.Requirements[0].Record.AppliesTo.Interfaces = []string{"foo"}
-	diagnostics := Validate(snapshot)
-	if len(diagnostics) != 1 {
-		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	diagnostics = Validate(snapshot)
+	var notFound Diagnostic
+	var found bool
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == CodeReferenceNotFound {
+			notFound = diagnostic
+			found = true
+			break
+		}
 	}
-	if diagnostics[0].Field != "applies_to.interfaces[0]" || !identifiesType(diagnostics[0].Message, "foo") {
-		t.Fatalf("diagnostic=%+v", diagnostics[0])
+	if !found {
+		t.Fatalf("diagnostics=%v, want reference.not_found for foo", diagnostics)
+	}
+	if notFound.Field != "applies_to.interfaces[0]" || !identifiesType(notFound.Message, "foo") {
+		t.Fatalf("diagnostic=%+v", notFound)
 	}
 }
 
@@ -464,12 +479,17 @@ func TestValidateRejectsAmbiguousInterfaceReference(t *testing.T) {
 	}
 
 	diagnostics := Validate(snapshot)
-	if len(diagnostics) != 1 {
-		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	var got Diagnostic
+	var found bool
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == CodeReferenceAmbiguous {
+			got = diagnostic
+			found = true
+			break
+		}
 	}
-	got := diagnostics[0]
-	if got.Code != CodeReferenceAmbiguous {
-		t.Errorf("code=%q, want %q", got.Code, CodeReferenceAmbiguous)
+	if !found {
+		t.Fatalf("diagnostics=%v, want CodeReferenceAmbiguous", diagnostics)
 	}
 	if got.Field != "applies_to.interfaces[0]" {
 		t.Errorf("field=%q, want applies_to.interfaces[0]", got.Field)
@@ -524,4 +544,13 @@ func TestValidateRejectsAmbiguousRelationshipTarget(t *testing.T) {
 	if !identifiesType(got.Message, "REQ-API-00001") || !identifiesType(got.Message, "ambiguous") {
 		t.Errorf("message %q does not identify ambiguous REQ-API-00001", got.Message)
 	}
+}
+
+func hasCodePath(diagnostics []Diagnostic, code, path string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code && diagnostic.Path == path {
+			return true
+		}
+	}
+	return false
 }

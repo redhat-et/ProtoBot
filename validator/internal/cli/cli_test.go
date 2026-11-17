@@ -1266,6 +1266,70 @@ relationships: []
 	}
 }
 
+func TestRunRejectsInvalidRequirementBasename(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/notes.yaml", requirementYAML("REQ-CORE-00001"))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantPrefix := "validator: layout.invalid_basename: spec/requirements/notes.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+}
+
+func TestRunRejectsRequirementIDBasenameMismatch(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-CORE-00001.yaml", requirementYAML("REQ-CORE-00002"))
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantPrefix := "validator: spec.id_basename_mismatch: spec/requirements/REQ-CORE-00001.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+	if !strings.Contains(stderr, "REQ-CORE-00002") {
+		t.Fatalf("stderr %q omitted in-record id", stderr)
+	}
+}
+
+func TestRunRejectsInterfaceBasenameMismatch(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/interfaces/service.yaml", "name: billing-api\nkind: http\ndescription: Billing API.\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantPrefix := "validator: layout.invalid_basename: spec/interfaces/service.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+	if !strings.Contains(stderr, "billing-api") {
+		t.Fatalf("stderr %q omitted declared name", stderr)
+	}
+}
+
+func TestRunAcceptsHyphenatedRequirementScopeBasename(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-CORE-X-00001.yaml", requirementYAML("REQ-CORE-X-00001"))
+	writeSpecFile(t, target, "spec/interfaces/billing-api.yaml", "name: billing-api\nkind: http\ndescription: Billing API.\n")
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
 func TestRunRejectsMalformedRequirementID(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/bad.yaml", `id: REQ-api-00001
@@ -1468,11 +1532,11 @@ func TestRunUnknownBaseFails(t *testing.T) {
 
 func TestRunRepairedBaseMalformedYAMLExitsZero(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/broken.yaml", "id: [\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", "id: [\n")
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "commit with malformed base yaml")
 
-	writeSpecFile(t, target, "spec/requirements/broken.yaml", requirementYAML("REQ-FIX-00001"))
+	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", requirementYAML("REQ-FIX-00001"))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
 	if code != exitOK {
@@ -1507,14 +1571,14 @@ func TestRunDeletedBaseMalformedYAMLFailsClosed(t *testing.T) {
 
 func TestRunRepairedBaseInvalidAndDuplicateIDsExitsZero(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/bad.yaml", requirementYAML("not-an-id"))
-	writeSpecFile(t, target, "spec/requirements/dup1.yaml", requirementYAML("REQ-DUP-00001"))
-	writeSpecFile(t, target, "spec/requirements/dup2.yaml", requirementYAML("REQ-DUP-00001"))
+	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", requirementYAML("not-an-id"))
+	writeSpecFile(t, target, "spec/requirements/REQ-DUP-00001.yaml", requirementYAML("REQ-DUP-00001"))
+	writeSpecFile(t, target, "spec/requirements/REQ-DUP-00002.yaml", requirementYAML("REQ-DUP-00001"))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "commit with bad and duplicate ids")
 
-	writeSpecFile(t, target, "spec/requirements/bad.yaml", requirementYAML("REQ-FIX-00001"))
-	if err := os.Remove(filepath.Join(target, "spec", "requirements", "dup2.yaml")); err != nil {
+	writeSpecFile(t, target, "spec/requirements/REQ-FIX-00001.yaml", requirementYAML("REQ-FIX-00001"))
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", "REQ-DUP-00002.yaml")); err != nil {
 		t.Fatal(err)
 	}
 
