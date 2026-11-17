@@ -11,8 +11,9 @@ import (
 
 // Diagnostic codes for requirement and interface file basename checks.
 const (
-	CodeInvalidBasename    = "layout.invalid_basename"
-	CodeIDBasenameMismatch = "spec.id_basename_mismatch"
+	CodeRequirementInvalidBasename    = "requirement.invalid_basename"
+	CodeRequirementIDBasenameMismatch = "requirement.id_basename_mismatch"
+	CodeInterfaceNameBasenameMismatch = "interface.name_basename_mismatch"
 )
 
 func validateBasenames(snapshot layout.Snapshot) []Diagnostic {
@@ -30,7 +31,7 @@ func validateRequirementBasename(document layout.Document[records.Requirement]) 
 	base := yamlBasename(document.Path)
 	if err := records.ValidateRequirementID(base); err != nil {
 		return []Diagnostic{{
-			Code: CodeInvalidBasename,
+			Code: CodeRequirementInvalidBasename,
 			Path: document.Path,
 			Message: fmt.Sprintf(
 				"Requirement file basename %q is invalid. Use REQ-<SCOPE>-<NNNNN>.yaml with an uppercase scope and five-digit sequence.",
@@ -43,7 +44,7 @@ func validateRequirementBasename(document layout.Document[records.Requirement]) 
 		return nil
 	}
 	return []Diagnostic{{
-		Code:  CodeIDBasenameMismatch,
+		Code:  CodeRequirementIDBasenameMismatch,
 		Path:  document.Path,
 		Field: "id",
 		Message: fmt.Sprintf(
@@ -61,7 +62,7 @@ func validateInterfaceBasename(document layout.Document[records.InterfaceRecord]
 		return nil
 	}
 	return []Diagnostic{{
-		Code:  CodeInvalidBasename,
+		Code:  CodeInterfaceNameBasenameMismatch,
 		Path:  document.Path,
 		Field: "name",
 		Message: fmt.Sprintf(

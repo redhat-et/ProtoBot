@@ -47,7 +47,7 @@ func TestValidateBasenames(t *testing.T) {
 					Record: records.Requirement{ID: "REQ-CORE-00001"},
 				}},
 			},
-			wantCode:  CodeInvalidBasename,
+			wantCode:  CodeRequirementInvalidBasename,
 			wantPath:  "spec/requirements/notes.yaml",
 			wantInMsg: []string{"notes", "REQ-<SCOPE>-<NNNNN>.yaml"},
 		},
@@ -59,7 +59,7 @@ func TestValidateBasenames(t *testing.T) {
 					Record: records.Requirement{ID: "REQ-CORE-00002"},
 				}},
 			},
-			wantCode:  CodeIDBasenameMismatch,
+			wantCode:  CodeRequirementIDBasenameMismatch,
 			wantPath:  "spec/requirements/REQ-CORE-00001.yaml",
 			wantField: "id",
 			wantInMsg: []string{"REQ-CORE-00001", "REQ-CORE-00002"},
@@ -72,7 +72,7 @@ func TestValidateBasenames(t *testing.T) {
 					Record: records.InterfaceRecord{Name: "billing-api"},
 				}},
 			},
-			wantCode:  CodeInvalidBasename,
+			wantCode:  CodeInterfaceNameBasenameMismatch,
 			wantPath:  "spec/interfaces/service.yaml",
 			wantField: "name",
 			wantInMsg: []string{"service", "billing-api"},
@@ -134,8 +134,8 @@ func TestValidateBasenamesDoesNotDropRecords(t *testing.T) {
 
 	diagnostics := Validate(snapshot)
 	gotBasename := basenameDiagnostics(diagnostics)
-	if len(gotBasename) != 1 || gotBasename[0].Code != CodeInvalidBasename {
-		t.Fatalf("basename diagnostics=%v, want layout.invalid_basename for copy.yaml", gotBasename)
+	if len(gotBasename) != 1 || gotBasename[0].Code != CodeRequirementInvalidBasename {
+		t.Fatalf("basename diagnostics=%v, want requirement.invalid_basename for copy.yaml", gotBasename)
 	}
 	if gotBasename[0].Path != "spec/requirements/copy.yaml" {
 		t.Errorf("path=%q, want spec/requirements/copy.yaml", gotBasename[0].Path)
@@ -192,13 +192,13 @@ description: Billing API.
 	if len(got) != 3 {
 		t.Fatalf("diagnostics=%v, want 3", got)
 	}
-	if got[0].Code != CodeInvalidBasename || got[0].Path != "spec/interfaces/service.yaml" {
+	if got[0].Code != CodeInterfaceNameBasenameMismatch || got[0].Path != "spec/interfaces/service.yaml" {
 		t.Errorf("first diagnostic=%+v", got[0])
 	}
-	if got[1].Code != CodeIDBasenameMismatch || got[1].Path != "spec/requirements/REQ-CORE-00002.yaml" {
+	if got[1].Code != CodeRequirementIDBasenameMismatch || got[1].Path != "spec/requirements/REQ-CORE-00002.yaml" {
 		t.Errorf("second diagnostic=%+v", got[1])
 	}
-	if got[2].Code != CodeInvalidBasename || got[2].Path != "spec/requirements/notes.yaml" {
+	if got[2].Code != CodeRequirementInvalidBasename || got[2].Path != "spec/requirements/notes.yaml" {
 		t.Errorf("third diagnostic=%+v", got[2])
 	}
 }
@@ -207,7 +207,7 @@ func basenameDiagnostics(diagnostics []Diagnostic) []Diagnostic {
 	var out []Diagnostic
 	for _, diagnostic := range diagnostics {
 		switch diagnostic.Code {
-		case CodeInvalidBasename, CodeIDBasenameMismatch:
+		case CodeRequirementInvalidBasename, CodeRequirementIDBasenameMismatch, CodeInterfaceNameBasenameMismatch:
 			out = append(out, diagnostic)
 		}
 	}

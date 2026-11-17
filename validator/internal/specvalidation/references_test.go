@@ -196,8 +196,8 @@ func TestValidateResolvesInterfaceByNameNotFilename(t *testing.T) {
 		}},
 	}
 	diagnostics := Validate(snapshot)
-	if !hasCodePath(diagnostics, CodeInvalidBasename, "spec/interfaces/foo.yaml") {
-		t.Fatalf("diagnostics=%v, want layout.invalid_basename for foo.yaml", diagnostics)
+	if !hasCodePath(diagnostics, CodeInterfaceNameBasenameMismatch, "spec/interfaces/foo.yaml") {
+		t.Fatalf("diagnostics=%v, want interface.name_basename_mismatch for foo.yaml", diagnostics)
 	}
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == CodeReferenceNotFound || diagnostic.Code == CodeReferenceAmbiguous {

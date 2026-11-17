@@ -72,14 +72,14 @@ exit with status 1; command-line usage errors exit with status 2.
 parses, specification checks require a requirement basename to match
 `REQ-<SCOPE>-<NNNNN>.yaml` using the same identifier pattern as in-record
 `id` values, and to equal that `id`. A malformed requirement basename fails
-with `layout.invalid_basename`. A valid basename that does not equal `id`
-fails with `spec.id_basename_mismatch`. An interface basename that does not
-equal the declared `name` fails with `layout.invalid_basename`. Parsed
-records remain in the snapshot so other checks still run. Requirement
-identity is path-keyed: moving a record to a new file path counts as a
-deletion at the old path and a reuse at the new path, except when moving
-a record from a non-canonical path to its canonical
-`spec/requirements/{id}.yaml` path to correct its basename.
+with `requirement.invalid_basename`. A valid basename that does not equal `id`
+fails with `requirement.id_basename_mismatch`. An interface basename that
+does not equal the declared `name` fails with
+`interface.name_basename_mismatch`. Parsed records remain in the snapshot
+so other checks still run. Requirement identity is path-keyed: moving a
+record to a new file path counts as a deletion at the old path and a reuse
+at the new path, except when moving a record from a non-canonical path to its
+canonical `spec/requirements/{id}.yaml` path to correct its basename.
 
 ```text
 validator --target PATH --base REF
@@ -145,18 +145,19 @@ diagnostic.
 
 This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
-`layout.parse_failed`, `layout.invalid_basename`), revision check codes
+`layout.parse_failed`), revision check codes
 (`revision.not_found`, `revision.read_failed`, `revision.unsupported_entry`,
 `revision.unexpected_file`, `revision.parse_failed`), requirement check codes
 (`requirement.missing_field`, `requirement.invalid_status`,
 `requirement.unexpected_field`, `requirement.invalid_id`,
 `requirement.duplicate_id`, `requirement.deleted`,
-`requirement.reused_id`, `requirement.text_immutable`), interface check codes
-(`interface.missing_field`, `interface.unexpected_field`), reference
+`requirement.reused_id`, `requirement.text_immutable`,
+`requirement.invalid_basename`, `requirement.id_basename_mismatch`),
+interface check codes (`interface.missing_field`,
+`interface.unexpected_field`, `interface.name_basename_mismatch`), reference
 check codes (`reference.not_found`, `reference.ambiguous`),
-specification check codes (`spec.id_basename_mismatch`,
-`relationship.invalid_type`, `relationship.cycle`,
-`relationship.superseded_requirement_active`,
+specification check codes (`relationship.invalid_type`,
+`relationship.cycle`, `relationship.superseded_requirement_active`,
 `relationship.superseded_requirement_not_in_change`), EARS check codes
 (`ears.shall_count`,
 `ears.pattern_mismatch`, `ears.invalid_type`), and test-tag codes

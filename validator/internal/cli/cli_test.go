@@ -1274,7 +1274,7 @@ func TestRunRejectsInvalidRequirementBasename(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantPrefix := "validator: layout.invalid_basename: spec/requirements/notes.yaml:"
+	wantPrefix := "validator: requirement.invalid_basename: spec/requirements/notes.yaml:"
 	if !strings.Contains(stderr, wantPrefix) {
 		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
@@ -1288,7 +1288,7 @@ func TestRunRejectsRequirementIDBasenameMismatch(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantPrefix := "validator: spec.id_basename_mismatch: spec/requirements/REQ-CORE-00001.yaml:"
+	wantPrefix := "validator: requirement.id_basename_mismatch: spec/requirements/REQ-CORE-00001.yaml:"
 	if !strings.Contains(stderr, wantPrefix) {
 		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
@@ -1305,7 +1305,7 @@ func TestRunRejectsInterfaceBasenameMismatch(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantPrefix := "validator: layout.invalid_basename: spec/interfaces/service.yaml:"
+	wantPrefix := "validator: interface.name_basename_mismatch: spec/interfaces/service.yaml:"
 	if !strings.Contains(stderr, wantPrefix) {
 		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
