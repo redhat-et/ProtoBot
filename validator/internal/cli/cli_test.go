@@ -1346,6 +1346,93 @@ status: retired
 	}
 }
 
+func TestRunRejectsActiveSupersedesTarget(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: ubiquitous
+text: The service shall log requests.
+applies_to:
+  scopes:
+    - api
+relationships:
+  - type: supersedes
+    target: REQ-API-00001
+status: active
+`)
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantPrefix := "validator: relationship.superseded_requirement_active: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001") {
+		t.Fatalf("stderr %q omitted predecessor id", stderr)
+	}
+}
+
+func TestRunAcceptsReplacementThatRetiresPredecessor(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "retired"))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: ubiquitous
+text: The service shall log requests.
+applies_to:
+  scopes:
+    - api
+relationships:
+  - type: supersedes
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitOK || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunRejectsReplacementOfAlreadyRetiredPredecessor(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "retired"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "base")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
+type: ubiquitous
+text: The service shall log requests.
+applies_to:
+  scopes:
+    - api
+relationships:
+  - type: supersedes
+    target: REQ-API-00001
+status: active
+`)
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	wantPrefix := "validator: relationship.superseded_requirement_not_in_change: spec/requirements/REQ-API-00002.yaml:"
+	if !strings.Contains(stderr, wantPrefix) {
+		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001") {
+		t.Fatalf("stderr %q omitted predecessor id", stderr)
+	}
+}
+
 func TestRunRejectsReusedRequirementID(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
