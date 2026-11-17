@@ -114,28 +114,35 @@ type graphValidator struct {
 }
 
 func (v *graphValidator) run() {
+	for _, vertex := range v.collectVertices() {
+		if v.state[vertex] == vertexUnvisited {
+			v.visit(vertex)
+		}
+	}
+}
+
+func (v *graphValidator) collectVertices() []string {
 	for source, targets := range v.graph {
 		sort.Strings(targets)
 		v.graph[source] = targets
 	}
 
+	missingTargets := make(map[string]bool)
 	vertices := make([]string, 0, len(v.graph))
 	for source := range v.graph {
 		vertices = append(vertices, source)
 		for _, target := range v.graph[source] {
 			if _, exists := v.graph[target]; !exists {
-				v.graph[target] = nil
-				vertices = append(vertices, target)
+				missingTargets[target] = true
 			}
 		}
 	}
-	sort.Strings(vertices)
-
-	for _, vertex := range vertices {
-		if v.state[vertex] == vertexUnvisited {
-			v.visit(vertex)
-		}
+	for target := range missingTargets {
+		v.graph[target] = nil
+		vertices = append(vertices, target)
 	}
+	sort.Strings(vertices)
+	return vertices
 }
 
 func (v *graphValidator) visit(vertex string) {
