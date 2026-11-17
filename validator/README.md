@@ -85,6 +85,12 @@ exceptions apply: moving a record from a non-canonical path to its canonical
 `requirement.reused_id`, and replacing exactly one non-canonical unparsed or
 invalid-ID requirement file from the comparison base with exactly one canonical
 `spec/requirements/{valid-id}.yaml` record suppresses `requirement.deleted`.
+The exception applies only when the repair is the only new requirement record
+in the change set; `REQ-FIX-00001.yaml` plus `REQ-NEW-00001.yaml` still emits
+`requirement.deleted`. Each legacy file needs its own change set; two legacy
+files cannot be repaired together, and two sequential repairs work. The
+validator cannot read the id of an unreadable base record, so one removed file
+and one unrelated added record also pass.
 
 ```text
 validator --target PATH --base REF

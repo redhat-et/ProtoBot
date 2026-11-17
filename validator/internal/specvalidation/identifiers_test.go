@@ -6,6 +6,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 )
 
 func TestValidateRequirementIDs(t *testing.T) {
@@ -456,6 +457,26 @@ func TestCompareBaseRejectsNonCanonicalMoveToNonCanonicalPath(t *testing.T) {
 	diagnostics := CompareBase(target, base, nil)
 	if len(diagnostics) != 1 || diagnostics[0].Code != CodeDeleted {
 		t.Fatalf("diagnostics=%v, want CodeDeleted for bad.yaml when moving to non-canonical path", diagnostics)
+	}
+}
+
+func TestCompareBaseRejectsUnexpectedBaseFileRemovalEvenWithCanonicalReplacement(t *testing.T) {
+	base := layout.Snapshot{}
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-FIX-00001.yaml", id: "REQ-FIX-00001"},
+	})
+	baseDiags := []layout.Diagnostic{
+		{Code: revision.CodeUnexpectedFile, Path: "spec/requirements/notes.txt", Message: "unexpected file"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics count=%d, want 1; got %v", len(diagnostics), diagnostics)
+	}
+	if diagnostics[0].Code != CodeDeleted {
+		t.Errorf("diagnostic code=%q, want %q", diagnostics[0].Code, CodeDeleted)
+	}
+	if diagnostics[0].Path != "spec/requirements/notes.txt" {
+		t.Errorf("diagnostic path=%q, want spec/requirements/notes.txt", diagnostics[0].Path)
 	}
 }
 

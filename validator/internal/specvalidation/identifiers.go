@@ -8,6 +8,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 )
 
 // Diagnostic codes for requirement identifier checks.
@@ -417,7 +418,7 @@ func uniqueSorted(paths []string) []string {
 func isUnreadableRequirementCode(code string) bool {
 	switch code {
 	case layout.CodeReadFailed, layout.CodeParseFailed,
-		"revision.read_failed", "revision.parse_failed":
+		revision.CodeReadFailed, revision.CodeParseFailed:
 		return true
 	default:
 		return false
