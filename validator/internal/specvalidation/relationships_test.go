@@ -240,6 +240,7 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 		wantCode     string
 		wantRelation string
 		wantIDs      []string
+		wantCycles   [][]string
 	}{
 		{
 			name: "acyclic depends-on chain",
@@ -342,6 +343,49 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 			wantIDs:      []string{"REQ-API-00001", "REQ-API-00002"},
 		},
 		{
+			name: "disjoint depends-on cycles",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00004"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00004.yaml", "REQ-API-00004", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00003"},
+				}),
+			),
+			wantCount:    2,
+			wantCode:     CodeCycle,
+			wantRelation: records.RelDependsOn,
+			wantCycles: [][]string{
+				{"REQ-API-00001", "REQ-API-00002"},
+				{"REQ-API-00003", "REQ-API-00004"},
+			},
+		},
+		{
+			name: "overlapping depends-on cycles",
+			snapshot: snapshotFromDocs(
+				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+					{Type: records.RelDependsOn, Target: "REQ-API-00003"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+				}),
+				requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", []records.Relationship{
+					{Type: records.RelDependsOn, Target: "REQ-API-00002"},
+				}),
+			),
+			wantCount:    1,
+			wantCode:     CodeCycle,
+			wantRelation: records.RelDependsOn,
+			wantIDs:      []string{"REQ-API-00001", "REQ-API-00002", "REQ-API-00003"},
+		},
+		{
 			name: "related-to cycle is exempt",
 			snapshot: snapshotFromDocs(
 				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
@@ -382,21 +426,34 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 			if tc.wantCount == 0 {
 				return
 			}
-			got := diagnostics[0]
-			if got.Code != tc.wantCode {
-				t.Errorf("code=%q, want %q", got.Code, tc.wantCode)
+			wantCycles := tc.wantCycles
+			if wantCycles == nil {
+				wantCycles = [][]string{tc.wantIDs}
 			}
-			if got.Field != "relationships" {
-				t.Errorf("field=%q, want relationships", got.Field)
+			if len(wantCycles) != tc.wantCount {
+				t.Fatalf("wantCycles=%d, wantCount=%d", len(wantCycles), tc.wantCount)
 			}
-			if !strings.Contains(got.Message, tc.wantRelation) {
-				t.Errorf("message %q does not identify relation %q", got.Message, tc.wantRelation)
+			var allIDs []string
+			for _, ids := range wantCycles {
+				allIDs = append(allIDs, ids...)
 			}
-			if !identifiesIDs(got.Message, tc.wantIDs...) {
-				t.Errorf("message %q does not identify IDs %v", got.Message, tc.wantIDs)
-			}
-			if got.Path == "" {
-				t.Errorf("path is empty, want a participating requirement file")
+			for i, got := range diagnostics {
+				if got.Code != tc.wantCode {
+					t.Errorf("diagnostic %d code=%q, want %q", i, got.Code, tc.wantCode)
+				}
+				if got.Field != "relationships" {
+					t.Errorf("diagnostic %d field=%q, want relationships", i, got.Field)
+				}
+				if !strings.Contains(got.Message, tc.wantRelation) {
+					t.Errorf("diagnostic %d message %q does not identify relation %q", i, got.Message, tc.wantRelation)
+				}
+				if got.Path == "" {
+					t.Errorf("diagnostic %d path is empty, want a participating requirement file", i)
+				}
+				gotIDs := idsInMessage(got.Message, allIDs)
+				if !sameStrings(gotIDs, wantCycles[i]) {
+					t.Errorf("diagnostic %d IDs=%v, want %v (message %q)", i, gotIDs, wantCycles[i], got.Message)
+				}
 			}
 		})
 	}
@@ -488,6 +545,28 @@ func TestGraphValidatorDeterministicLeafHandling(t *testing.T) {
 			if _, exists := v.graph[leaf]; !exists {
 				t.Fatalf("iteration %d: missing leaf %q was not merged into the graph", i, leaf)
 			}
+		}
+	}
+}
+
+func TestStronglyConnectedComponentsIncludesOverlappingMembers(t *testing.T) {
+	graph := map[string][]string{
+		"REQ-API-00001": {"REQ-API-00002", "REQ-API-00003"},
+		"REQ-API-00002": {"REQ-API-00001"},
+		"REQ-API-00003": {"REQ-API-00002"},
+	}
+	vertices := []string{"REQ-API-00001", "REQ-API-00002", "REQ-API-00003"}
+	components := stronglyConnectedComponents(graph, vertices)
+	if len(components) != 1 {
+		t.Fatalf("components=%v, want 1 cyclic component", components)
+	}
+	want := []string{"REQ-API-00001", "REQ-API-00002", "REQ-API-00003"}
+	if len(components[0]) != len(want) {
+		t.Fatalf("component=%v, want %v", components[0], want)
+	}
+	for i, id := range want {
+		if components[0][i] != id {
+			t.Fatalf("component=%v, want %v", components[0], want)
 		}
 	}
 }
@@ -602,6 +681,28 @@ func snapshotFromDocs(docs ...layout.Document[records.Requirement]) layout.Snaps
 func identifiesIDs(message string, ids ...string) bool {
 	for _, id := range ids {
 		if !strings.Contains(message, id) {
+			return false
+		}
+	}
+	return true
+}
+
+func idsInMessage(message string, ids []string) []string {
+	var found []string
+	for _, id := range ids {
+		if strings.Contains(message, id) {
+			found = append(found, id)
+		}
+	}
+	return found
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
 			return false
 		}
 	}
