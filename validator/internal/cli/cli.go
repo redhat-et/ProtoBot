@@ -318,13 +318,10 @@ func requirementIDs(snapshot layout.Snapshot, layoutDiagnostics []layout.Diagnos
 	// for those IDs do not cascade into testtags.unresolved findings.
 	// The layout diagnostic remains the actionable error.
 	for _, diagnostic := range layoutDiagnostics {
-		if path.Dir(diagnostic.Path) != layout.RequirementsDir {
+		if !specvalidation.IsCanonicalRequirementPath(diagnostic.Path) {
 			continue
 		}
-		id, ok := strings.CutSuffix(path.Base(diagnostic.Path), ".yaml")
-		if !ok || id == "" {
-			continue
-		}
+		id := strings.TrimSuffix(path.Base(diagnostic.Path), ".yaml")
 		ids[id] = struct{}{}
 	}
 	return ids

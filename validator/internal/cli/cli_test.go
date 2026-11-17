@@ -772,6 +772,20 @@ func TestRunSuppressesTestTagUnresolvedWhenRequirementFailsToParse(t *testing.T)
 	}
 }
 
+func TestRunDoesNotTreatNonCanonicalFailedRequirementAsKnownID(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/notes.yaml", "not valid yaml: [\n")
+	writeSpecFile(t, target, "tests/notes.feature", "@req:notes\nFeature: Tagged to non-canonical file\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "unknown requirement ID \"notes\"") {
+		t.Fatalf("stderr %q expected testtags.unresolved for non-canonical ID 'notes'", stderr)
+	}
+}
+
 func TestRunRejectsRelationshipCycles(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001

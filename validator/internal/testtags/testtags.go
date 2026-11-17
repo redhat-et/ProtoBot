@@ -129,6 +129,7 @@ func scanFeature(root *os.Root, relative string, knownIDs map[string]struct{}) [
 	var diagnostics []Diagnostic
 	line := 0
 	delim := ""
+	openLine := 0
 	for scanner.Scan() {
 		line++
 		text := scanner.Text()
@@ -139,17 +140,35 @@ func scanFeature(root *os.Root, relative string, knownIDs map[string]struct{}) [
 		if delim != "" {
 			if trimmed == delim {
 				delim = ""
+				openLine = 0
 			}
 			continue
 		}
 		if open := gherkinDocstringDelimiter(trimmed); open != "" {
 			delim = open
+			openLine = line
 			continue
 		}
 		diagnostics = append(diagnostics, tagsOnLine(relative, line, text, knownIDs)...)
 	}
 	if err := scanner.Err(); err != nil {
-		diagnostics = append(diagnostics, diagnostic(CodeReadFailed, relative, 0, fmt.Sprintf("cannot scan file: %s", err)))
+		if errors.Is(err, bufio.ErrTooLong) {
+			diagnostics = append(diagnostics, diagnostic(
+				CodeReadFailed,
+				relative,
+				line+1,
+				"line exceeds 1 MiB limit; later @req tags were not scanned",
+			))
+		} else {
+			diagnostics = append(diagnostics, diagnostic(CodeReadFailed, relative, 0, fmt.Sprintf("cannot scan file: %s", err)))
+		}
+	} else if delim != "" {
+		diagnostics = append(diagnostics, diagnostic(
+			CodeReadFailed,
+			relative,
+			openLine,
+			"unterminated Gherkin docstring; later @req tags were not scanned",
+		))
 	}
 	return diagnostics
 }
