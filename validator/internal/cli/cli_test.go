@@ -944,13 +944,16 @@ func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	if len(lines) < 1 {
-		t.Fatalf("stderr had %d lines, want at least 1: %q", len(lines), stderr)
+	diagLines, noteLines := splitStderrNotes(stderr)
+	if len(diagLines) != 1 {
+		t.Fatalf("stderr had %d diagnostic lines, want 1: %q", len(diagLines), stderr)
 	}
 	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00001.yaml:"
-	if !strings.HasPrefix(lines[0], wantPrefix) {
-		t.Fatalf("stderr line %q omitted %q", lines[0], wantPrefix)
+	if !strings.HasPrefix(diagLines[0], wantPrefix) {
+		t.Fatalf("stderr line %q omitted %q", diagLines[0], wantPrefix)
+	}
+	if len(noteLines) != 1 || !strings.Contains(noteLines[0], revision.CodeEmptyBase) {
+		t.Fatalf("stderr missing empty-base note: %q", stderr)
 	}
 }
 
@@ -971,8 +974,12 @@ func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	wantLine := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name"
-	if !strings.Contains(stderr, wantLine) {
-		t.Fatalf("stderr = %q, want to contain %q", stderr, wantLine)
+	diagLines, noteLines := splitStderrNotes(stderr)
+	if len(diagLines) != 1 || diagLines[0] != wantLine {
+		t.Fatalf("diagnostic lines = %q, want [%q]", diagLines, wantLine)
+	}
+	if len(noteLines) != 1 || !strings.Contains(noteLines[0], revision.CodeEmptyBase) {
+		t.Fatalf("stderr missing empty-base note: %q", stderr)
 	}
 }
 
@@ -993,8 +1000,12 @@ func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	wantLine := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\""
-	if !strings.Contains(stderr, wantLine) {
-		t.Fatalf("stderr = %q, want to contain %q", stderr, wantLine)
+	diagLines, noteLines := splitStderrNotes(stderr)
+	if len(diagLines) != 1 || diagLines[0] != wantLine {
+		t.Fatalf("diagnostic lines = %q, want [%q]", diagLines, wantLine)
+	}
+	if len(noteLines) != 1 || !strings.Contains(noteLines[0], revision.CodeEmptyBase) {
+		t.Fatalf("stderr missing empty-base note: %q", stderr)
 	}
 }
 
@@ -1248,6 +1259,21 @@ func runCLIRaw(args ...string) (int, string, string) {
 	var stdout, stderr bytes.Buffer
 	code := Run(args, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
+}
+
+func splitStderrNotes(stderr string) (diagLines, noteLines []string) {
+	trimmed := strings.TrimRight(stderr, "\n")
+	if trimmed == "" {
+		return nil, nil
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		if strings.HasPrefix(line, "validator: note:") {
+			noteLines = append(noteLines, line)
+		} else {
+			diagLines = append(diagLines, line)
+		}
+	}
+	return diagLines, noteLines
 }
 
 func moduleRoot(t *testing.T) string {
