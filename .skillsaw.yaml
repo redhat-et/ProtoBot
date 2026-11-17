@@ -1,5 +1,5 @@
 ---
-version: "0.22.0"
+version: "0.23.0"
 # This list extends content-* rules to extra files; it does not
 # restrict which files the skillsaw pre-commit hook scans. The hook
 # lints the whole repository (pass_filenames: false by default).
