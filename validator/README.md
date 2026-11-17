@@ -16,26 +16,30 @@ can fetch a missing base object over the network.
 
 The design is the [ProtoBot V2 validator][design]. This module implements the
 command line, spec directory reader, record schema checks, relationship-type
-allowlist, relationship acyclicity, reference resolution, EARS shape checks,
-requirement identifier checks, and parsed-text immutability against comparison
-base (issues #381, #383, #385, #387, and #388, #390, #392, #395, #397, #402).
-The command line accepts the checkout path and comparison base. It reads
-requirement and interface YAML records from `spec/requirements/` and
-`spec/interfaces/` in the target checkout. Missing directories are treated as
-empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
-and malformed YAML produce diagnostics. A mapping key that contains `.`, `[`,
-or `]` fails with `layout.parse_failed`. Requirement relationship types are
-restricted to `depends-on`, `supersedes`, and `related-to`; unsupported
-types, including legacy `conflicts-with`, fail validation. Directed
-`depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
-`relationship.cycle` and names the participating requirement IDs.
-`related-to` associations are exempt. Each `applies_to.interfaces` entry
-must equal an interface record's `name` (matching is case-sensitive),
-and requirement IDs in `relationships[].target` must resolve to declared
-records; retired requirement targets satisfy resolution. Requirement IDs must
-match `REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must not be
-deleted or reused relative to the comparison base. It also scans
-Gherkin `.feature` files under `tests/` for `@req:<ID>` tags and fails
+allowlist, relationship acyclicity, replacement and retirement rules,
+reference resolution, EARS shape checks, requirement identifier checks, and
+parsed-text immutability against comparison base (issues #381, #383, #385,
+and #387, #388, #390, #392, #395, #397, #399, and #402). The command line
+accepts the checkout path and comparison base. It reads requirement and
+interface YAML records from `spec/requirements/` and `spec/interfaces/` in
+the target checkout. Missing directories are treated as empty. Unreadable
+files, non-YAML entries, `.yaml` records larger than 1 MiB, and malformed YAML
+produce diagnostics. A mapping key that contains `.`, `[`, or `]` fails with
+`layout.parse_failed`. Requirement relationship types are restricted to
+`depends-on`, `supersedes`, and `related-to`; unsupported types, including
+legacy `conflicts-with`, fail validation. Directed `depends-on` and
+`supersedes` graphs must be acyclic; a cycle fails with `relationship.cycle`
+and names the participating requirement IDs. `related-to` associations are
+exempt. A `supersedes` target must have `status: retired`. A newly introduced
+`supersedes` edge must retire that predecessor in the same specification
+change relative to `--base`. Retirement without a successor is allowed.
+Retired records must not be deleted. Each `applies_to.interfaces` entry must
+equal an interface record's `name` (matching is case-sensitive), and
+requirement IDs in `relationships[].target` must resolve to declared records;
+retired requirement targets satisfy resolution. Requirement IDs must match
+`REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must not be deleted
+or reused relative to the comparison base. It also scans Gherkin `.feature`
+files under `tests/` for `@req:<ID>` tags and fails
 when a tag does not resolve to a known requirement record. Active and
 retired IDs both count as known; unknown or misspelled IDs fail with
 line-level diagnostics. Requirement records must include `id`, `type`,
@@ -144,7 +148,9 @@ include layout codes (`layout.read_failed`, `layout.unexpected_file`,
 (`interface.missing_field`, `interface.unexpected_field`), reference
 check codes (`reference.not_found`, `reference.ambiguous`),
 specification check codes (`relationship.invalid_type`,
-`relationship.cycle`), EARS check codes (`ears.shall_count`,
+`relationship.cycle`, `relationship.superseded_requirement_active`,
+`relationship.superseded_requirement_not_in_change`), EARS check codes
+(`ears.shall_count`,
 `ears.pattern_mismatch`, `ears.invalid_type`), and test-tag codes
 (`testtags.read_failed`, `testtags.unexpected_file`,
 `testtags.unresolved`). A `.yaml` record larger than 1 MiB produces

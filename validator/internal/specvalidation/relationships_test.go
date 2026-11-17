@@ -275,10 +275,10 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 				requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", []records.Relationship{
 					{Type: records.RelSupersedes, Target: "REQ-API-00002"},
 				}),
-				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+				withStatus(requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
 					{Type: records.RelSupersedes, Target: "REQ-API-00001"},
-				}),
-				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", nil),
+				}), records.StatusRetired),
+				withStatus(requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", nil), records.StatusRetired),
 			),
 		},
 		{
@@ -329,12 +329,12 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 		{
 			name: "two-node supersedes cycle",
 			snapshot: snapshotFromDocs(
-				requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+				withStatus(requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
 					{Type: records.RelSupersedes, Target: "REQ-API-00002"},
-				}),
-				requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+				}), records.StatusRetired),
+				withStatus(requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
 					{Type: records.RelSupersedes, Target: "REQ-API-00001"},
-				}),
+				}), records.StatusRetired),
 			),
 			wantCount:    1,
 			wantCode:     CodeCycle,
@@ -404,14 +404,14 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 
 func TestValidateRelationshipAcyclicityReportsIndependentGraphs(t *testing.T) {
 	snapshot := snapshotFromDocs(
-		requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+		withStatus(requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
 			{Type: records.RelDependsOn, Target: "REQ-API-00002"},
 			{Type: records.RelSupersedes, Target: "REQ-API-00002"},
-		}),
-		requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
+		}), records.StatusRetired),
+		withStatus(requirementDocument("spec/requirements/REQ-API-00002.yaml", "REQ-API-00002", []records.Relationship{
 			{Type: records.RelDependsOn, Target: "REQ-API-00003"},
 			{Type: records.RelSupersedes, Target: "REQ-API-00001"},
-		}),
+		}), records.StatusRetired),
 		requirementDocument("spec/requirements/REQ-API-00003.yaml", "REQ-API-00003", nil),
 	)
 
@@ -613,16 +613,26 @@ func requirementSnapshot(path, id string, relationships []records.Relationship, 
 		requirementDocument(path, id, relationships),
 	}
 	seen := map[string]bool{id: true}
+	superseded := map[string]bool{}
+	for _, relationship := range relationships {
+		if relationship.Type == records.RelSupersedes && relationship.Target != "" {
+			superseded[relationship.Target] = true
+		}
+	}
 	for _, extraID := range extraIDs {
 		if extraID == "" || seen[extraID] {
 			continue
 		}
 		seen[extraID] = true
-		requirements = append(requirements, requirementDocument(
+		extra := requirementDocument(
 			"spec/requirements/"+extraID+".yaml",
 			extraID,
 			nil,
-		))
+		)
+		if superseded[extraID] {
+			extra.Record.Status = records.StatusRetired
+		}
+		requirements = append(requirements, extra)
 	}
 	return layout.Snapshot{Requirements: requirements}
 }
@@ -638,6 +648,11 @@ func relationshipTargets(relationships []records.Relationship) []string {
 		ids = append(ids, relationship.Target)
 	}
 	return ids
+}
+
+func withStatus(document layout.Document[records.Requirement], status string) layout.Document[records.Requirement] {
+	document.Record.Status = status
+	return document
 }
 
 func requirementDocument(path, id string, relationships []records.Relationship) layout.Document[records.Requirement] {

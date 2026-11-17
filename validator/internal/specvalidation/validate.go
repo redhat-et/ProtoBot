@@ -25,6 +25,7 @@ func Validate(snapshot layout.Snapshot, layoutDiagnostics ...layout.Diagnostic) 
 	diagnostics = append(diagnostics, validateRequirementIDs(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateRelationshipTypes(snapshot.Requirements)...)
 	diagnostics = append(diagnostics, validateRelationshipAcyclicity(snapshot.Requirements)...)
+	diagnostics = append(diagnostics, validateReplacement(snapshot)...)
 	diagnostics = append(diagnostics, validateReferences(snapshot, layoutDiagnostics...)...)
 	sortDiagnostics(diagnostics)
 	return diagnostics

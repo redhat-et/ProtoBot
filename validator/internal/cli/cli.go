@@ -110,6 +110,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			reportSpec(stderr, diagnostic)
 		}
 
+		for _, diagnostic := range specvalidation.CompareReplacement(snapshot, baseSnapshot) {
+			failed = true
+			reportSpec(stderr, diagnostic)
+		}
+
 		immutabilityDiagnostics := immutability.Check(snapshot, baseSnapshot)
 		if len(immutabilityDiagnostics) > 0 {
 			failed = true
