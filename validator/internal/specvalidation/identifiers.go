@@ -226,7 +226,9 @@ func canonicalRequirementPath(id string) string {
 	return path.Join(layout.RequirementsDir, id+".yaml")
 }
 
-func isCanonicalRequirementPath(relPath string) bool {
+// IsCanonicalRequirementPath reports whether relPath matches
+// spec/requirements/<ID>.yaml where ID is a valid requirement ID.
+func IsCanonicalRequirementPath(relPath string) bool {
 	if path.Dir(relPath) != layout.RequirementsDir {
 		return false
 	}
@@ -236,6 +238,10 @@ func isCanonicalRequirementPath(relPath string) bool {
 	}
 	id := strings.TrimSuffix(base, ".yaml")
 	return records.ValidateRequirementID(id) == nil
+}
+
+func isCanonicalRequirementPath(relPath string) bool {
+	return IsCanonicalRequirementPath(relPath)
 }
 
 // BasePathExists reports whether relPath is present in base requirements

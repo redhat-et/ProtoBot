@@ -38,11 +38,16 @@ type Diagnostic struct {
 	Message string
 }
 
+// maxFeatureLineBytes is the maximum size of one line in a .feature file.
+// Longer lines produce CodeReadFailed without discarding earlier findings.
+const maxFeatureLineBytes = 1 << 20
+
 // Check scans Gherkin .feature files under tests/ in target for @req:<ID>
 // association tags and reports tags that do not resolve to a known
 // requirement ID. Retired and active IDs both count as known. Missing
 // tests/ is treated as empty. Traversal stays inside target and does
-// not follow symlinks.
+// not follow symlinks. Nested symlinks under tests/ are reported as
+// unexpected files. Lines inside Gherkin docstrings are not tags.
 func Check(target string, knownIDs map[string]struct{}) []Diagnostic {
 	absolute, err := filepath.Abs(target)
 	if err != nil {
@@ -72,10 +77,7 @@ func walk(root *os.Root, relative string, knownIDs map[string]struct{}, top bool
 		if top {
 			return []Diagnostic{diagnostic(CodeUnexpectedFile, relative, 0, "must be a directory")}
 		}
-		if filepath.Ext(info.Name()) == ".feature" {
-			return []Diagnostic{diagnostic(CodeUnexpectedFile, relative, 0, "is not a regular file")}
-		}
-		return nil
+		return []Diagnostic{diagnostic(CodeUnexpectedFile, relative, 0, "is not a regular file")}
 	}
 	if info.IsDir() {
 		return walkDir(root, relative, knownIDs)
@@ -125,16 +127,62 @@ func scanFeature(root *os.Root, relative string, knownIDs map[string]struct{}) [
 	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxFeatureLineBytes)
 	var diagnostics []Diagnostic
 	line := 0
+	delim := ""
+	openLine := 0
 	for scanner.Scan() {
 		line++
-		diagnostics = append(diagnostics, tagsOnLine(relative, line, scanner.Text(), knownIDs)...)
+		text := scanner.Text()
+		if line == 1 {
+			text = strings.TrimPrefix(text, "\ufeff")
+		}
+		trimmed := strings.TrimSpace(text)
+		if delim != "" {
+			if trimmed == delim {
+				delim = ""
+				openLine = 0
+			}
+			continue
+		}
+		if open := gherkinDocstringDelimiter(trimmed); open != "" {
+			delim = open
+			openLine = line
+			continue
+		}
+		diagnostics = append(diagnostics, tagsOnLine(relative, line, text, knownIDs)...)
 	}
 	if err := scanner.Err(); err != nil {
-		return []Diagnostic{diagnostic(CodeReadFailed, relative, 0, fmt.Sprintf("cannot scan file: %s", err))}
+		if errors.Is(err, bufio.ErrTooLong) {
+			diagnostics = append(diagnostics, diagnostic(
+				CodeReadFailed,
+				relative,
+				line+1,
+				"line exceeds 1 MiB limit; later @req tags were not scanned",
+			))
+		} else {
+			diagnostics = append(diagnostics, diagnostic(CodeReadFailed, relative, 0, fmt.Sprintf("cannot scan file: %s", err)))
+		}
+	} else if delim != "" {
+		diagnostics = append(diagnostics, diagnostic(
+			CodeReadFailed,
+			relative,
+			openLine,
+			"unterminated Gherkin docstring; later @req tags were not scanned",
+		))
 	}
 	return diagnostics
+}
+
+func gherkinDocstringDelimiter(trimmed string) string {
+	if strings.HasPrefix(trimmed, `"""`) {
+		return `"""`
+	}
+	if strings.HasPrefix(trimmed, "```") {
+		return "```"
+	}
+	return ""
 }
 
 func tagsOnLine(relative string, line int, text string, knownIDs map[string]struct{}) []Diagnostic {

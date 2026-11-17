@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strings"
 
 	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
@@ -125,7 +126,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		failed = true
 		printDiagnostic(stderr, diagnostic.Code, diagnostic.Path, diagnostic.Message)
 	}
-	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot)) {
+	for _, finding := range testtags.Check(opts.target, requirementIDs(snapshot, diagnostics)) {
 		failed = true
 		targetPath := finding.Path
 		if finding.Line > 0 {
@@ -253,13 +254,23 @@ func fail(stderr io.Writer, message string) int {
 	return exitFailure
 }
 
-func requirementIDs(snapshot layout.Snapshot) map[string]struct{} {
-	ids := make(map[string]struct{}, len(snapshot.Requirements))
+func requirementIDs(snapshot layout.Snapshot, layoutDiagnostics []layout.Diagnostic) map[string]struct{} {
+	ids := make(map[string]struct{}, len(snapshot.Requirements)+len(layoutDiagnostics))
 	for _, document := range snapshot.Requirements {
 		if document.Record.ID == "" {
 			continue
 		}
 		ids[document.Record.ID] = struct{}{}
+	}
+	// Treat requirement files that failed to load as known so @req tags
+	// for those IDs do not cascade into testtags.unresolved findings.
+	// The layout diagnostic remains the actionable error.
+	for _, diagnostic := range layoutDiagnostics {
+		if !specvalidation.IsCanonicalRequirementPath(diagnostic.Path) {
+			continue
+		}
+		id := strings.TrimSuffix(path.Base(diagnostic.Path), ".yaml")
+		ids[id] = struct{}{}
 	}
 	return ids
 }

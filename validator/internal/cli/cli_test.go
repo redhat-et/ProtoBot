@@ -748,6 +748,44 @@ func TestRunTestTagReferenceResolution(t *testing.T) {
 	}
 }
 
+func TestRunSuppressesTestTagUnresolvedWhenRequirementFailsToParse(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
+	writeSpecFile(t, target, "tests/tagged.feature", "@req:REQ-API-00001\nFeature: Tagged to malformed record\n")
+	writeSpecFile(t, target, "tests/unknown.feature", "@req:REQ-UNKNOWN\nFeature: Genuinely unknown identifier\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "REQ-API-00001.yaml") || !strings.Contains(stderr, "parse YAML") {
+		t.Fatalf("stderr %q omitted parse error for REQ-API-00001.yaml", stderr)
+	}
+	if strings.Contains(stderr, "unknown requirement ID \"REQ-API-00001\"") {
+		t.Fatalf("stderr %q cascaded testtags.unresolved for a requirement that failed to load", stderr)
+	}
+	if !strings.Contains(stderr, "validator: testtags.unresolved: tests/unknown.feature:1:") {
+		t.Fatalf("stderr %q omitted testtags.unresolved for a genuinely unknown tag", stderr)
+	}
+	if !strings.Contains(stderr, "REQ-UNKNOWN") {
+		t.Fatalf("stderr %q omitted genuinely unknown requirement ID", stderr)
+	}
+}
+
+func TestRunDoesNotTreatNonCanonicalFailedRequirementAsKnownID(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/notes.yaml", "not valid yaml: [\n")
+	writeSpecFile(t, target, "tests/notes.feature", "@req:notes\nFeature: Tagged to non-canonical file\n")
+
+	code, stdout, stderr := runCLI("--target", target, "--base", "main")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "unknown requirement ID \"notes\"") {
+		t.Fatalf("stderr %q expected testtags.unresolved for non-canonical ID 'notes'", stderr)
+	}
+}
+
 func TestRunRejectsRelationshipCycles(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
