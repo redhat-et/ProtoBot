@@ -17,32 +17,35 @@ can fetch a missing base object over the network.
 The design is the [ProtoBot V2 validator][design]. This module implements the
 command line, spec directory reader, record schema checks, relationship-type
 allowlist, relationship acyclicity, replacement and retirement rules,
-reference resolution, EARS shape checks, requirement identifier checks, and
-parsed-text immutability against comparison base (issues #381, #383, #385,
-and #387, #388, #390, #392, #395, #397, #399, and #402). The command line
-accepts the checkout path and comparison base. It reads requirement and
-interface YAML records from `spec/requirements/` and `spec/interfaces/` in
-the target checkout. Missing directories are treated as empty. Unreadable
-files, non-YAML entries, `.yaml` records larger than 1 MiB, and malformed YAML
-produce diagnostics. A mapping key that contains `.`, `[`, or `]` fails with
-`layout.parse_failed`. Requirement relationship types are restricted to
-`depends-on`, `supersedes`, and `related-to`; unsupported types, including
-legacy `conflicts-with`, fail validation. Directed `depends-on` and
-`supersedes` graphs must be acyclic; a cycle fails with `relationship.cycle`
-and names the participating requirement IDs. `related-to` associations are
-exempt. A `supersedes` target must have `status: retired`. A newly introduced
-`supersedes` edge must retire that predecessor in the same specification
-change relative to `--base`. Retirement without a successor is allowed.
-Retired records must not be deleted. Each `applies_to.interfaces` entry must
-equal an interface record's `name` (matching is case-sensitive), and
-requirement IDs in `relationships[].target` must resolve to declared records;
-retired requirement targets satisfy resolution. Requirement IDs must match
-`REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must not be deleted
-or reused relative to the comparison base. It also scans Gherkin `.feature`
-files under `tests/` for `@req:<ID>` tags and fails
-when a tag does not resolve to a known requirement record. Active and
-retired IDs both count as known; unknown or misspelled IDs fail with
-line-level diagnostics. Requirement records must include `id`, `type`,
+reference resolution, EARS shape checks, requirement identifier checks,
+basename-to-id and basename-to-name matching, and parsed-text
+immutability against comparison base
+(issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
+and #463). The command line accepts the checkout path and comparison base.
+It reads requirement and interface YAML records from `spec/requirements/` and
+`spec/interfaces/` in the target checkout. Missing directories are treated as
+empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
+and malformed YAML produce diagnostics. A mapping key that contains `.`, `[`,
+or `]` fails with `layout.parse_failed`. Requirement relationship types are
+restricted to `depends-on`, `supersedes`, and `related-to`; unsupported
+types, including legacy `conflicts-with`, fail validation. Directed
+`depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
+`relationship.cycle` and names the participating requirement IDs.
+`related-to` associations are exempt. A `supersedes` target must have
+`status: retired`. A newly introduced `supersedes` edge must retire that
+predecessor in the same specification change relative to `--base`. Retirement
+without a successor is allowed. Retired records must not be deleted. Each
+`applies_to.interfaces` entry must equal an interface record's `name`
+(matching is case-sensitive), and requirement IDs in `relationships[].target`
+must resolve to declared records; retired requirement targets satisfy
+resolution. Requirement IDs must match `REQ-<SCOPE>-<NNNNN>`, be unique in the
+working tree, and must not be deleted or reused relative to the comparison
+base. Requirement file basenames must use that same identifier pattern and
+equal the in-record `id`. Interface file basenames must equal the declared
+`name`. It also scans Gherkin `.feature` files under `tests/` for `@req:<ID>`
+tags and fails when a tag does not resolve to a known requirement record.
+Active and retired IDs both count as known; unknown or misspelled IDs fail
+with line-level diagnostics. Requirement records must include `id`, `type`,
 `text`, `applies_to`, `relationships`, and `status`. `applies_to` must
 name at least one interface or scope. Blank selectors count as absent.
 Interface records must include `name`, `kind`, and `description`. Status
@@ -66,13 +69,28 @@ On success, it prints `validator: ok` along with the target and base
 arguments on standard output and exits with status 0. Validation failures
 exit with status 1; command-line usage errors exit with status 2.
 
-`layout.Read` discovers `*.yaml` files in those directories. It does
-not require requirement basenames to match `REQ-<SCOPE>-<NNNNN>.yaml`
-or interface basenames to match the in-record name. No current check
-covers basename-to-record-ID or basename-to-name matching; that matching
-is not implemented yet. Requirement identity is path-keyed: moving a
-record to a new file path counts as a deletion at the old path and a reuse
-at the new path.
+`layout.Read` discovers `*.yaml` files in those directories. After a record
+parses, specification checks require a requirement basename to match
+`REQ-<SCOPE>-<NNNNN>.yaml` using the same identifier pattern as in-record
+`id` values, and to equal that `id`. A malformed requirement basename fails
+with `requirement.invalid_basename`. When `id` is non-empty, a valid basename
+that does not equal `id` fails with `requirement.id_basename_mismatch`.
+When `name` is non-empty, an interface basename that does not equal the declared
+`name` fails with `interface.name_basename_mismatch`. Parsed records remain in
+the snapshot so other checks still run. Requirement identity is path-keyed:
+moving a record to a new file path with the same ID emits
+`requirement.reused_id` at the new path and no `requirement.deleted`. Two
+exceptions apply: moving a record from a non-canonical path to its canonical
+`spec/requirements/{id}.yaml` path to correct its basename suppresses
+`requirement.reused_id`, and replacing exactly one non-canonical unparsed or
+invalid-ID requirement file from the comparison base with exactly one canonical
+`spec/requirements/{valid-id}.yaml` record suppresses `requirement.deleted`.
+The exception applies only when the repair is the only new requirement record
+in the change set; `REQ-FIX-00001.yaml` plus `REQ-NEW-00001.yaml` still emits
+`requirement.deleted`. Each legacy file needs its own change set; two legacy
+files cannot be repaired together, and two sequential repairs work. The
+validator cannot read the id of an unreadable base record, so one removed file
+and one unrelated added record also pass.
 
 ```text
 validator --target PATH --base REF
@@ -138,14 +156,16 @@ diagnostic.
 
 This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
-`layout.parse_failed`), revision check codes (`revision.not_found`,
-`revision.read_failed`, `revision.unsupported_entry`,
+`layout.parse_failed`), revision check codes
+(`revision.not_found`, `revision.read_failed`, `revision.unsupported_entry`,
 `revision.unexpected_file`, `revision.parse_failed`), requirement check codes
 (`requirement.missing_field`, `requirement.invalid_status`,
 `requirement.unexpected_field`, `requirement.invalid_id`,
 `requirement.duplicate_id`, `requirement.deleted`,
-`requirement.reused_id`, `requirement.text_immutable`), interface check codes
-(`interface.missing_field`, `interface.unexpected_field`), reference
+`requirement.reused_id`, `requirement.text_immutable`,
+`requirement.invalid_basename`, `requirement.id_basename_mismatch`),
+interface check codes (`interface.missing_field`,
+`interface.unexpected_field`, `interface.name_basename_mismatch`), reference
 check codes (`reference.not_found`, `reference.ambiguous`),
 specification check codes (`relationship.invalid_type`,
 `relationship.cycle`, `relationship.superseded_requirement_active`,

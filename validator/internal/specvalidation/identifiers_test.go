@@ -6,6 +6,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/revision"
 )
 
 func TestValidateRequirementIDs(t *testing.T) {
@@ -168,6 +169,31 @@ func TestCompareBaseRejectsReuse(t *testing.T) {
 	}
 }
 
+func TestCompareBaseAllowsBasenameCorrection(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/notes.yaml", id: "REQ-CORE-00001"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-CORE-00001.yaml", id: "REQ-CORE-00001"},
+	})
+	if diagnostics := CompareBase(target, base, nil); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v, want none (basename correction should pass CompareBase)", diagnostics)
+	}
+}
+
+func TestCompareBaseRejectsNonCanonicalMove(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/notes.yaml", id: "REQ-CORE-00001"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/other.yaml", id: "REQ-CORE-00001"},
+	})
+	diagnostics := CompareBase(target, base, nil)
+	if len(diagnostics) != 1 || diagnostics[0].Code != CodeReusedID {
+		t.Fatalf("diagnostics=%v, want CodeReusedID for other.yaml", diagnostics)
+	}
+}
+
 func TestCompareBaseAllowsNewIDs(t *testing.T) {
 	base := snapshotFromIDs([]idPath{
 		{path: "spec/requirements/REQ-API-00001.yaml", id: "REQ-API-00001"},
@@ -327,6 +353,130 @@ func TestCompareBaseSuppressesDeletionForRepairedUnparsedBaseFile(t *testing.T) 
 	diagnostics := CompareBase(target, base, nil, baseDiags...)
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v, want none (unparsed base file was repaired in target)", diagnostics)
+	}
+}
+
+func TestCompareBaseSuppressesDeletionForNonCanonicalUnparsedBaseFileReplacedByCanonicalRecord(t *testing.T) {
+	base := layout.Snapshot{}
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-FIX-00001.yaml", id: "REQ-FIX-00001"},
+	})
+	baseDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken.yaml", Message: "yaml: malformed"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v, want none (non-canonical unparsed base file was replaced by canonical record)", diagnostics)
+	}
+}
+
+func TestCompareBaseSuppressesDeletionForNonCanonicalInvalidBaseIDReplacedByCanonicalRecord(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "not-an-id"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-FIX-00001.yaml", id: "REQ-FIX-00001"},
+	})
+	diagnostics := CompareBase(target, base, nil)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v, want none (non-canonical invalid base id was replaced by canonical record)", diagnostics)
+	}
+}
+
+func TestCompareBaseRejectsDeletionWhenNonCanonicalBaseFileRemovedWithoutReplacement(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "not-an-id"},
+	})
+	target := snapshotFromIDs(nil)
+	baseDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken.yaml", Message: "yaml: malformed"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics count=%d, want 2", len(diagnostics))
+	}
+	for _, diag := range diagnostics {
+		if diag.Code != CodeDeleted {
+			t.Errorf("diagnostic code=%q, want %q", diag.Code, CodeDeleted)
+		}
+	}
+}
+
+func TestCompareBaseRejectsMultipleNonCanonicalWhenReplacementsDoNotMatchExactlyOne(t *testing.T) {
+	// Base has two non-canonical files needing repair (one unparsed, one invalid ID).
+	// Because repair is restricted to exactly one removed file and one replacement,
+	// neither is repaired and both emit requirement.deleted.
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "not-an-id"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-FIX-00001.yaml", id: "REQ-FIX-00001"},
+	})
+	baseDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken.yaml", Message: "yaml: malformed"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics count=%d, want 2 (neither repaired)", len(diagnostics))
+	}
+	for _, diag := range diagnostics {
+		if diag.Code != CodeDeleted {
+			t.Errorf("code=%q, want %q", diag.Code, CodeDeleted)
+		}
+	}
+}
+
+func TestCompareBaseRejectsTwoRemovedFilesWithTwoAddedRecords(t *testing.T) {
+	base := snapshotFromIDs(nil)
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-FIX-00001.yaml", id: "REQ-FIX-00001"},
+		{path: "spec/requirements/REQ-FIX-00002.yaml", id: "REQ-FIX-00002"},
+	})
+	baseDiags := []layout.Diagnostic{
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken1.yaml", Message: "yaml: malformed"},
+		{Code: layout.CodeParseFailed, Path: "spec/requirements/broken2.yaml", Message: "yaml: malformed"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics count=%d, want 2", len(diagnostics))
+	}
+	for _, diag := range diagnostics {
+		if diag.Code != CodeDeleted {
+			t.Errorf("diagnostic code=%q, want %q", diag.Code, CodeDeleted)
+		}
+	}
+}
+
+func TestCompareBaseRejectsNonCanonicalMoveToNonCanonicalPath(t *testing.T) {
+	base := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/bad.yaml", id: "not-an-id"},
+	})
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/other.yaml", id: "REQ-FIX-00001"},
+	})
+	diagnostics := CompareBase(target, base, nil)
+	if len(diagnostics) != 1 || diagnostics[0].Code != CodeDeleted {
+		t.Fatalf("diagnostics=%v, want CodeDeleted for bad.yaml when moving to non-canonical path", diagnostics)
+	}
+}
+
+func TestCompareBaseRejectsUnexpectedBaseFileRemovalEvenWithCanonicalReplacement(t *testing.T) {
+	base := layout.Snapshot{}
+	target := snapshotFromIDs([]idPath{
+		{path: "spec/requirements/REQ-FIX-00001.yaml", id: "REQ-FIX-00001"},
+	})
+	baseDiags := []layout.Diagnostic{
+		{Code: revision.CodeUnexpectedFile, Path: "spec/requirements/notes.txt", Message: "unexpected file"},
+	}
+	diagnostics := CompareBase(target, base, nil, baseDiags...)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics count=%d, want 1; got %v", len(diagnostics), diagnostics)
+	}
+	if diagnostics[0].Code != CodeDeleted {
+		t.Errorf("diagnostic code=%q, want %q", diagnostics[0].Code, CodeDeleted)
+	}
+	if diagnostics[0].Path != "spec/requirements/notes.txt" {
+		t.Errorf("diagnostic path=%q, want spec/requirements/notes.txt", diagnostics[0].Path)
 	}
 }
 

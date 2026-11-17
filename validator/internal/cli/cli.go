@@ -100,7 +100,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 	} else {
 		for _, diagnostic := range baseParseDiagnostics {
-			if specvalidation.TargetPathExists(snapshot, diagnostics, diagnostic.Path) {
+			if specvalidation.TargetPathExists(snapshot, diagnostics, diagnostic.Path) || specvalidation.IsRepairedBaseRequirement(diagnostic.Path, snapshot, baseSnapshot, diagnostics, baseParseDiagnostics...) {
 				reportBaseLayout(stderr, opts.base, diagnostic)
 			}
 		}

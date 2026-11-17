@@ -195,17 +195,30 @@ func TestValidateResolvesInterfaceByNameNotFilename(t *testing.T) {
 			},
 		}},
 	}
-	if diagnostics := Validate(snapshot); len(diagnostics) != 0 {
-		t.Fatalf("diagnostics=%v, want none", diagnostics)
-	}
-
-	snapshot.Requirements[0].Record.AppliesTo.Interfaces = []string{"foo"}
 	diagnostics := Validate(snapshot)
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostics=%v, want 1", diagnostics)
 	}
-	if diagnostics[0].Field != "applies_to.interfaces[0]" || !identifiesType(diagnostics[0].Message, "foo") {
-		t.Fatalf("diagnostic=%+v", diagnostics[0])
+	if diagnostics[0].Code != CodeInterfaceNameBasenameMismatch {
+		t.Errorf("code=%q, want %q", diagnostics[0].Code, CodeInterfaceNameBasenameMismatch)
+	}
+	if diagnostics[0].Path != "spec/interfaces/foo.yaml" {
+		t.Errorf("path=%q, want spec/interfaces/foo.yaml", diagnostics[0].Path)
+	}
+
+	snapshot.Requirements[0].Record.AppliesTo.Interfaces = []string{"foo"}
+	diagnostics = Validate(snapshot)
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics=%v, want 2", diagnostics)
+	}
+	if diagnostics[0].Code != CodeInterfaceNameBasenameMismatch || diagnostics[0].Path != "spec/interfaces/foo.yaml" {
+		t.Errorf("diagnostic[0]=%+v, want %s for spec/interfaces/foo.yaml", diagnostics[0], CodeInterfaceNameBasenameMismatch)
+	}
+	if diagnostics[1].Code != CodeReferenceNotFound {
+		t.Errorf("diagnostic[1].code=%q, want %q", diagnostics[1].Code, CodeReferenceNotFound)
+	}
+	if diagnostics[1].Field != "applies_to.interfaces[0]" || !identifiesType(diagnostics[1].Message, "foo") {
+		t.Fatalf("diagnostic[1]=%+v", diagnostics[1])
 	}
 }
 
@@ -464,10 +477,16 @@ func TestValidateRejectsAmbiguousInterfaceReference(t *testing.T) {
 	}
 
 	diagnostics := Validate(snapshot)
-	if len(diagnostics) != 1 {
-		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	if len(diagnostics) != 3 {
+		t.Fatalf("diagnostics=%v, want 3", diagnostics)
 	}
-	got := diagnostics[0]
+	if diagnostics[0].Code != CodeInterfaceNameBasenameMismatch || diagnostics[0].Path != "spec/interfaces/api-a.yaml" {
+		t.Errorf("diagnostic[0]=%+v, want %s for spec/interfaces/api-a.yaml", diagnostics[0], CodeInterfaceNameBasenameMismatch)
+	}
+	if diagnostics[1].Code != CodeInterfaceNameBasenameMismatch || diagnostics[1].Path != "spec/interfaces/api-b.yaml" {
+		t.Errorf("diagnostic[1]=%+v, want %s for spec/interfaces/api-b.yaml", diagnostics[1], CodeInterfaceNameBasenameMismatch)
+	}
+	got := diagnostics[2]
 	if got.Code != CodeReferenceAmbiguous {
 		t.Errorf("code=%q, want %q", got.Code, CodeReferenceAmbiguous)
 	}

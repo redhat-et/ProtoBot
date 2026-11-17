@@ -598,6 +598,24 @@ status: active
 	}
 }
 
+func TestReadLoadsMismatchedBasenames(t *testing.T) {
+	target := t.TempDir()
+	writeFile(t, target, "spec/requirements/notes.yaml", requirementYAML("REQ-CORE-00001"))
+	writeFile(t, target, "spec/requirements/REQ-CORE-00002.yaml", requirementYAML("REQ-CORE-00003"))
+	writeFile(t, target, "spec/interfaces/service.yaml", interfaceYAML("billing-api"))
+
+	snapshot, diagnostics := Read(target)
+	if len(diagnostics) != 0 {
+		t.Fatalf("layout diagnostics=%v, want none; basename matching is a post-read check", diagnostics)
+	}
+	if len(snapshot.Requirements) != 2 {
+		t.Fatalf("requirements=%d, want 2", len(snapshot.Requirements))
+	}
+	if len(snapshot.Interfaces) != 1 || snapshot.Interfaces[0].Record.Name != "billing-api" {
+		t.Fatalf("interfaces=%+v", snapshot.Interfaces)
+	}
+}
+
 func TestReadDeterministicOrder(t *testing.T) {
 	target := t.TempDir()
 	writeFile(t, target, "spec/requirements/REQ-Z-00001.yaml", requirementYAML("REQ-Z-00001"))
