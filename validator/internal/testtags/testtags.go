@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 )
 
 // TestsDir is the checkout-relative directory that holds derived tests.
@@ -53,7 +55,7 @@ func Check(target string, knownIDs map[string]struct{}) []Diagnostic {
 	defer func() { _ = root.Close() }()
 
 	diagnostics := walk(root, TestsDir, knownIDs, true)
-	sortDiagnostics(diagnostics)
+	diag.Sort(diagnostics, diagnosticKey)
 	return diagnostics
 }
 
@@ -181,18 +183,6 @@ func diagnostic(code, path string, line int, message string) Diagnostic {
 	return Diagnostic{Code: code, Path: path, Line: line, Message: message}
 }
 
-func sortDiagnostics(diagnostics []Diagnostic) {
-	sort.Slice(diagnostics, func(i, j int) bool {
-		left, right := diagnostics[i], diagnostics[j]
-		if left.Path != right.Path {
-			return left.Path < right.Path
-		}
-		if left.Line != right.Line {
-			return left.Line < right.Line
-		}
-		if left.Code != right.Code {
-			return left.Code < right.Code
-		}
-		return left.Message < right.Message
-	})
+func diagnosticKey(d Diagnostic) diag.Key {
+	return diag.Key{Path: d.Path, Line: d.Line, Code: d.Code, Message: d.Message}
 }
