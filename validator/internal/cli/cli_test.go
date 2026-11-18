@@ -960,20 +960,21 @@ func TestRunUnchangedTextPasses(t *testing.T) {
 
 func TestRunYAMLFormattingVariationPasses(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00001")))
+	baseYAML := testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00001"))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", baseYAML)
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "base")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: event-driven
-text: >-
-  When a client sends GET /health, the service
-  shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
+
+	foldedYAML := strings.Replace(
+		baseYAML,
+		"text: When a client sends GET /health, the service shall return HTTP 200.",
+		"text: >-\n  When a client sends GET /health, the service\n  shall return HTTP 200.",
+		1,
+	)
+	if foldedYAML == baseYAML {
+		t.Fatal("failed to reflow text scalar into folded form")
+	}
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", foldedYAML)
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
 	if code != exitOK || stderr != "" {

@@ -42,6 +42,12 @@ func TestCanonicalFixtureYAMLRoundTrip(t *testing.T) {
 	if len(layoutDiagnostics) != 0 {
 		t.Fatalf("layout diagnostics=%v", layoutDiagnostics)
 	}
+	if len(snapshot.Requirements) != 1 {
+		t.Fatalf("len(snapshot.Requirements)=%d, want 1", len(snapshot.Requirements))
+	}
+	if len(snapshot.Interfaces) != 1 {
+		t.Fatalf("len(snapshot.Interfaces)=%d, want 1", len(snapshot.Interfaces))
+	}
 	if errs := Validate(snapshot); len(errs) != 0 {
 		t.Fatalf("round-tripped fixtures failed validation: %v", errs)
 	}
