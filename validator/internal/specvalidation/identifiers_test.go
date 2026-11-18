@@ -7,6 +7,7 @@ import (
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
 	"github.com/redhat-et/protobot/validator/internal/revision"
+	"github.com/redhat-et/protobot/validator/internal/testutil"
 )
 
 func TestValidateRequirementIDs(t *testing.T) {
@@ -129,13 +130,10 @@ func TestCompareBaseAllowsRetirement(t *testing.T) {
 	})
 	target := layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
-			{
-				Path: "spec/requirements/REQ-API-00001.yaml",
-				Record: records.Requirement{
-					ID:     "REQ-API-00001",
-					Status: records.StatusRetired,
-				},
-			},
+			testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00001"),
+				testutil.WithStatus(records.StatusRetired),
+			),
 		},
 	}
 	if diagnostics := CompareBase(target, base, nil); len(diagnostics) != 0 {
@@ -522,12 +520,17 @@ type idPath struct {
 	id   string
 }
 
+// snapshotFromIDs builds minimal synthetic requirement documents that carry
+// only a path and id. It exists to exercise identifier-only checks
+// (format, duplicates, deletion, reuse) in isolation, filtered through
+// identifierDiagnostics; other schema fields are irrelevant to those
+// checks, so the canonical testutil fixtures are intentionally not used.
 func snapshotFromIDs(ids []idPath) layout.Snapshot {
 	docs := make([]layout.Document[records.Requirement], 0, len(ids))
 	for _, item := range ids {
-		docs = append(docs, layout.Document[records.Requirement]{
+		docs = append(docs, layout.Document[records.Requirement]{ // nolint:fixtures
 			Path: item.path,
-			Record: records.Requirement{
+			Record: records.Requirement{ // nolint:fixtures
 				ID: item.id,
 			},
 		})

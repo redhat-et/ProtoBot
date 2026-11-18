@@ -199,3 +199,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_validator_spec_parity|test_check_validator_spec_parity)\.py$
+      - id: validator-fixtures
+        name: validator-fixtures
+        entry: python3 scripts/check_validator_fixtures.py
+        language: system
+        pass_filenames: false
+        files: ^(validator/internal/.+_test\.go|scripts/check_validator_fixtures\.py)$
+      - id: test-validator-fixtures
+        name: test-validator-fixtures
+        entry: python3 scripts/test_check_validator_fixtures.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_validator_fixtures|test_check_validator_fixtures)\.py$
