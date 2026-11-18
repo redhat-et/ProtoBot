@@ -54,11 +54,18 @@ values are `active` or `retired`. Legacy metadata (`verification`,
 Requirement text is checked for exactly one `shall` and for a match
 against the declared EARS type (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
-State-driven statements require the keyword `While`. Parsed requirement
-`text` is compared against `--base` for every existing ID; YAML scalar
-reformatting that preserves the parsed string passes, and metadata-only
-edits such as status transitions pass. A wording change under an
-existing ID fails.
+Statement pattern matching and the `shall` count use
+case-insensitive regex matching per [ADR-0002][adr-0002]
+(`(?is)` for patterns and `(?i)\bshall\b` for the obligation
+keyword). State-driven statements require the keyword `While`
+rather than an undeclared alias such as `During`; case variations
+such as `while` and `While` match. Complex statements require at
+least two distinct trigger keywords from `When`, `While`, `Where`,
+and the pair `If`...`then`; each keyword counts once. Parsed
+requirement `text` is compared against `--base` for every existing ID;
+YAML scalar reformatting that preserves the parsed string passes, and
+metadata-only edits such as status transitions pass. A wording change
+under an existing ID fails.
 
 `--target` is used as given; the command does not apply
 `filepath.Clean`, so relative paths and trailing slashes stay in the
@@ -176,6 +183,20 @@ specification check codes (`relationship.invalid_type`,
 `testtags.unresolved`). A `.yaml` record larger than 1 MiB produces
 `layout.read_failed`.
 
+An `ears.pattern_mismatch` message appends the expected template
+syntax for author remediation. A state-driven mismatch, including an
+undeclared alias such as `During`, reports:
+
+```text
+requirement text does not match the declared state-driven pattern; expected "While <state>, the <system> shall <response>"
+```
+
+A `complex` mismatch reports:
+
+```text
+requirement text does not match the declared complex pattern; expected at least two distinct trigger keywords
+```
+
 Build and test it from this directory:
 
 ```sh
@@ -186,3 +207,4 @@ go vet ./...
 ```
 
 [design]: ../docs/architecture/ProtoBotV2.md
+[adr-0002]: ../docs/decisions/0002-ears-specification-record-schema.md#ears-template-validation
