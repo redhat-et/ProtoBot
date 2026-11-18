@@ -289,8 +289,8 @@ description: Degenerate interface name.
 			sawInvalidBasename = true
 		}
 	}
-	if !sawInvalidName && !sawInvalidBasename {
-		t.Fatalf("diagnostics=%v, want %s or %s for a degenerate interface name", diagnostics, CodeInterfaceInvalidName, CodeInterfaceInvalidBasename)
+	if !sawInvalidName || !sawInvalidBasename {
+		t.Fatalf("diagnostics=%v, want both %s and %s for a degenerate interface name", diagnostics, CodeInterfaceInvalidName, CodeInterfaceInvalidBasename)
 	}
 }
 

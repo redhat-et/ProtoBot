@@ -64,10 +64,11 @@ single path segment: non-empty, free of path separators (`/` or `\`), and
 without a leading or trailing dot. This rejects the degenerate segments `.`
 and `..`, hidden-file-style names such as `.hidden`, and trailing-dot names
 such as `service.`, while still permitting interior dots such as
-`service..api` or `api.v1`. A violation in the declared `name` fails with
-`interface.invalid_name`; a violation in the file basename fails with
-`interface.invalid_basename` even when the basename equals an equally
-degenerate `name`. It also scans Gherkin `.feature` files under `tests/`
+`service..api` or `api.v1`. A non-empty `name` that is not a single path
+segment fails with `interface.invalid_name`; an empty or whitespace-only
+`name` fails with `interface.missing_field`. An invalid file basename
+fails with `interface.invalid_basename` even when the basename equals an
+equally degenerate `name`. It also scans Gherkin `.feature` files under `tests/`
 for `@req:<ID>`
 tags and fails when a tag does not resolve to a known requirement record.
 Active and retired IDs both count as known; unknown or misspelled IDs fail
@@ -117,8 +118,9 @@ parses, specification checks require a requirement basename to match
 `id` values, and to equal that `id`. A malformed requirement basename fails
 with `requirement.invalid_basename`. When `id` is non-empty, a valid basename
 that does not equal `id` fails with `requirement.id_basename_mismatch`.
-When `name` is non-empty, an interface basename that does not equal the declared
-`name` fails with `interface.name_basename_mismatch`. Parsed records remain in
+When `name` is non-empty and the basename itself is valid, an interface
+basename that does not equal the declared `name` fails with
+`interface.name_basename_mismatch`. Parsed records remain in
 the snapshot so other checks still run. When a target record fails to load,
 referring records do not receive a cascading `reference.not_found`; the layout
 diagnostic remains the actionable error. Parse-failure suppression looks up

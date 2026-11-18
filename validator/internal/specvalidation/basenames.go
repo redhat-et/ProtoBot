@@ -63,8 +63,9 @@ func validateInterfaceBasename(document layout.Document[records.InterfaceRecord]
 			Code: CodeInterfaceInvalidBasename,
 			Path: document.Path,
 			Message: fmt.Sprintf(
-				"Interface file basename %q is invalid. Use a single path segment without leading or trailing dots or path separators.",
+				"Interface file basename %q is invalid. %s",
 				base,
+				interfaceNameRemediation,
 			),
 		}}
 	}

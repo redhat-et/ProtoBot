@@ -124,6 +124,8 @@ func validateRequirementSchema(document layout.Document[records.Requirement]) []
 	return diagnostics
 }
 
+const interfaceNameRemediation = "Use a single path segment without leading or trailing dots or path separators."
+
 func validateInterfaceSchema(document layout.Document[records.InterfaceRecord]) []Diagnostic {
 	if document.Fields == nil {
 		return nil
@@ -148,8 +150,9 @@ func validateInterfaceSchema(document layout.Document[records.InterfaceRecord]) 
 				Path:  document.Path,
 				Field: "name",
 				Message: fmt.Sprintf(
-					"Interface name %q is invalid. Use a single path segment without leading or trailing dots or path separators.",
+					"Interface name %q is invalid. %s",
 					record.Name,
+					interfaceNameRemediation,
 				),
 			})
 		}
