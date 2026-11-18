@@ -293,7 +293,13 @@ def _ceiling_number(value: object, file_path: str, source: str) -> int:
 def ceiling_values(
     data: dict[str, Any], source: str
 ) -> dict[tuple[str, str], list[int]]:
-    """Index ceiling entries as ``(file_path, rule_id) -> [values]``."""
+    """Index ceiling entries as ``(file_path, rule_id) -> [values]``.
+
+    ``file_path`` is normalized with ``os.path.normpath`` and converted to a
+    POSIX-style string before it is used as part of the index key, so
+    alternate representations of the same path (``./AGENTS.md``,
+    ``docs//vision.md``) match the canonical form used elsewhere.
+    """
     index: dict[tuple[str, str], list[int]] = {}
     clean_source = sanitize_log_string(source)
     for entry in data.get("violations", []):
@@ -319,7 +325,8 @@ def ceiling_values(
                 f"ERROR: {clean_source} ceiling for {clean_path} is missing a value"
             )
         number = _ceiling_number(entry["value"], file_path, source)
-        index.setdefault((file_path, rule_id), []).append(number)
+        normalized_path = Path(os.path.normpath(file_path.strip())).as_posix()
+        index.setdefault((normalized_path, rule_id), []).append(number)
     return index
 
 

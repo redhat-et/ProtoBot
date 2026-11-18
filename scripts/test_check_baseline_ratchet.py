@@ -140,6 +140,37 @@ class CompareCeilingsTests(unittest.TestCase):
         self.assertEqual(1, len(diagnostics))
         self.assertIn("increased from 10 to 20", diagnostics[0])
 
+    def test_dot_slash_prefix_matches_canonical_base_path(self) -> None:
+        """A ``./`` prefix on the head path must still ratchet against base."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(_ceiling(file_path="./AGENTS.md", value=4100)),
+            _baseline(_ceiling(file_path="AGENTS.md", value=4000)),
+        )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("AGENTS.md", diagnostics[0])
+        self.assertIn("increased from 4000 to 4100", diagnostics[0])
+
+    def test_redundant_separators_match_canonical_base_path(self) -> None:
+        """Redundant path separators on the head path must still ratchet."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(_ceiling(file_path="docs//vision.md", value=2050)),
+            _baseline(_ceiling(file_path="docs/vision.md", value=2000)),
+        )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("docs/vision.md", diagnostics[0])
+        self.assertIn("increased from 2000 to 2050", diagnostics[0])
+
+    def test_normalized_paths_are_independent_keys_across_calls(self) -> None:
+        """Normalization is applied to both head and base before matching."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(_ceiling(file_path="./docs//vision.md", value=2050)),
+            _baseline(_ceiling(file_path="docs/vision.md", value=2050)),
+        )
+
+        self.assertEqual([], diagnostics)
+
 
 class ParseBaselineTests(unittest.TestCase):
     def test_invalid_json_is_rejected(self) -> None:
