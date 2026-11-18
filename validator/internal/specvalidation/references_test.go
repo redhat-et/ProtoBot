@@ -6,44 +6,32 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/testutil"
 )
 
 func TestValidateResolvesCompleteSpecification(t *testing.T) {
 	snapshot := layout.Snapshot{
-		Interfaces: []layout.Document[records.InterfaceRecord]{{
-			Path:   "spec/interfaces/health-api.yaml",
-			Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
-		}},
+		Interfaces: []layout.Document[records.InterfaceRecord]{
+			testutil.ValidInterfaceDocument(),
+		},
 		Requirements: []layout.Document[records.Requirement]{
-			{
-				Path: "spec/requirements/REQ-API-00001.yaml",
-				Record: records.Requirement{
-					ID:     "REQ-API-00001",
-					Status: records.StatusRetired,
-				},
-			},
-			{
-				Path: "spec/requirements/REQ-API-00003.yaml",
-				Record: records.Requirement{
-					ID:     "REQ-API-00003",
-					Status: records.StatusActive,
-				},
-			},
-			{
-				Path: "spec/requirements/REQ-API-00002.yaml",
-				Record: records.Requirement{
-					ID: "REQ-API-00002",
-					AppliesTo: records.Applicability{
-						Interfaces: []string{"health-api"},
-						Scopes:     []string{"api"},
-					},
-					Relationships: []records.Relationship{
-						{Type: records.RelDependsOn, Target: "REQ-API-00001"},
-						{Type: records.RelRelatedTo, Target: "REQ-API-00003"},
-					},
-					Status: records.StatusActive,
-				},
-			},
+			testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00001"),
+				testutil.WithStatus(records.StatusRetired),
+			),
+			testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00003"),
+			),
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
+					Interfaces: []string{"health-api"},
+					Scopes:     []string{"api"},
+				}),
+				testutil.WithRelationships(
+					records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+					records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00003"},
+				),
+			),
 		},
 	}
 	if diagnostics := Validate(snapshot); len(diagnostics) != 0 {
@@ -54,23 +42,16 @@ func TestValidateResolvesCompleteSpecification(t *testing.T) {
 func TestValidateResolvesRetiredRelationshipTarget(t *testing.T) {
 	snapshot := layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
-			{
-				Path: "spec/requirements/REQ-API-00000.yaml",
-				Record: records.Requirement{
-					ID:     "REQ-API-00000",
-					Status: records.StatusRetired,
-				},
-			},
-			{
-				Path: "spec/requirements/REQ-API-00002.yaml",
-				Record: records.Requirement{
-					ID: "REQ-API-00002",
-					Relationships: []records.Relationship{
-						{Type: records.RelSupersedes, Target: "REQ-API-00000"},
-					},
-					Status: records.StatusActive,
-				},
-			},
+			testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00000"),
+				testutil.WithStatus(records.StatusRetired),
+			),
+			testutil.ValidRequirementDocument(
+				testutil.WithRelationships(records.Relationship{
+					Type:   records.RelSupersedes,
+					Target: "REQ-API-00000",
+				}),
+			),
 		},
 	}
 	if diagnostics := Validate(snapshot); len(diagnostics) != 0 {
@@ -81,15 +62,13 @@ func TestValidateResolvesRetiredRelationshipTarget(t *testing.T) {
 func TestValidateRejectsDanglingInterfaceReference(t *testing.T) {
 	const path = "spec/requirements/REQ-API-00002.yaml"
 	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: path,
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"undeclared-api"},
-				},
-			},
-		}},
+				}),
+			),
+		},
 	}
 
 	diagnostics := Validate(snapshot)
@@ -115,9 +94,12 @@ func TestValidateRejectsDanglingRelationshipTarget(t *testing.T) {
 	const path = "spec/requirements/REQ-API-00002.yaml"
 	snapshot := layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
-			requirementDocument(path, "REQ-API-00002", []records.Relationship{
-				{Type: records.RelDependsOn, Target: "REQ-MISSING-00001"},
-			}),
+			testutil.ValidRequirementDocument(
+				testutil.WithRelationships(records.Relationship{
+					Type:   records.RelDependsOn,
+					Target: "REQ-MISSING-00001",
+				}),
+			),
 		},
 	}
 
@@ -141,13 +123,18 @@ func TestValidateRejectsDanglingRelationshipTarget(t *testing.T) {
 }
 
 func TestValidateRejectsEmptyInterfaceAndTargetReferences(t *testing.T) {
-	document := validRequirementDocument()
-	document.Record.AppliesTo.Interfaces = []string{""}
-	document.Record.Relationships = []records.Relationship{
-		{Type: records.RelRelatedTo, Target: ""},
-	}
+	document := testutil.ValidRequirementDocument(
+		testutil.WithAppliesTo(records.Applicability{
+			Interfaces: []string{""},
+			Scopes:     []string{"api"},
+		}),
+		testutil.WithRelationships(records.Relationship{
+			Type:   records.RelRelatedTo,
+			Target: "",
+		}),
+	)
 	snapshot := layout.Snapshot{
-		Interfaces:   []layout.Document[records.InterfaceRecord]{validInterfaceDocument()},
+		Interfaces:   []layout.Document[records.InterfaceRecord]{testutil.ValidInterfaceDocument()},
 		Requirements: []layout.Document[records.Requirement]{document},
 	}
 
@@ -176,19 +163,19 @@ func TestValidateRejectsEmptyInterfaceAndTargetReferences(t *testing.T) {
 
 func TestValidateResolvesInterfaceByNameNotFilename(t *testing.T) {
 	snapshot := layout.Snapshot{
-		Interfaces: []layout.Document[records.InterfaceRecord]{{
-			Path:   "spec/interfaces/foo.yaml",
-			Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
-		}},
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: "spec/requirements/REQ-API-00002.yaml",
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Interfaces: []layout.Document[records.InterfaceRecord]{
+			testutil.ValidInterfaceDocument(
+				testutil.WithName("health-api"),
+				testutil.WithPath("spec/interfaces/foo.yaml"),
+			),
+		},
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"health-api"},
-				},
-			},
-		}},
+				}),
+			),
+		},
 	}
 	diagnostics := Validate(snapshot)
 	if len(diagnostics) != 1 {
@@ -219,19 +206,16 @@ func TestValidateResolvesInterfaceByNameNotFilename(t *testing.T) {
 
 func TestValidateInterfaceReferenceIsCaseSensitive(t *testing.T) {
 	snapshot := layout.Snapshot{
-		Interfaces: []layout.Document[records.InterfaceRecord]{{
-			Path:   "spec/interfaces/health-api.yaml",
-			Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
-		}},
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: "spec/requirements/REQ-API-00002.yaml",
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Interfaces: []layout.Document[records.InterfaceRecord]{
+			testutil.ValidInterfaceDocument(),
+		},
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"Health-api"},
-				},
-			},
-		}},
+				}),
+			),
+		},
 	}
 	diagnostics := Validate(snapshot)
 	if len(diagnostics) != 1 {
@@ -244,15 +228,13 @@ func TestValidateInterfaceReferenceIsCaseSensitive(t *testing.T) {
 
 func TestValidateReferenceResolutionIgnoresScopes(t *testing.T) {
 	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: "spec/requirements/REQ-API-00002.yaml",
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Scopes: []string{"undeclared-scope"},
-				},
-			},
-		}},
+				}),
+			),
+		},
 	}
 	if diagnostics := Validate(snapshot); len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%v, want none", diagnostics)
@@ -262,27 +244,23 @@ func TestValidateReferenceResolutionIgnoresScopes(t *testing.T) {
 func TestValidateReferenceResolutionIsDeterministic(t *testing.T) {
 	snapshot := layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
-			{
-				Path: "spec/requirements/REQ-API-00002.yaml",
-				Record: records.Requirement{
-					ID: "REQ-API-00002",
-					AppliesTo: records.Applicability{
-						Interfaces: []string{"undeclared-api", "also-missing"},
-					},
-					Relationships: []records.Relationship{
-						{Type: records.RelDependsOn, Target: "REQ-MISSING-00001"},
-					},
-				},
-			},
-			{
-				Path: "spec/requirements/REQ-API-00001.yaml",
-				Record: records.Requirement{
-					ID: "REQ-API-00001",
-					Relationships: []records.Relationship{
-						{Type: records.RelRelatedTo, Target: "REQ-MISSING-00002"},
-					},
-				},
-			},
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
+					Interfaces: []string{"undeclared-api", "also-missing"},
+					Scopes:     []string{"api"},
+				}),
+				testutil.WithRelationships(records.Relationship{
+					Type:   records.RelDependsOn,
+					Target: "REQ-MISSING-00001",
+				}),
+			),
+			testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00001"),
+				testutil.WithRelationships(records.Relationship{
+					Type:   records.RelRelatedTo,
+					Target: "REQ-MISSING-00002",
+				}),
+			),
 		},
 	}
 
@@ -312,33 +290,20 @@ func TestValidateReferenceResolutionIsDeterministic(t *testing.T) {
 
 func TestValidateReferenceResolutionAfterLayoutRead(t *testing.T) {
 	target := t.TempDir()
-	writeFile(t, target, "spec/interfaces/health-api.yaml", `name: health-api
-kind: http
-description: Health check HTTP API.
-`)
-	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: retired
-`)
-	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  interfaces:
-    - health-api
-    - undeclared-api
-relationships:
-  - type: depends-on
-    target: REQ-API-00001
-  - type: related-to
-    target: REQ-MISSING-00001
-status: active
-`)
+	writeFile(t, target, "spec/interfaces/health-api.yaml", testutil.ValidInterfaceYAML())
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+		testutil.WithStatus(records.StatusRetired),
+	))
+	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithAppliesTo(records.Applicability{
+			Interfaces: []string{"health-api", "undeclared-api"},
+		}),
+		testutil.WithRelationships(
+			records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+			records.Relationship{Type: records.RelRelatedTo, Target: "REQ-MISSING-00001"},
+		),
+	))
 
 	snapshot, layoutDiagnostics := layout.Read(target)
 	if len(layoutDiagnostics) != 0 {
@@ -365,19 +330,17 @@ status: active
 
 func TestValidateSuppressesCascadingReferenceDiagnosticsOnParseFailure(t *testing.T) {
 	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: "spec/requirements/REQ-API-00002.yaml",
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"health-api", "genuinely-missing-api"},
-				},
-				Relationships: []records.Relationship{
-					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
-					{Type: records.RelRelatedTo, Target: "REQ-API-00099"},
-				},
-			},
-		}},
+				}),
+				testutil.WithRelationships(
+					records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+					records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00099"},
+				),
+			),
+		},
 	}
 	layoutDiagnostics := []layout.Diagnostic{
 		{
@@ -406,18 +369,17 @@ func TestValidateSuppressesCascadingReferenceDiagnosticsOnParseFailure(t *testin
 
 func TestValidateCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *testing.T) {
 	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: "spec/requirements/REQ-API-00002.yaml",
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"health-api"},
-				},
-				Relationships: []records.Relationship{
-					{Type: records.RelDependsOn, Target: "REQ-API-00001"},
-				},
-			},
-		}},
+				}),
+				testutil.WithRelationships(records.Relationship{
+					Type:   records.RelDependsOn,
+					Target: "REQ-API-00001",
+				}),
+			),
+		},
 	}
 	layoutDiagnostics := []layout.Diagnostic{
 		{
@@ -451,24 +413,22 @@ func TestValidateCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *tes
 func TestValidateRejectsAmbiguousInterfaceReference(t *testing.T) {
 	snapshot := layout.Snapshot{
 		Interfaces: []layout.Document[records.InterfaceRecord]{
-			{
-				Path:   "spec/interfaces/api-a.yaml",
-				Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
-			},
-			{
-				Path:   "spec/interfaces/api-b.yaml",
-				Record: records.InterfaceRecord{Name: "health-api", Kind: "http"},
-			},
+			testutil.ValidInterfaceDocument(
+				testutil.WithName("health-api"),
+				testutil.WithPath("spec/interfaces/api-a.yaml"),
+			),
+			testutil.ValidInterfaceDocument(
+				testutil.WithName("health-api"),
+				testutil.WithPath("spec/interfaces/api-b.yaml"),
+			),
 		},
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: "spec/requirements/REQ-API-00002.yaml",
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"health-api"},
-				},
-			},
-		}},
+				}),
+			),
+		},
 	}
 
 	diagnostics := Validate(snapshot)
@@ -496,23 +456,21 @@ func TestValidateRejectsAmbiguousInterfaceReference(t *testing.T) {
 func TestValidateDuplicateRequirementIDDoesNotEmitReferenceAmbiguous(t *testing.T) {
 	snapshot := layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
-			{
-				Path:   "spec/requirements/REQ-API-00001-a.yaml",
-				Record: records.Requirement{ID: "REQ-API-00001", Status: records.StatusActive},
-			},
-			{
-				Path:   "spec/requirements/REQ-API-00001-b.yaml",
-				Record: records.Requirement{ID: "REQ-API-00001", Status: records.StatusRetired},
-			},
-			{
-				Path: "spec/requirements/REQ-API-00002.yaml",
-				Record: records.Requirement{
-					ID: "REQ-API-00002",
-					Relationships: []records.Relationship{
-						{Type: records.RelDependsOn, Target: "REQ-API-00001"},
-					},
-				},
-			},
+			testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00001"),
+				testutil.WithPath("spec/requirements/REQ-API-00001-a.yaml"),
+			),
+			testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00001"),
+				testutil.WithPath("spec/requirements/REQ-API-00001-b.yaml"),
+				testutil.WithStatus(records.StatusRetired),
+			),
+			testutil.ValidRequirementDocument(
+				testutil.WithRelationships(records.Relationship{
+					Type:   records.RelDependsOn,
+					Target: "REQ-API-00001",
+				}),
+			),
 		},
 	}
 
@@ -549,34 +507,35 @@ func TestValidatePathTraversalDoesNotSuppressReferenceNotFound(t *testing.T) {
 	}{
 		{
 			name: "interface slash traversal",
-			req: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+			req: testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00002"),
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{traversal},
-				},
-			},
+				}),
+			).Record,
 			field: "applies_to.interfaces[0]",
 			ident: traversal,
 		},
 		{
 			name: "interface backslash traversal",
-			req: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+			req: testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00002"),
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{backslash},
-				},
-			},
+				}),
+			).Record,
 			field: "applies_to.interfaces[0]",
 			ident: "REQ-BROKEN",
 		},
 		{
 			name: "relationship slash traversal",
-			req: records.Requirement{
-				ID: "REQ-API-00002",
-				Relationships: []records.Relationship{
-					{Type: records.RelDependsOn, Target: traversal},
-				},
-			},
+			req: testutil.ValidRequirementDocument(
+				testutil.WithID("REQ-API-00002"),
+				testutil.WithRelationships(records.Relationship{
+					Type:   records.RelDependsOn,
+					Target: traversal,
+				}),
+			).Record,
 			field: "relationships[0].target",
 			ident: traversal,
 		},
@@ -615,15 +574,13 @@ func TestValidateInterfaceNameMismatchParseFailureSuppression(t *testing.T) {
 	// Basename matching (#463) enforces stem == name on successfully parsed
 	// interface records.
 	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: path,
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"health-api"},
-				},
-			},
-		}},
+				}),
+			),
+		},
 	}
 	layoutDiagnostics := []layout.Diagnostic{{
 		Code:    layout.CodeParseFailed,
@@ -650,15 +607,13 @@ func TestValidateInterfaceNameMismatchParseFailureSuppression(t *testing.T) {
 func TestValidateInterfaceWithDotDotSuppressesReferenceNotFound(t *testing.T) {
 	const path = "spec/requirements/REQ-API-00002.yaml"
 	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: path,
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
+		Requirements: []layout.Document[records.Requirement]{
+			testutil.ValidRequirementDocument(
+				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{"service..api"},
-				},
-			},
-		}},
+				}),
+			),
+		},
 	}
 	layoutDiagnostics := []layout.Diagnostic{{
 		Code:    layout.CodeParseFailed,

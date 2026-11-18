@@ -7,6 +7,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/testutil"
 )
 
 func TestValidateRecordSchema(t *testing.T) {
@@ -615,53 +616,20 @@ func schemaSnapshot(requirement layout.Document[records.Requirement], iface layo
 }
 
 func validRequirementDocument() layout.Document[records.Requirement] {
-	return layout.Document[records.Requirement]{
-		Path: "spec/requirements/REQ-API-00002.yaml",
-		Record: records.Requirement{
-			ID:   "REQ-API-00002",
-			Type: records.TypeEventDriven,
-			Text: "When a client sends GET /health, the service shall return HTTP 200.",
-			AppliesTo: records.Applicability{
-				Interfaces: []string{"health-api"},
-				Scopes:     []string{"api"},
-			},
-			Relationships: []records.Relationship{
-				{Type: records.RelRelatedTo, Target: "REQ-API-00001"},
-			},
-			Status: records.StatusActive,
-		},
-		Fields: map[string]bool{
-			"id":                       true,
-			"type":                     true,
-			"text":                     true,
-			"applies_to":               true,
-			"applies_to.interfaces":    true,
-			"applies_to.interfaces[0]": true,
-			"applies_to.scopes":        true,
-			"applies_to.scopes[0]":     true,
-			"relationships":            true,
-			"relationships[0]":         true,
-			"relationships[0].type":    true,
-			"relationships[0].target":  true,
-			"status":                   true,
-		},
-	}
+	return testutil.ValidRequirementDocument(
+		testutil.WithAppliesTo(records.Applicability{
+			Interfaces: []string{"health-api"},
+			Scopes:     []string{"api"},
+		}),
+		testutil.WithRelationships(records.Relationship{
+			Type:   records.RelRelatedTo,
+			Target: "REQ-API-00001",
+		}),
+	)
 }
 
 func validInterfaceDocument() layout.Document[records.InterfaceRecord] {
-	return layout.Document[records.InterfaceRecord]{
-		Path: "spec/interfaces/health-api.yaml",
-		Record: records.InterfaceRecord{
-			Name:        "health-api",
-			Kind:        "http",
-			Description: "Health check HTTP API used by unauthenticated clients.",
-		},
-		Fields: map[string]bool{
-			"name":        true,
-			"kind":        true,
-			"description": true,
-		},
-	}
+	return testutil.ValidInterfaceDocument()
 }
 
 func requirementOmitting(field string) layout.Document[records.Requirement] {
