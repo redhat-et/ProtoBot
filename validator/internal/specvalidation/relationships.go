@@ -161,11 +161,17 @@ func (v *graphValidator) reportCycle(component []string) {
 			break
 		}
 	}
+	cycle := strings.Join(members, ", ")
+	if len(members) == 1 {
+		// A singleton cyclic SCC is a self-loop; name the edge so the
+		// diagnostic is not a truncated one-ID list.
+		cycle = fmt.Sprintf("%s->%s", members[0], members[0])
+	}
 	v.diagnostics = append(v.diagnostics, Diagnostic{
 		Code:    CodeCycle,
 		Path:    path,
 		Field:   "relationships",
-		Message: fmt.Sprintf("The %s relationship graph contains a cycle: %s.", v.relationType, strings.Join(members, ", ")),
+		Message: fmt.Sprintf("The %s relationship graph contains a cycle: %s.", v.relationType, cycle),
 	})
 }
 
@@ -202,8 +208,15 @@ func stronglyConnectedComponents(graph map[string][]string, vertices []string) [
 			return
 		}
 		start := len(stack) - 1
-		for start > 0 && stack[start] != vertex {
+		for start >= 0 && stack[start] != vertex {
 			start--
+		}
+		// vertex was pushed onto stack at the start of this visit and
+		// remains there until its SCC is popped. Missing it means the
+		// stack invariant is broken; fail rather than treat the whole
+		// stack as one component.
+		if start < 0 {
+			panic(fmt.Sprintf("stronglyConnectedComponents: vertex %q missing from stack", vertex))
 		}
 		component := append([]string(nil), stack[start:]...)
 		stack = stack[:start]

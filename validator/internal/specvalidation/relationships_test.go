@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -433,10 +434,6 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 			if len(wantCycles) != tc.wantCount {
 				t.Fatalf("wantCycles=%d, wantCount=%d", len(wantCycles), tc.wantCount)
 			}
-			var allIDs []string
-			for _, ids := range wantCycles {
-				allIDs = append(allIDs, ids...)
-			}
 			for i, got := range diagnostics {
 				if got.Code != tc.wantCode {
 					t.Errorf("diagnostic %d code=%q, want %q", i, got.Code, tc.wantCode)
@@ -450,12 +447,35 @@ func TestValidateRelationshipAcyclicity(t *testing.T) {
 				if got.Path == "" {
 					t.Errorf("diagnostic %d path is empty, want a participating requirement file", i)
 				}
-				gotIDs := idsInMessage(got.Message, allIDs)
-				if !sameStrings(gotIDs, wantCycles[i]) {
+				gotIDs := idsInMessage(got.Message)
+				if !slices.Equal(gotIDs, wantCycles[i]) {
 					t.Errorf("diagnostic %d IDs=%v, want %v (message %q)", i, gotIDs, wantCycles[i], got.Message)
 				}
 			}
 		})
+	}
+}
+
+func TestSelfReferentialCycleMessageFormatting(t *testing.T) {
+	snapshot := snapshotFromDocs(
+		requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+			{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+		}),
+	)
+
+	diagnostics := cycleDiagnostics(Validate(snapshot))
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+
+	got := diagnostics[0]
+	if got.Code != CodeCycle {
+		t.Errorf("code=%q, want %q", got.Code, CodeCycle)
+	}
+
+	const wantLoop = "REQ-API-00001->REQ-API-00001"
+	if !strings.Contains(got.Message, wantLoop) {
+		t.Errorf("message %q does not contain self-loop %q", got.Message, wantLoop)
 	}
 }
 
@@ -687,26 +707,24 @@ func identifiesIDs(message string, ids ...string) bool {
 	return true
 }
 
-func idsInMessage(message string, ids []string) []string {
-	var found []string
-	for _, id := range ids {
-		if strings.Contains(message, id) {
-			found = append(found, id)
+func idsInMessage(message string) []string {
+	const prefix = "contains a cycle: "
+	index := strings.Index(message, prefix)
+	if index < 0 {
+		return nil
+	}
+	body := strings.TrimSuffix(message[index+len(prefix):], ".")
+	if body == "" {
+		return nil
+	}
+	ids := strings.Split(body, ", ")
+	for i, id := range ids {
+		if arrow := strings.Index(id, "->"); arrow >= 0 {
+			ids[i] = id[:arrow]
 		}
 	}
-	return found
-}
-
-func sameStrings(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
+	slices.Sort(ids)
+	return ids
 }
 
 func requirementSnapshot(path, id string, relationships []records.Relationship, extraIDs ...string) layout.Snapshot {

@@ -20,7 +20,7 @@ allowlist, relationship acyclicity, replacement and retirement rules,
 reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
-(issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
+(issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402, #459,
 and #463). The command line accepts the checkout path and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
