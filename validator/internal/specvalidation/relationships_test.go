@@ -1,7 +1,6 @@
 package specvalidation
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/testutil"
 )
 
 func TestValidateRelationshipTypes(t *testing.T) {
@@ -157,37 +157,22 @@ func TestValidateRelationshipTypesIgnoresInterfaces(t *testing.T) {
 
 func TestValidateRelationshipTypesAfterLayoutRead(t *testing.T) {
 	target := t.TempDir()
-	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
-type: ubiquitous
-text: The service shall log health checks.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: related-to
-    target: REQ-API-00001
-  - type: conflicts-with
-    target: REQ-API-00003
-status: active
-`)
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+		testutil.WithType(records.TypeUbiquitous),
+		testutil.WithText("The service shall exist."),
+	))
+	writeFile(t, target, "spec/requirements/REQ-API-00003.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00003"),
+		testutil.WithType(records.TypeUbiquitous),
+		testutil.WithText("The service shall log health checks."),
+	))
+	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithRelationships(
+			records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"},
+			records.Relationship{Type: "conflicts-with", Target: "REQ-API-00003"},
+		),
+	))
 
 	snapshot, layoutDiagnostics := layout.Read(target)
 	if len(layoutDiagnostics) != 0 {
@@ -679,28 +664,21 @@ func TestValidateRelationshipAcyclicityMissingLeavesIsDeterministic(t *testing.T
 
 func TestValidateRelationshipAcyclicityAfterLayoutRead(t *testing.T) {
 	target := t.TempDir()
-	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: depends-on
-    target: REQ-API-00002
-status: active
-`)
-	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /ready, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: depends-on
-    target: REQ-API-00001
-status: active
-`)
+	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+		testutil.WithRelationships(records.Relationship{
+			Type:   records.RelDependsOn,
+			Target: "REQ-API-00002",
+		}),
+	))
+	writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00002"),
+		testutil.WithText("When a client sends GET /ready, the service shall return HTTP 200."),
+		testutil.WithRelationships(records.Relationship{
+			Type:   records.RelDependsOn,
+			Target: "REQ-API-00001",
+		}),
+	))
 
 	snapshot, layoutDiagnostics := layout.Read(target)
 	if len(layoutDiagnostics) != 0 {
@@ -829,47 +807,15 @@ func withStatus(document layout.Document[records.Requirement], status string) la
 }
 
 func requirementDocument(path, id string, relationships []records.Relationship) layout.Document[records.Requirement] {
-	fields := map[string]bool{
-		"id":            true,
-		"type":          true,
-		"text":          true,
-		"applies_to":    true,
-		"relationships": true,
-		"status":        true,
-	}
-	for i := range relationships {
-		fields[fmt.Sprintf("relationships[%d]", i)] = true
-		fields[fmt.Sprintf("relationships[%d].type", i)] = true
-		fields[fmt.Sprintf("relationships[%d].target", i)] = true
-	}
-	return layout.Document[records.Requirement]{
-		Path: path,
-		Record: records.Requirement{
-			ID:            id,
-			Type:          records.TypeEventDriven,
-			Text:          "When a client sends GET /health, the service shall return HTTP 200.",
-			AppliesTo:     records.Applicability{Scopes: []string{"api"}},
-			Relationships: relationships,
-			Status:        records.StatusActive,
-		},
-		Fields: fields,
-	}
+	return testutil.ValidRequirementDocument(
+		testutil.WithID(id),
+		testutil.WithPath(path),
+		testutil.WithRelationships(relationships...),
+	)
 }
 
 func interfaceDocument(path string) layout.Document[records.InterfaceRecord] {
-	return layout.Document[records.InterfaceRecord]{
-		Path: path,
-		Record: records.InterfaceRecord{
-			Name:        "health-api",
-			Kind:        "http",
-			Description: "Health check HTTP API used by unauthenticated clients.",
-		},
-		Fields: map[string]bool{
-			"name":        true,
-			"kind":        true,
-			"description": true,
-		},
-	}
+	return testutil.ValidInterfaceDocument(testutil.WithPath(path))
 }
 
 func identifiesType(message, relationshipType string) bool {
