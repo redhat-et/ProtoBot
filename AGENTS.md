@@ -225,15 +225,13 @@ must follow these rules:
    supersede an accepted record via
    `> Status: **Superseded by ADR-NNNN**`. Amendments and
    supersessions append a dated amendment block
-   (`**[Amended Month Year]**`) citing change, rationale, and
-   updated architecture documents. Review agents must verify an
+   (`**[Amended Month Year]**`). Review agents must verify an
    accepted or superseded architecture decision record is never
    rewritten, replaced, deleted, or renamed in place, except to
    supersede an accepted record via
    `> Status: **Superseded by ADR-NNNN**`, and amendments and
    supersessions append a dated amendment block
-   (`**[Amended Month Year]**`) citing change, rationale, and
-   updated architecture documents.
+   (`**[Amended Month Year]**`).
 
 ## Agent skills
 
