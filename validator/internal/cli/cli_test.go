@@ -1526,7 +1526,7 @@ status: active
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantPrefix := "validator: relationship.superseded_requirement_not_in_change: spec/requirements/REQ-API-00002.yaml:"
+	wantPrefix := "validator: relationship.superseded_requirement_not_retired_in_change: spec/requirements/REQ-API-00002.yaml:"
 	if !strings.Contains(stderr, wantPrefix) {
 		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}

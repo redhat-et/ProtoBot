@@ -3,8 +3,11 @@
 package specvalidation
 
 import (
+	"sort"
+
 	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/records"
 )
 
 // Diagnostic is a deterministic finding about one record in the checkout.
@@ -33,4 +36,15 @@ func Validate(snapshot layout.Snapshot, layoutDiagnostics ...layout.Diagnostic) 
 
 func diagnosticKey(d Diagnostic) diag.Key {
 	return diag.Key{Path: d.Path, Code: d.Code, Field: d.Field, Message: d.Message}
+}
+
+func orderedRequirements(requirements []layout.Document[records.Requirement]) []layout.Document[records.Requirement] {
+	ordered := append([]layout.Document[records.Requirement](nil), requirements...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Path != ordered[j].Path {
+			return ordered[i].Path < ordered[j].Path
+		}
+		return ordered[i].Record.ID < ordered[j].Record.ID
+	})
+	return ordered
 }

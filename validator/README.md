@@ -33,8 +33,11 @@ types, including legacy `conflicts-with`, fail validation. Directed
 `relationship.cycle` and names the participating requirement IDs.
 `related-to` associations are exempt. A `supersedes` target must have
 `status: retired`. A newly introduced `supersedes` edge must retire that
-predecessor in the same specification change relative to `--base`. Retirement
-without a successor is allowed. Retired records must not be deleted. Each
+predecessor in the same specification change relative to `--base`. An edge
+is newly introduced when it is present in the working tree and absent from
+`--base`; historical `supersedes` edges already present in `--base` are
+exempt from same-change retirement enforcement. Retirement without a
+successor is allowed. Retired records must not be deleted. Each
 `applies_to.interfaces` entry must equal an interface record's `name`
 (matching is case-sensitive), and requirement IDs in `relationships[].target`
 must resolve to declared records; retired requirement targets satisfy
@@ -169,7 +172,7 @@ interface check codes (`interface.missing_field`,
 check codes (`reference.not_found`, `reference.ambiguous`),
 specification check codes (`relationship.invalid_type`,
 `relationship.cycle`, `relationship.superseded_requirement_active`,
-`relationship.superseded_requirement_not_in_change`), EARS check codes
+`relationship.superseded_requirement_not_retired_in_change`), EARS check codes
 (`ears.shall_count`,
 `ears.pattern_mismatch`, `ears.invalid_type`), and test-tag codes
 (`testtags.read_failed`, `testtags.unexpected_file`,

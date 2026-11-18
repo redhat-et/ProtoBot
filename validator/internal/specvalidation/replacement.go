@@ -2,7 +2,6 @@ package specvalidation
 
 import (
 	"fmt"
-	"sort"
 
 	diag "github.com/redhat-et/protobot/validator/internal/diagnostics"
 	"github.com/redhat-et/protobot/validator/internal/layout"
@@ -11,8 +10,8 @@ import (
 
 // Diagnostic codes for replacement and retirement checks.
 const (
-	CodeSupersededRequirementActive      = "relationship.superseded_requirement_active"
-	CodeSupersededRequirementNotInChange = "relationship.superseded_requirement_not_in_change"
+	CodeSupersededRequirementActive             = "relationship.superseded_requirement_active"
+	CodeSupersededRequirementNotRetiredInChange = "relationship.superseded_requirement_not_retired_in_change"
 )
 
 func validateReplacement(snapshot layout.Snapshot) []Diagnostic {
@@ -30,7 +29,7 @@ func validateReplacement(snapshot layout.Snapshot) []Diagnostic {
 			if target.Record.Status == records.StatusRetired {
 				continue
 			}
-			field := fmt.Sprintf("relationships[%d]", index)
+			field := fmt.Sprintf("relationships[%d].target", index)
 			diagnostics = append(diagnostics, Diagnostic{
 				Code:  CodeSupersededRequirementActive,
 				Path:  document.Path,
@@ -75,9 +74,9 @@ func CompareReplacement(target, base layout.Snapshot) []Diagnostic {
 			if retiredInThisChange(predecessor.Record, baseByID) {
 				continue
 			}
-			field := fmt.Sprintf("relationships[%d]", index)
+			field := fmt.Sprintf("relationships[%d].target", index)
 			diagnostics = append(diagnostics, Diagnostic{
-				Code:  CodeSupersededRequirementNotInChange,
+				Code:  CodeSupersededRequirementNotRetiredInChange,
 				Path:  document.Path,
 				Field: field,
 				Message: fmt.Sprintf(
@@ -157,15 +156,4 @@ func supersedesEdges(requirements []layout.Document[records.Requirement]) map[st
 		}
 	}
 	return edges
-}
-
-func orderedRequirements(requirements []layout.Document[records.Requirement]) []layout.Document[records.Requirement] {
-	ordered := append([]layout.Document[records.Requirement](nil), requirements...)
-	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].Path != ordered[j].Path {
-			return ordered[i].Path < ordered[j].Path
-		}
-		return ordered[i].Record.ID < ordered[j].Record.ID
-	})
-	return ordered
 }
