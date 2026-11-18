@@ -3,6 +3,11 @@
 ## Validate selected-release config
 
 When either `.fullsend/config.yaml` or `.fullsend/config.base.yaml` exists, validate the files against the exact selected release. Prefer a strict schema or validator from that release. Otherwise inspect `internal/config` at the selected tag: the YAML tags on config structs and nested structs, custom `UnmarshalYAML` handlers, and validation rules for dynamic maps. Compare every configured key at every level in each present file with that release's supported keys; reject unsupported or misspelled keys. `fullsend lint` is not necessarily a strict key validator: v0.56.1 uses non-strict YAML unmarshalling, so a typo such as `runtim: pi` is ignored.
+For v0.56.1, migrate `create_issues.allow_targets` to
+`tracker.<provider>.allowed_targets`. `tracker.github.allowed_targets.repos`
+lists destinations beyond the source repository; preserve prior external
+entries and do not add the local repository, which remains implicitly allowed.
+
 
 Run the selected release's `fullsend lint` for the semantic and harness checks it supports. For v0.56.1, lint validates merged agents and model aliases but does not validate some inherited values, such as `runtime` or `version`, from `config.base.yaml` when the overlay omits them. Validate the base layer independently by linting a temporary copy as `config.yaml`, then lint the actual layered config:
 

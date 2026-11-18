@@ -106,8 +106,8 @@ compatibility impact; missing notes do not mean no changes.
 The migration audit must inspect `.fullsend/config.yaml` and
 `.fullsend/config.base.yaml`, when present, against the selected release's
 configuration contract. Apply each required migration; release-note review and
-PR-description notes are not compatibility evidence. Step 6's target-CLI
-configuration check is a hard gate.
+PR-description notes are not compatibility evidence.
+Step 6's target-CLI config check is a hard gate.
 
 Record the resolved binary path, installed release, selected target, and
 installation ownership. Compare normalized semantic versions, not strings.
@@ -124,8 +124,10 @@ authorizes it.
 
 Continue only when `command -v fullsend`, `fullsend --version`, and
 `fullsend github setup --help` confirm the exact selected release and
-`--dry-run` support. The reference covers release metadata, archive checksums,
-installation, and refreshing shell command lookup.
+`--dry-run` support. In v0.56.1, the binary updater is `fullsend self-update`,
+not `fullsend self-upgrade`; it updates only the local CLI binary. Repository
+workflows and configuration are handled by this skill's later steps. The
+reference covers its signed dry-run and the package-manager/archive safeguards.
 
 ## Step 3: Preview and review repository setup
 
