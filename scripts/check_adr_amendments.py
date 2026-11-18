@@ -30,11 +30,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _DECISIONS_DIR = Path("docs") / "decisions"
 _ACCEPTED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Accepted\*\*",
+    r"^> Status:\s*\*\*Accepted\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
     re.MULTILINE,
 )
 _SUPERSEDED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*",
+    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
     re.MULTILINE,
 )
 _HEADER_LINE_LIMIT = 30
