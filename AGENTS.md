@@ -93,9 +93,7 @@ Examples of sibling entries: numbered rules in `AGENTS.md`;
 specification documents under `docs/`; skill files under
 `.agents/skills/`; module specification documents (`**/README.md`),
 i.e. component READMEs describing a module's contracts, CLI
-interfaces, and validation rules regardless of nesting depth
-(e.g. `validator/README.md`, `eval/corpus/README.md`,
-`tests/drafting-table/README.md`).
+interfaces, and validation rules regardless of nesting depth.
 
 ## Specification document hierarchy
 
