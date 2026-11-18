@@ -21,6 +21,8 @@ allowed_remote_resources:
     - https://raw.githubusercontent.com/fullsend-ai/agents/
 tracker:
     github:
+        # The source repository (redhat-et/ProtoBot) is implicitly allowed.
+        # This list contains only additional GitHub destinations.
         allowed_targets:
             repos:
                 - fullsend-ai/fullsend
