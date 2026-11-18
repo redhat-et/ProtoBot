@@ -60,10 +60,14 @@ tags and fails when a tag does not resolve to a known requirement record.
 Active and retired IDs both count as known; unknown or misspelled IDs fail
 with line-level diagnostics. Requirement records must include `id`, `type`,
 `text`, `applies_to`, `relationships`, and `status`. `applies_to` must
-name at least one interface or scope. Blank selectors count as absent.
-Interface records must include `name`, `kind`, and `description`. Status
-values are `active` or `retired`. Legacy metadata (`verification`,
-`provenance`, `created`) and other unparsed fields are rejected.
+name at least one interface or scope. A blank or whitespace-only
+selector in `applies_to.interfaces` or `applies_to.scopes` is
+`requirement.missing_field` on the indexed field and does not count as a
+named selector. A blank or whitespace-only `relationships[].target` is
+`requirement.missing_field` on the indexed field. Interface records must
+include `name`, `kind`, and `description`. Status values are `active` or
+`retired`. Legacy metadata (`verification`, `provenance`, `created`) and
+other unparsed fields are rejected.
 Requirement text is checked for exactly one `shall` and for a match
 against the declared EARS type (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).

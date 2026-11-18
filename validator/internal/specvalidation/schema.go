@@ -68,13 +68,29 @@ func validateRequirementSchema(document layout.Document[records.Requirement]) []
 		}
 		diagnostics = append(diagnostics, missingFieldDiagnostic(CodeRequirementMissingField, document.Path, field))
 	}
-	if fieldPresent(document.Fields, "applies_to") && !hasApplicableSelector(record.AppliesTo) {
-		diagnostics = append(diagnostics, Diagnostic{
-			Code:    CodeRequirementMissingField,
-			Path:    document.Path,
-			Field:   "applies_to",
-			Message: "applies_to must name at least one interface or scope.",
-		})
+	if fieldPresent(document.Fields, "applies_to") {
+		diagnostics = append(diagnostics, blankIndexedStringDiagnostics(document.Path, "applies_to.interfaces", record.AppliesTo.Interfaces)...)
+		diagnostics = append(diagnostics, blankIndexedStringDiagnostics(document.Path, "applies_to.scopes", record.AppliesTo.Scopes)...)
+		if !hasApplicableSelector(record.AppliesTo) {
+			diagnostics = append(diagnostics, Diagnostic{
+				Code:    CodeRequirementMissingField,
+				Path:    document.Path,
+				Field:   "applies_to",
+				Message: "applies_to must name at least one interface or scope.",
+			})
+		}
+	}
+	if fieldPresent(document.Fields, "relationships") {
+		for index, relationship := range record.Relationships {
+			if strings.TrimSpace(relationship.Target) != "" {
+				continue
+			}
+			diagnostics = append(diagnostics, missingFieldDiagnostic(
+				CodeRequirementMissingField,
+				document.Path,
+				fmt.Sprintf("relationships[%d].target", index),
+			))
+		}
 	}
 	if fieldPresent(document.Fields, "status") && strings.TrimSpace(record.Status) != "" && !allowedStatuses[record.Status] {
 		diagnostics = append(diagnostics, Diagnostic{
@@ -139,6 +155,21 @@ func missingFieldDiagnostic(code, path, field string) Diagnostic {
 		Field:   field,
 		Message: fmt.Sprintf("Required field %q is missing.", field),
 	}
+}
+
+func blankIndexedStringDiagnostics(path, prefix string, values []string) []Diagnostic {
+	var diagnostics []Diagnostic
+	for index, value := range values {
+		if strings.TrimSpace(value) != "" {
+			continue
+		}
+		diagnostics = append(diagnostics, missingFieldDiagnostic(
+			CodeRequirementMissingField,
+			path,
+			fmt.Sprintf("%s[%d]", prefix, index),
+		))
+	}
+	return diagnostics
 }
 
 func fieldPresent(fields map[string]bool, field string) bool {

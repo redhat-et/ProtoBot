@@ -91,6 +91,9 @@ func validateInterfaceAttachments(
 ) []Diagnostic {
 	var diagnostics []Diagnostic
 	for index, name := range document.Record.AppliesTo.Interfaces {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
 		paths := declarations[name]
 		if len(paths) == 1 {
 			continue
@@ -133,6 +136,9 @@ func validateRelationshipTargets(
 ) []Diagnostic {
 	var diagnostics []Diagnostic
 	for index, relationship := range document.Record.Relationships {
+		if strings.TrimSpace(relationship.Target) == "" {
+			continue
+		}
 		// Duplicate requirement IDs are reported by requirement.duplicate_id.
 		// A present ID, unique or not, is not a dangling reference.
 		if len(declarations[relationship.Target]) > 0 {
