@@ -42,8 +42,9 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
 1. **Respect the prompt context budget.** Do not raise a
    `.skillsaw-baseline.json` ceiling value to fit new prose; after a
    genuine prose shrink, regenerate the baseline with
-   `skillsaw baseline` so the ceiling, and the `.skillsaw.yaml`
-   `agents-md` warn limit, ratchet downward.
+   `skillsaw baseline` so the ceiling ratchets downward, and
+   separately lower the `agents-md` warn limit in `.skillsaw.yaml`
+   to match.
 2. **Consolidate or extract when adding prose.** Offset new
    prose by consolidating existing text or extracting detail
    into an on-demand skill under `.agents/skills/`.
