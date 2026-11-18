@@ -171,3 +171,13 @@ func TestValidRequirementDocumentDoesNotAliasSlices(t *testing.T) {
 		t.Fatal("Relationships aliased caller slice")
 	}
 }
+
+func TestWithRelationshipsZeroArgumentsYieldsEmptySlice(t *testing.T) {
+	document := ValidRequirementDocument(WithRelationships())
+	if document.Record.Relationships == nil {
+		t.Fatal("relationships is nil, want empty non-nil slice")
+	}
+	if len(document.Record.Relationships) != 0 {
+		t.Fatalf("relationships len=%d, want 0", len(document.Record.Relationships))
+	}
+}
