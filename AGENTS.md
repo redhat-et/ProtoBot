@@ -1,18 +1,17 @@
 # AGENTS
 
 - All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py` as a
-  network-independent alternative to `pre-commit run`.
+  environments without network access, use `python scripts/lint.py`
+  (tools must be pre-installed) as an alternative to `pre-commit run`.
   Key flags: `--all-files` (check every tracked file),
   `--files FILE [FILE ...]` (check specific files),
   `--check-parity` (verify registry covers all configured hooks).
-  Tools must be pre-installed when running without network access.
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
-- The upstream repository is `redhat-et/protobot`. Ensure that pull requests
-  are made against this repository.
-- Agent skills live in `.agents/skills/`. `.claude/skills` is a symlink to
-  that directory so Claude Code finds the same skills; do not add skills
+- The upstream repository is `redhat-et/protobot`. Ensure pull requests
+  target this repository.
+- Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
+  there so Claude Code finds the same skills; do not add skills
   under `.claude/` directly.
 
 ## Workflow files and CI boundaries
@@ -23,22 +22,41 @@ Agents must follow these rules:
    GitHub workflows must not create or modify any file under
    `.github/workflows/`. Local coding agents may create or modify
    files under `.github/workflows/`, except as restricted by
-   Rule 2, when the requested change requires it and the user has
-   authorized the change.
+   Rule 2, when the change requires it and the user authorizes it.
 
 2. **Defer CI integration for new modules.** When implementing an issue
    that introduces a new Go module, package, or tool, implement the
    code, local test suites, and module-local configs (`go.mod`,
    `.golangci.yml`), but do not create or modify
-   [`.github/workflows/ci-workflow.yaml`][ci-workflow]. Creating
-   or modifying [`.github/workflows/ci-workflow.yaml`][ci-workflow]
-   is reserved for manual human pull requests.
+   [`.github/workflows/ci-workflow.yaml`][ci-workflow] — that is
+   reserved for manual human pull requests.
 
 [ci-workflow]: .github/workflows/ci-workflow.yaml
 
+## Context budget and prompt efficiency
+
+`AGENTS.md` is injected into every dispatched agent's prompt and
+budget-capped by the `context-budget` rule's `agents-md` warn limit in
+`.skillsaw.yaml`, enforced downward by
+[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
+
+1. **Respect the prompt context budget.** Do not raise a
+   `.skillsaw-baseline.json` ceiling value to fit new prose; after a
+   genuine prose shrink, regenerate the baseline with
+   `skillsaw baseline` so the ceiling ratchets downward. The
+   `agents-md` warn limit in `.skillsaw.yaml` is lowered when
+   `AGENTS.md` shrinks below it (`.skillsaw.yaml:19-20`).
+2. **Consolidate or extract when adding prose.** Offset a new rule or
+   explanation by consolidating existing prose or extracting
+   detail into an on-demand skill under `.agents/skills/`.
+3. **Review agents must recognize budget consolidation.** Treat prose
+   consolidation offsetting a new `AGENTS.md` addition as required
+   budget compliance, not scope creep, provided no governance
+   requirement, defined keyword, or diagnostic name is omitted.
+
 ## Rules for creating or modifying sibling entries
 
-A governed scope defines a domain of applicability, while a list
+A governed scope defines a domain of applicability; a list
 or governed collection defines the sibling set within that domain.
 When creating or modifying any numbered rule in `AGENTS.md`, any
 specification document under `docs/`, any skill file under
@@ -48,9 +66,9 @@ follow these rules:
 1. **Read all sibling entries first.** Before drafting or
    revising an entry, read every other entry in the same list
    or governed collection. Consistency cannot be verified
-   without knowing what the sibling entries say.
+   without knowing what sibling entries say.
 
-2. **Reuse established terminology.** Match the sibling
+2. **Reuse established terminology.** Match sibling
    entries' terms for the same concepts. An undeclared alias
    for a term already used in the same list or governed
    collection is a defect.
@@ -72,14 +90,10 @@ follow these rules:
    intra-entry terminology drift, not only sibling-entry
    terminology matching.
 
-Examples of sibling entries:
-
-- **Numbered rules in `AGENTS.md`:** the other numbered
-  rules in the same list.
-- **Specification documents under `docs/`:** every other
-  governed Markdown document.
-- **Skill files under `.agents/skills/`:** every other
-  skill file.
+Examples of sibling entries: numbered rules in `AGENTS.md` (the
+other numbered rules in the list); specification documents
+under `docs/` (every other governed Markdown document); skill
+files under `.agents/skills/` (every other skill file).
 
 ## Specification document hierarchy
 
@@ -132,22 +146,19 @@ When creating or modifying any document under `docs/`, agents
 must follow these rules:
 
 1. **Account for all components, interfaces, and constraints.**
-   New or revised specification documents must account for
-   every component, interface, and constraint enumerated in
+   New or revised specification documents must account for every
+   component, interface, and constraint enumerated in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md`. If a component or
-   interface from those documents is relevant to the new
-   document's scope, it must be addressed — not silently
-   omitted.
+   `docs/architecture/overview.md`, and must address, not
+   silently omit, those relevant to the document's scope.
 
 2. **Verify deployment topology, security posture, and
-   persistent state coverage.** Cross-check the document
-   against `docs/architecture/overview.md` and
-   `docs/architecture.md` to confirm that deployment topology
-   (single-player, multi-player, web), security posture
-   (credential isolation, sandbox constraints), and persistent
-   state (all stores enumerated in the Architecture) are
-   covered where relevant.
+   persistent state coverage.** Cross-check against
+   `docs/architecture/overview.md` and `docs/architecture.md`:
+   deployment topology (single-player, multi-player, web),
+   security posture (credential isolation, sandbox
+   constraints), and persistent state (all stores in the
+   Architecture) must be covered where relevant.
 
 3. **Review agents must check cross-document coverage.** When
    reviewing a PR that creates or modifies a specification
@@ -159,7 +170,7 @@ must follow these rules:
    Checks must go beyond link freshness and heading alignment:
    register new capabilities where `components.md` enumerates
    them, avoid conflicting with principles in `overview.md`
-   or `components.md` (for example, the harness-agnostic
+   or `components.md` (e.g., the harness-agnostic
    Toolkit principle in `components.md`), and match defined
    ProtoBot keywords and relationship terms; an undeclared
    alias for a defined keyword is a defect.
@@ -175,49 +186,40 @@ must follow these rules:
 5. **Update registered specification artifacts through
    `ears-manager artifact put`.** Registered specification artifacts
    (`docs/vision.md`, `docs/architecture.md`, and any other artifact
-   registered in `.protobot/project.yaml`) must never be edited by
-   hand, and `.protobot/project.yaml` must never be edited by hand.
+   registered in `.protobot/project.yaml`) and
+   `.protobot/project.yaml` must never be edited by hand.
    When a PR creates or modifies a registered specification artifact,
    or when Rule 4 identifies staleness in a registered specification
    artifact, apply the update exclusively via
    `ears-manager artifact put` within an active change set. Run
-   formatters and linters prior to `ears-manager artifact put`, and
+   formatters and linters before `ears-manager artifact put`, and
    verify with `ears-manager check` before committing.
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
-   registered specification artifact, or when Rule 4 identifies staleness
-   in a registered specification artifact, inspect each such registered
-   specification artifact for hand edits under Rule 5 and run
-   `ears-manager check` on a checkout or worktree of the recorded PR head; a
-   check on the base branch is not evidence. Require it to pass without
+   registered specification artifact, when Rule 4 identifies staleness
+   in a registered specification artifact, or when a PR modifies
+   [.protobot/project.yaml](.protobot/project.yaml), inspect the
+   affected registered specification artifact or project configuration
+   for hand edits under Rule 5. Run `ears-manager check` on a checkout
+   or worktree of the recorded PR head — a check on the base branch is
+   not evidence — and require it to pass without
    `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. The check requires each registered artifact path
-   or canonical-content delta to have a matching `artifact_id` in an
-   `artifact_operations[]` entry in any proposed change set, and rejects
-   unregistration of an artifact-registry entry present on the default
-   branch. It confirms manifest association only, not that
-   `ears-manager artifact put` was invoked. Reviewers must flag hand edits
-   they can identify, not claim CLI provenance from an operation record.
-   Separately, whenever a PR modifies
-   [.protobot/project.yaml](.protobot/project.yaml), inspect the project
-   configuration under Rule 5 and flag any hand edit, even if no
-   registered specification artifact is changed. Run the same
-   `ears-manager check` on the recorded PR head; a check on the base
-   branch is not evidence. Require it to pass without
-   `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. Metadata-only changes to an artifact-registry
-   entry do not by themselves require an artifact operation. Findings
-   should include, when a PR creates or modifies a registered
-   specification artifact or Rule 4 identifies staleness in a registered
-   specification artifact: each listed diagnostic; and any hand edit
-   identified while inspecting a registered specification artifact; each
-   listed diagnostic and any hand edit identified in
-   [.protobot/project.yaml](.protobot/project.yaml) whenever a PR modifies
-   [.protobot/project.yaml](.protobot/project.yaml), even if no registered
-   specification artifact is changed; and, when Rule 4 identifies
-   staleness in a registered specification artifact, a staleness finding
-   that prescribes `ears-manager artifact put`, not a hand edit.
+   `artifact.unregistered`. The check requires each registered artifact
+   path or canonical-content delta to have a matching `artifact_id` in
+   an `artifact_operations[]` entry in any proposed change set, and
+   rejects unregistration of an artifact-registry entry present on the
+   default branch. It confirms manifest association only, not that
+   `ears-manager artifact put` was invoked; metadata-only changes to an
+   artifact-registry entry do not by themselves require an artifact
+   operation. Reviewers must flag hand edits they can identify, not
+   claim CLI provenance from an operation record. Findings should
+   include each listed diagnostic and any hand edit identified in the
+   inspected registered specification artifact or
+   [.protobot/project.yaml](.protobot/project.yaml); and, when Rule 4
+   identifies staleness in a registered specification artifact, a
+   staleness finding that prescribes `ears-manager artifact put`, not a
+   hand edit.
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
@@ -247,11 +249,11 @@ agents must follow these rules:
    defect.
 
 2. **Match structural conventions, not behavioral fields.**
-   Structural formatting conventions should be matched to siblings,
+   Structural formatting conventions should match siblings,
    but behavioral fields like dispatch parameters must be determined
-   by the skill's own requirements, not copied from siblings.
-   Blindly copying behavioral configuration from a sibling can
-   produce incorrect dispatch or workflow behavior.
+   by the skill's own requirements. Copying behavioral
+   configuration from a sibling can produce incorrect dispatch
+   or workflow behavior.
 
 3. **Link a GitHub issue or justify why none is needed.**
    When reversing or correcting a business rule, link an
@@ -309,7 +311,7 @@ reviewing such a skill, agents must:
    subset of those fields it names (`Affected interfaces`,
    `Observable at the named boundary alone`) onto ADR-0002
    persistence fields (`applies_to`, `verification.mode`). Do not
-   demand persistence fields from host-independent skills, and
+   demand persistence fields from host-independent skills;
    emit required properties as fields, not only as prose.
 
 5. **Review agents must check skill-to-spec alignment.** When
