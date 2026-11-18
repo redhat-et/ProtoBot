@@ -103,6 +103,11 @@ its release notes and relevant tag changes as well as the Fullsend CLI's notes.
 If no GitHub release or release notes exist for that tag, compare each
 overlay's current base tag with the target tag and record any migration or
 compatibility impact; missing notes do not mean no changes.
+The migration audit must inspect `.fullsend/config.yaml` and
+`.fullsend/config.base.yaml`, when present, against the selected release's
+configuration contract. Apply each required migration; release-note review and
+PR-description notes are not compatibility evidence. Step 6's target-CLI
+configuration check is a hard gate.
 
 Record the resolved binary path, installed release, selected target, and
 installation ownership. Compare normalized semantic versions, not strings.
@@ -219,10 +224,43 @@ space before and after the hash.
 ## Step 6: Verify and document the upgrade
 
 Do not report the upgrade complete until the selected target repository passes
-its applicable integrity, lint, and test checks. Inspect that repository's
-documentation and CI/build configuration to identify the actual commands, and
-run them from `FULLSEND_TARGET_ROOT`. For a non-ProtoBot target, use that
-repository's verification commands. For a ProtoBot target, run:
+its applicable integrity, lint, and test checks.
+
+Before repository-specific checks, validate the selected release's config
+against the target repository. When either `.fullsend/config.yaml` or
+`.fullsend/config.base.yaml` exists, run the selected Fullsend CLI's
+configuration and harness lint. It loads both config layers and rejects
+unsupported or legacy keys:
+
+```bash
+(
+  cd "$FULLSEND_TARGET_ROOT"
+  set -e
+  if [[ -f .fullsend/config.yaml || -f .fullsend/config.base.yaml ]]; then
+    fullsend lint --fullsend-dir .fullsend
+  else
+    printf '%s\n' 'No .fullsend config files; no per-repo config to validate.'
+  fi
+)
+```
+
+Use normal lint mode, not `--strict`: warning-level findings remain visible
+without automatically blocking the upgrade on unrelated existing harness
+deprecations. Error-level config or harness findings still fail the check.
+
+`fullsend lint` does not run agents or change repository settings, but may
+fetch remote harness resources and populate `.fullsend/.fullsend-cache`. Use
+`--offline` only when all required resources are cached. If the selected CLI
+does not provide `lint`, use a documented non-mutating config validator from
+that release; if no such validator exists or the check cannot run, report it as
+a blocker and do not declare the upgrade verified.
+
+The config check validates both config layers as loaded by the target release;
+do not substitute YAML syntax, pin-integrity, or repository lint checks for it.
+
+Inspect that repository's documentation and CI/build configuration to identify
+the actual commands, and run them from `FULLSEND_TARGET_ROOT`. For a non-ProtoBot
+target, use that repository's verification commands. For a ProtoBot target, run:
 
 ```bash
 (
@@ -253,5 +291,6 @@ Prepare a structured PR description that includes:
   reviewed downstream addition retained.
 - **Repository settings:** approved setting names and actions, without
   plaintext secret values.
-- **Verification:** the target's applicable integrity, lint, and test commands
-  with their observed results.
+- **Verification:** the selected-release Fullsend config check when either
+  config layer is present, plus the target's applicable integrity, lint, and
+  test commands with their observed results.
