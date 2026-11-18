@@ -73,6 +73,109 @@ class FindViolationsTests(unittest.TestCase):
         text = 'if "/dev/null" != optionValue {\n'
         self.assertEqual([], checker.find_violations(text))
 
+    def test_detects_raw_string_literal(self) -> None:
+        """Flag a key=value environment literal in backtick raw string."""
+        text = "env = append(env, `GIT_CONFIG_GLOBAL=/dev/null`)\n"
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(1, violations[0][0])
+        self.assertIn("/dev/null", violations[0][1])
+
+    def test_detects_bare_raw_string_literal(self) -> None:
+        """Flag a bare `/dev/null` literal in backticks used as argument."""
+        text = "probes := []string{`/dev/null`}\n"
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(1, violations[0][0])
+
+    def test_exempts_raw_string_comparison(self) -> None:
+        """Do not flag a comparison using a raw string literal."""
+        text = "if path == `/dev/null` {\n"
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_multiline_equality_comparison(self) -> None:
+        """Do not flag an == comparison split across lines."""
+        text = 'if path ==\n\t"/dev/null" {\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_multiline_lhs_equality_comparison(self) -> None:
+        """Do not flag an == comparison with LHS literal split across lines."""
+        text = 'if "/dev/null" ==\n\tpath {\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_multiline_inequality_comparison(self) -> None:
+        """Do not flag a != comparison split across lines."""
+        text = 'if optionValue !=\n\t"/dev/null" {\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_line_comment(self) -> None:
+        """Do not flag a line comment mentioning /dev/null."""
+        text = '// e.g. use "/dev/null" as the null device\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_block_comment(self) -> None:
+        """Do not flag a block comment mentioning /dev/null."""
+        text = '/*\n * Hardcoding "/dev/null" is non-portable.\n */\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_switch_case(self) -> None:
+        """Do not flag a switch case clause matching the literal."""
+        text = 'switch path {\ncase "/dev/null":\n\treturn nil\n}\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_switch_case_multiple_values(self) -> None:
+        """Do not flag a switch case with multiple expressions."""
+        text = 'switch path {\ncase "", "/dev/null":\n\treturn nil\n}\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_switch_case_multiline(self) -> None:
+        """Do not flag a switch case with literal on a continuation line."""
+        text = 'switch path {\ncase\n\t"/dev/null":\n\treturn nil\n}\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_path_boundary_substring(self) -> None:
+        """Do not flag paths where /dev/null is part of a larger path."""
+        text = 'path := "/tmp/dev/null"\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_path_boundary_raw_string_substring(self) -> None:
+        """Do not flag raw strings where /dev/null is part of a larger path."""
+        text = "path := `/tmp/dev/null`\n"
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_pragma_same_line(self) -> None:
+        """Do not flag code with portability:allow-null-device on same line."""
+        text = 'env = append(env, "GIT_CONFIG_GLOBAL=/dev/null") // portability:allow-null-device\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_pragma_preceding_line(self) -> None:
+        """Do not flag code preceded by portability:allow-null-device."""
+        text = '// portability:allow-null-device\nenv = append(env, "GIT_CONFIG_GLOBAL=/dev/null")\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_combined_exempted_comparison_and_real_violation(self) -> None:
+        """Report only real violation in file containing exempted comparison."""
+        text = (
+            'if path == "/dev/null" {\n'
+            "\treturn\n"
+            "}\n"
+            'env = append(env, "GIT_CONFIG_GLOBAL=/dev/null")\n'
+        )
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(4, violations[0][0])
+        self.assertIn("GIT_CONFIG_GLOBAL", violations[0][1])
+
+    def test_exempts_writes_go_diff_sentinel(self) -> None:
+        """Reproduce drafting-table/writes.go diff sentinel comparison."""
+        text = 'if path == "" || path == "/dev/null" {\n\tcontinue\n}\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_shell_analysis_go_rcfile_probe(self) -> None:
+        """Reproduce drafting-table/shell_analysis.go rcfile probe check."""
+        text = 'if optionValue != "/dev/null" {\n\tbreak\n}\n'
+        self.assertEqual([], checker.find_violations(text))
+
     def test_no_literal_present(self) -> None:
         """Return no violations when the line has no /dev/null literal."""
         text = 'fmt.Println("hello world")\n'
@@ -137,6 +240,37 @@ class CheckTests(unittest.TestCase):
         path = self.write_go(
             "writes.go",
             'if path == "" || path == "/dev/null" {\n\tcontinue\n}\n',
+        )
+        self.assertEqual(0, checker.check([path]))
+
+    def test_suppression_pragma_file_passes(self) -> None:
+        """Pass a file using portability:allow-null-device suppression."""
+        path = self.write_go(
+            "suppressed.go",
+            '// portability:allow-null-device\n'
+            'env = append(env, "GIT_CONFIG_GLOBAL=/dev/null")\n',
+        )
+        self.assertEqual(0, checker.check([path]))
+
+    def test_raw_string_file_fails(self) -> None:
+        """Fail and report diagnostic for raw string literal violation."""
+        path = self.write_go(
+            "raw.go",
+            "env = append(env, `GIT_CONFIG_GLOBAL=/dev/null`)\n",
+        )
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = checker.check([path])
+        self.assertEqual(1, result)
+        self.assertIn("os.DevNull", buffer.getvalue())
+
+    def test_comment_only_file_passes(self) -> None:
+        """Pass a file that only mentions /dev/null in comments."""
+        path = self.write_go(
+            "comments.go",
+            '// Note: /dev/null is used on Unix\n'
+            '/* e.g. "/dev/null" */\n'
+            'var x = 1\n',
         )
         self.assertEqual(0, checker.check([path]))
 

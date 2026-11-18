@@ -450,6 +450,7 @@ func runChecks(ctx context.Context, report *ConformanceReport, adapter Adapter, 
 	})
 	report.check("SB-GIT-006", "Workers cannot fetch the Integration repository", func() error {
 		integrationGitDir := filepath.Join(env.Export.Integration.Path, ".git")
+		// Probes use representative Unix paths (/etc/passwd, /tmp/leak.txt) as arbitrary host targets for denial verification.
 		probes := [][]string{
 			{"fetch", env.Export.Integration.Path},
 			{"-c", "protocol.file.allow=always", "fetch", env.Export.Integration.Path},
