@@ -1,20 +1,17 @@
 # AGENTS
 
-- All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py` as a
-  wrapper around `pre-commit run`.
-  Key flags: `--all-files` (all tracked files), `--files FILE [FILE ...]`
-  (specific files), `--check-parity` (validate config and offline hook cache).
-  The hook cache must be pre-populated for offline runs (bootstrap with
-  `pre-commit install-hooks`).
-  Tools must be pre-installed when running without network access.
-  Go changes must pass `gofmt` and `go vet` across affected Go modules
-  before committing.
+- All pre-commit tests must pass before committing. Offline, run
+  `python scripts/lint.py` (wraps `pre-commit run`) with
+  `--all-files`, `--files FILE [FILE ...]`, or `--check-parity`
+  (validate config and cache); pre-install tools and pre-populate
+  the hook cache (`pre-commit install-hooks`). Go changes must
+  pass `gofmt` and `go vet` across affected Go modules before
+  committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
   target this repository.
-- Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
-  there so Claude Code finds the same skills; do not add skills
-  under `.claude/` directly.
+- Agent skills live in `.agents/skills/`; `.claude/skills` symlinks
+  there for Claude Code. Do not add skills under `.claude/`
+  directly.
 
 ## Workflow files and CI boundaries
 
@@ -22,16 +19,16 @@ Agents must follow these rules:
 
 1. **Workflow file restrictions.** Fullsend agents running via
    GitHub workflows must not create or modify any file under
-   `.github/workflows/`. Local coding agents may create or modify
-   files under `.github/workflows/`, except as restricted by
-   Rule 2, when the change requires it and the user authorizes it.
+   `.github/workflows/`. Local coding agents may do so, except as
+   restricted by Rule 2, when the change requires it and the user
+   authorizes it.
 
-2. **Defer CI integration for new modules.** When implementing an issue
-   that introduces a new Go module, package, or tool, implement the
-   code, local test suites, and module-local configs (`go.mod`,
-   `.golangci.yml`), but do not create or modify
-   [`.github/workflows/ci-workflow.yaml`][ci-workflow] — that is
-   reserved for manual human pull requests.
+2. **Defer CI integration for new modules.** When implementing an
+   issue introducing a new Go module, package, or tool, implement
+   the code, local test suites, and module-local configs
+   (`go.mod`, `.golangci.yml`), but do not touch
+   [`.github/workflows/ci-workflow.yaml`][ci-workflow] — reserved
+   for manual human pull requests.
 
 [ci-workflow]: .github/workflows/ci-workflow.yaml
 
@@ -45,16 +42,15 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
 1. **Respect the prompt context budget.** Do not raise a
    `.skillsaw-baseline.json` ceiling value to fit new prose; after a
    genuine prose shrink, regenerate the baseline with
-   `skillsaw baseline` so the ceiling ratchets downward. The
-   `agents-md` warn limit in `.skillsaw.yaml` is lowered when
-   `AGENTS.md` shrinks below it (`.skillsaw.yaml:19-20`).
-2. **Consolidate or extract when adding prose.** Offset a new rule or
-   explanation by consolidating existing prose or extracting
-   detail into an on-demand skill under `.agents/skills/`.
-3. **Review agents must recognize budget consolidation.** Treat prose
-   consolidation offsetting a new `AGENTS.md` addition as required
-   budget compliance, not scope creep, provided no governance
-   requirement, defined keyword, or diagnostic name is omitted.
+   `skillsaw baseline` so the ceiling, and the `.skillsaw.yaml`
+   `agents-md` warn limit, ratchet downward.
+2. **Consolidate or extract when adding prose.** Offset new
+   prose by consolidating existing text or extracting detail
+   into an on-demand skill under `.agents/skills/`.
+3. **Review agents must recognize budget consolidation.** Treat
+   prose consolidation offsetting a new addition as required budget
+   compliance, not scope creep, provided no governance requirement,
+   defined keyword, or diagnostic name is omitted.
 
 ## Rules for creating or modifying sibling entries
 
@@ -62,8 +58,8 @@ A governed scope defines a domain of applicability; a list
 or governed collection defines the sibling set within that domain.
 When creating or modifying any numbered rule in `AGENTS.md`, any
 specification document under `docs/`, any skill file under
-`.agents/skills/`, or an entry in any future governed scope, agents must
-follow these rules:
+`.agents/skills/`, any module specification document (`*/README.md`), or
+an entry in any future governed scope, agents must follow these rules:
 
 1. **Read all sibling entries first.** Before drafting or
    revising an entry, read every other entry in the same list
@@ -80,7 +76,10 @@ follow these rules:
    reuses established sibling terminology rather than inventing
    an alias. Findings should include terminology drift within
    the same list or governed collection, not only
-   specification-hierarchy keyword checks.
+   specification-hierarchy keyword checks. For a module
+   specification document (`*/README.md`), this includes
+   terminology drift between neighboring paragraphs and CLI
+   flag descriptions.
 
 4. **Match intra-entry restatement terminology.** When
    an entry restates a requirement's cases in a separate
@@ -94,7 +93,9 @@ follow these rules:
 Examples of sibling entries: numbered rules in `AGENTS.md` (other
 rules in the list); specification documents under `docs/` (other
 governed Markdown files); skill files under `.agents/skills/`
-(other skill files).
+(other skill files); module specification documents (`*/README.md`)
+(other component READMEs and specification documents describing
+the module's contracts, CLI interfaces, and validation rules).
 
 ## Specification document hierarchy
 
@@ -247,11 +248,10 @@ agents must follow these rules:
    formatting with sibling skills is a defect.
 
 2. **Match structural conventions, not behavioral fields.**
-   Structural formatting conventions should match siblings,
-   but behavioral fields like dispatch parameters must be determined
-   by the skill's own requirements. Copying behavioral
-   configuration from a sibling can produce incorrect dispatch
-   or workflow behavior.
+   Structural formatting should match siblings, but behavioral
+   fields like dispatch parameters must be determined by the
+   skill's own requirements — copying them from a sibling can
+   misconfigure dispatch or workflow behavior.
 
 3. **Link a GitHub issue or justify why none is needed.**
    When reversing or correcting a business rule, link an
