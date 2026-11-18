@@ -24,8 +24,8 @@ reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
 (issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
-and #459, #462, #463, and #468). The command line accepts the checkout path
-and comparison base.
+and #459, #462, #463, #468, and #479). The command line accepts the checkout
+path and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
 empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
@@ -34,8 +34,12 @@ or `]` fails with `layout.parse_failed`. Requirement relationship types are
 restricted to `depends-on`, `supersedes`, and `related-to`; unsupported
 types, including legacy `conflicts-with`, fail validation. Directed
 `depends-on` and `supersedes` graphs must be acyclic; a cycle fails with
-`relationship.cycle` and names the participating requirement IDs.
-`related-to` associations are exempt. A `supersedes` target must have
+`relationship.cycle` and names the participating requirement IDs. A
+multi-node cycle names its IDs as a comma-separated list; a singleton
+cyclic strongly connected component (a self-loop) is instead named as a
+directed edge (`REQ-...->REQ-...`) so the diagnostic is not mistaken for
+a truncated one-ID list. `related-to` associations are exempt.
+A `supersedes` target must have
 `status: retired`. A newly introduced `supersedes` edge must retire that
 predecessor in the same specification change relative to `--base`. An edge
 is newly introduced when it is present in the working tree and absent from
