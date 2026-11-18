@@ -162,7 +162,18 @@ class CompareCeilingsTests(unittest.TestCase):
         self.assertIn("docs/vision.md", diagnostics[0])
         self.assertIn("increased from 2000 to 2050", diagnostics[0])
 
-    def test_normalized_paths_are_independent_keys_across_calls(self) -> None:
+    def test_backslash_separators_match_canonical_base_path(self) -> None:
+        """Windows backslashes on the head path must still ratchet against base."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(_ceiling(file_path=r"docs\vision.md", value=2050)),
+            _baseline(_ceiling(file_path="docs/vision.md", value=2000)),
+        )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("docs/vision.md", diagnostics[0])
+        self.assertIn("increased from 2000 to 2050", diagnostics[0])
+
+    def test_equivalent_paths_with_equal_ceilings_are_accepted(self) -> None:
         """Normalization is applied to both head and base before matching."""
         diagnostics = checker.compare_ceilings(
             _baseline(_ceiling(file_path="./docs//vision.md", value=2050)),
