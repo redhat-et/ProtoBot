@@ -1027,6 +1027,23 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("none increased", messages[0])
 
+    def test_skillsaw_config_with_none_intermediates_skips_warn_parity(self) -> None:
+        """Skip warn-parity check without error when intermediate config keys map to None."""
+        for malformed in (
+            "rules:\n",
+            "rules:\n  context-budget:\n",
+            "rules:\n  context-budget:\n    limits:\n",
+        ):
+            with self.subTest(config=malformed):
+                (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+                    malformed, encoding="utf-8"
+                )
+
+                exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+                self.assertEqual(0, exit_code)
+                self.assertIn("none increased", messages[0])
+
 
 if __name__ == "__main__":
     unittest.main()

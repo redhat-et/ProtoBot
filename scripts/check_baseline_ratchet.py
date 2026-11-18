@@ -472,7 +472,13 @@ def compare_warn_limits(
     """
     if not isinstance(config, dict):
         return []
-    limits = config.get("rules", {}).get("context-budget", {}).get("limits", {})
+    rules = config.get("rules")
+    if not isinstance(rules, dict):
+        return []
+    context_budget = rules.get("context-budget")
+    if not isinstance(context_budget, dict):
+        return []
+    limits = context_budget.get("limits")
     if not isinstance(limits, dict):
         return []
     diagnostics: list[str] = []
