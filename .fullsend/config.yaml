@@ -19,12 +19,14 @@ roles:
 allowed_remote_resources:
     - https://raw.githubusercontent.com/fullsend-ai/fullsend/
     - https://raw.githubusercontent.com/fullsend-ai/agents/
-create_issues:
-    allow_targets:
-        repos:
-            - redhat-et/ProtoBot
-            - fullsend-ai/fullsend
-            - fullsend-ai/agents
+tracker:
+    github:
+        # The source repository (redhat-et/ProtoBot) is implicitly allowed.
+        # This list contains only additional GitHub destinations.
+        allowed_targets:
+            repos:
+                - fullsend-ai/fullsend
+                - fullsend-ai/agents
 # Fullsend itself is pinned to sonnet 4.6. This changes what the `sonnet` alias means.
 models:
     aliases:
