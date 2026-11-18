@@ -438,10 +438,10 @@ def context_budget_limit_key(file_path: str) -> str:
 def load_skillsaw_config(repo_root: Path) -> dict[str, Any] | None:
     """Return the parsed ``.skillsaw.yaml`` config, or ``None`` if absent.
 
-    If the config file does not exist, ``None`` is returned and warn-parity
-    checking is skipped. Any read failure, parse error, or non-mapping
-    document raises :class:`BaselineRatchetError` so invalid configuration
-    fails closed rather than silently disabling warn-parity enforcement.
+    If the config file does not exist, ``None`` is returned. Any read failure,
+    parse error, or non-mapping document raises :class:`BaselineRatchetError`
+    so invalid configuration fails closed rather than silently disabling
+    warn-parity enforcement.
     """
     path = repo_root / SKILLSAW_CONFIG_RELATIVE_PATH
     if not path.is_file():
@@ -478,12 +478,20 @@ def compare_warn_limits(
     next baseline regeneration (see the module docstring).
 
     When *config* is ``None`` (the config file does not exist), checking is
-    skipped. When *config* is present, each ``context-budget`` ceiling must
-    map to a unique limits key and have a corresponding limits entry with a
-    numeric ``warn`` limit. Key collisions, missing limit entries, and
-    non-numeric warn limits all produce diagnostics.
+    skipped only when *head_index* contains no ``context-budget`` ceilings.
+    If *head_index* contains any ``context-budget`` ceiling entries, the
+    absence of ``.skillsaw.yaml`` is an error (failing closed). When *config*
+    is present, each ``context-budget`` ceiling must map to a unique limits
+    key and have a corresponding limits entry with a numeric ``warn`` limit.
+    Key collisions, missing limit entries, and non-numeric warn limits all
+    produce diagnostics.
     """
+    has_context_budget = any(rule_id == "context-budget" for _, rule_id in head_index)
     if config is None:
+        if has_context_budget:
+            return [
+                "ERROR: .skillsaw.yaml is missing but context-budget ceilings are tracked."
+            ]
         return []
     rules = config.get("rules")
     context_budget = rules.get("context-budget") if isinstance(rules, dict) else None

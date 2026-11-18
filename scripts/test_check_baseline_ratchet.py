@@ -97,11 +97,14 @@ class CompareCeilingsTests(unittest.TestCase):
 
     def test_dropped_ceiling_for_existing_file_is_rejected(self) -> None:
         """Reject dropping a baseline ceiling entry if the file still exists on disk."""
-        diagnostics = checker.compare_ceilings(
-            _baseline(),
-            _baseline(_ceiling(file_path="AGENTS.md", value=4000)),
-            repo_root=checker.REPO_ROOT,
-        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / "AGENTS.md").write_text("dummy", encoding="utf-8")
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(_ceiling(file_path="AGENTS.md", value=4000)),
+                repo_root=repo_root,
+            )
 
         self.assertTrue(
             any("was removed while the file still exists" in d for d in diagnostics)
@@ -109,13 +112,15 @@ class CompareCeilingsTests(unittest.TestCase):
 
     def test_dropped_ceiling_for_deleted_file_is_accepted(self) -> None:
         """Permit dropping a baseline ceiling entry if the file was removed from the repo."""
-        diagnostics = checker.compare_ceilings(
-            _baseline(),
-            _baseline(
-                _ceiling(file_path="docs/nonexistent_deleted_file.md", value=100)
-            ),
-            repo_root=checker.REPO_ROOT,
-        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(
+                    _ceiling(file_path="docs/nonexistent_deleted_file.md", value=100)
+                ),
+                repo_root=repo_root,
+            )
 
         self.assertEqual([], diagnostics)
 
@@ -708,9 +713,19 @@ class CompareWarnLimitsTests(unittest.TestCase):
             "share the .skillsaw.yaml limits key 'docs-foo-md'", diagnostics[0]
         )
 
-    def test_none_config_skips_checking(self) -> None:
-        """Skip checking when config is None (file absent)."""
+    def test_none_config_with_context_budget_ceilings_is_rejected(self) -> None:
+        """Reject absent .skillsaw.yaml when context-budget ceilings are tracked."""
         head_index = {("AGENTS.md", "context-budget"): [4000]}
+        diagnostics = checker.compare_warn_limits(head_index, None)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn(
+            ".skillsaw.yaml is missing but context-budget ceilings are tracked",
+            diagnostics[0],
+        )
+
+    def test_none_config_without_context_budget_ceilings_skips(self) -> None:
+        """Skip checking when config is None and no context-budget ceilings exist."""
+        head_index = {("docs/architecture.md", "content-section-length"): [500]}
         diagnostics = checker.compare_warn_limits(head_index, None)
         self.assertEqual([], diagnostics)
 
@@ -733,6 +748,14 @@ class CheckRepoTests(unittest.TestCase):
         self._git("config", "user.name", "Ratchet Test")
         self._git("config", "commit.gpgsign", "false")
         self._write_baseline(_baseline(_ceiling(value=4000)))
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            "        warn: 1000\n",
+            encoding="utf-8",
+        )
         self._git("add", checker.BASELINE_RELATIVE_PATH)
         self._git("commit", "-m", "base ceiling")
 
@@ -901,6 +924,14 @@ class CheckRepoTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=True,
+        )
+        (other / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            "        warn: 1000\n",
+            encoding="utf-8",
         )
         (other / checker.BASELINE_RELATIVE_PATH).write_text(
             json.dumps(_baseline(_ceiling(value=4100))) + "\n",
@@ -1102,8 +1133,30 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("none increased", messages[0])
 
-    def test_missing_skillsaw_config_skips_warn_parity(self) -> None:
-        """Skip the warn-parity check when .skillsaw.yaml is absent."""
+    def test_missing_skillsaw_config_with_context_budget_fails_closed(self) -> None:
+        """Fail closed when .skillsaw.yaml is absent and context-budget ceilings exist."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).unlink()
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertTrue(
+            any(
+                ".skillsaw.yaml is missing but context-budget ceilings are tracked"
+                in msg
+                for msg in messages
+            )
+        )
+
+    def test_missing_skillsaw_config_without_context_budget_skips_warn_parity(
+        self,
+    ) -> None:
+        """Skip the warn-parity check when .skillsaw.yaml is absent and no context-budget ceilings exist."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).unlink()
+        self._write_baseline(
+            _baseline(_ceiling(file_path="foo.md", rule_id="other-rule", value=100))
+        )
+
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
 
         self.assertEqual(0, exit_code)
