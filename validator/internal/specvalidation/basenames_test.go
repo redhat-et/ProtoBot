@@ -6,6 +6,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/testutil"
 )
 
 func TestValidateBasenames(t *testing.T) {
@@ -125,6 +126,19 @@ func TestValidateBasenames(t *testing.T) {
 			wantCode:  CodeInterfaceInvalidBasename,
 			wantPath:  "spec/interfaces/...yaml",
 			wantInMsg: []string{".."},
+		},
+		{
+			name: "invalid interface name paired with valid differing basename emits name mismatch",
+			snapshot: layout.Snapshot{
+				Interfaces: []layout.Document[records.InterfaceRecord]{{
+					Path:   "spec/interfaces/service.yaml",
+					Record: records.InterfaceRecord{Name: ".hidden"},
+				}},
+			},
+			wantCode:  CodeInterfaceNameBasenameMismatch,
+			wantPath:  "spec/interfaces/service.yaml",
+			wantField: "name",
+			wantInMsg: []string{"service", ".hidden"},
 		},
 	}
 
@@ -291,6 +305,29 @@ description: Degenerate interface name.
 	}
 	if !sawInvalidName || !sawInvalidBasename {
 		t.Fatalf("diagnostics=%v, want both %s and %s for a degenerate interface name", diagnostics, CodeInterfaceInvalidName, CodeInterfaceInvalidBasename)
+	}
+}
+
+func TestValidateInvalidInterfaceNameWithDifferingValidBasename(t *testing.T) {
+	doc := testutil.ValidInterfaceDocument(testutil.WithPath("spec/interfaces/service.yaml"))
+	doc.Record.Name = ".hidden"
+	snapshot := layout.Snapshot{
+		Interfaces: []layout.Document[records.InterfaceRecord]{doc},
+	}
+
+	diagnostics := Validate(snapshot)
+	var sawInvalidName, sawMismatch bool
+	for _, diagnostic := range diagnostics {
+		switch diagnostic.Code {
+		case CodeInterfaceInvalidName:
+			sawInvalidName = true
+		case CodeInterfaceNameBasenameMismatch:
+			sawMismatch = true
+		}
+	}
+	if !sawInvalidName || !sawMismatch {
+		t.Fatalf("diagnostics=%v, want both %s and %s for invalid interface name with differing valid basename",
+			diagnostics, CodeInterfaceInvalidName, CodeInterfaceNameBasenameMismatch)
 	}
 }
 

@@ -1,0 +1,13 @@
+# managed by ears-manager; do not edit by hand
+id: CS-00007
+base_commit: 17e45da56a3081d716fa9d466764c1ebb19c9762
+intent: Align Architecture with interface syntax rules
+operations: []
+artifact_operations:
+    - action: revise
+      artifact_id: architecture
+affected_interfaces: []
+implementation_required: false
+implementation_rationale: Synchronize registered Architecture artifact with interface name syntax validation.
+impact_assessment_base_commit: 17e45da56a3081d716fa9d466764c1ebb19c9762
+created: "2026-11-18T23:00:00Z"
