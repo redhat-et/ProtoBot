@@ -537,6 +537,25 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "types": ["markdown"],
                 "default_files": r"^docs/decisions/.*\.md$",
             },
+            "validator-spec-parity": {
+                "cmd": "python3",
+                "fixed_args": ["scripts/check_validator_spec_parity.py"],
+                "pass_filenames": False,
+                "default_files": (
+                    r"^(validator/internal/.+|validator/README\.md|"
+                    r"docs/architecture/ProtoBotV2\.md|"
+                    r"scripts/check_validator_spec_parity\.py)$"
+                ),
+            },
+            "test-validator-spec-parity": {
+                "cmd": "python3",
+                "fixed_args": ["scripts/test_check_validator_spec_parity.py"],
+                "pass_filenames": False,
+                "default_files": (
+                    r"^scripts/(check_validator_spec_parity|"
+                    r"test_check_validator_spec_parity)\.py$"
+                ),
+            },
         },
     },
 }
