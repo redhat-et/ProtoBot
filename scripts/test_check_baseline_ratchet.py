@@ -647,7 +647,9 @@ class CompareWarnLimitsTests(unittest.TestCase):
         config = {"rules": {"context-budget": {"limits": {}}}}
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual(1, len(diagnostics))
-        self.assertIn("is missing a rules.context-budget.limits.agents-md entry", diagnostics[0])
+        self.assertIn(
+            "is missing a rules.context-budget.limits.agents-md entry", diagnostics[0]
+        )
 
     def test_miskeyed_or_renamed_limits_entry_is_rejected(self) -> None:
         """Reject mis-keyed or renamed .skillsaw.yaml limits entry for context-budget ceiling."""
@@ -663,7 +665,9 @@ class CompareWarnLimitsTests(unittest.TestCase):
         }
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual(1, len(diagnostics))
-        self.assertIn("is missing a rules.context-budget.limits.agents-md entry", diagnostics[0])
+        self.assertIn(
+            "is missing a rules.context-budget.limits.agents-md entry", diagnostics[0]
+        )
 
     def test_missing_or_non_numeric_warn_field_is_rejected(self) -> None:
         """Reject .skillsaw.yaml limits entry with missing or non-numeric warn value."""
@@ -700,7 +704,9 @@ class CompareWarnLimitsTests(unittest.TestCase):
         }
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual(1, len(diagnostics))
-        self.assertIn("share the .skillsaw.yaml limits key 'docs-foo-md'", diagnostics[0])
+        self.assertIn(
+            "share the .skillsaw.yaml limits key 'docs-foo-md'", diagnostics[0]
+        )
 
     def test_none_config_skips_checking(self) -> None:
         """Skip checking when config is None (file absent)."""
@@ -1110,7 +1116,9 @@ class CheckRepoTests(unittest.TestCase):
         )
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
         self.assertEqual(1, exit_code)
-        self.assertTrue(any("invalid YAML in .skillsaw.yaml" in msg for msg in messages))
+        self.assertTrue(
+            any("invalid YAML in .skillsaw.yaml" in msg for msg in messages)
+        )
 
     def test_non_mapping_skillsaw_config_fails_closed(self) -> None:
         """Reject non-mapping .skillsaw.yaml (e.g. list, string, empty)."""
@@ -1121,7 +1129,9 @@ class CheckRepoTests(unittest.TestCase):
                 )
                 exit_code, messages = checker.check_repo(self.root, base_ref="main")
                 self.assertEqual(1, exit_code)
-                self.assertTrue(any("must be a YAML mapping" in msg for msg in messages))
+                self.assertTrue(
+                    any("must be a YAML mapping" in msg for msg in messages)
+                )
 
     def test_skillsaw_config_read_error_fails_closed(self) -> None:
         """Fail closed when .skillsaw.yaml cannot be read."""
@@ -1137,7 +1147,9 @@ class CheckRepoTests(unittest.TestCase):
         with patch.object(Path, "read_text", side_effect=mock_read_text, autospec=True):
             exit_code, messages = checker.check_repo(self.root, base_ref="main")
             self.assertEqual(1, exit_code)
-            self.assertTrue(any("cannot read .skillsaw.yaml" in msg for msg in messages))
+            self.assertTrue(
+                any("cannot read .skillsaw.yaml" in msg for msg in messages)
+            )
 
     def test_skillsaw_config_missing_limit_entry_is_rejected(self) -> None:
         """Reject .skillsaw.yaml missing limits entry for tracked context-budget ceiling."""
@@ -1154,7 +1166,10 @@ class CheckRepoTests(unittest.TestCase):
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
         self.assertEqual(1, exit_code)
         self.assertTrue(
-            any("is missing a rules.context-budget.limits.agents-md entry" in msg for msg in messages)
+            any(
+                "is missing a rules.context-budget.limits.agents-md entry" in msg
+                for msg in messages
+            )
         )
 
     def test_skillsaw_config_limit_key_collision_is_rejected(self) -> None:
@@ -1178,10 +1193,15 @@ class CheckRepoTests(unittest.TestCase):
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
         self.assertEqual(1, exit_code)
         self.assertTrue(
-            any("share the .skillsaw.yaml limits key 'docs-foo-md'" in msg for msg in messages)
+            any(
+                "share the .skillsaw.yaml limits key 'docs-foo-md'" in msg
+                for msg in messages
+            )
         )
 
-    def test_skillsaw_config_with_none_intermediates_reports_missing_limit(self) -> None:
+    def test_skillsaw_config_with_none_intermediates_reports_missing_limit(
+        self,
+    ) -> None:
         """Report missing limit without error when intermediate config keys map to None."""
         for malformed in (
             "rules:\n",
@@ -1197,10 +1217,16 @@ class CheckRepoTests(unittest.TestCase):
 
                 self.assertEqual(1, exit_code)
                 self.assertTrue(
-                    any("is missing a rules.context-budget.limits.agents-md entry" in msg for msg in messages)
+                    any(
+                        "is missing a rules.context-budget.limits.agents-md entry"
+                        in msg
+                        for msg in messages
+                    )
                 )
 
-    def test_skillsaw_config_with_none_intermediates_skips_when_no_context_budget_ceilings(self) -> None:
+    def test_skillsaw_config_with_none_intermediates_skips_when_no_context_budget_ceilings(
+        self,
+    ) -> None:
         """Skip warn parity when intermediate config keys map to None and no context-budget ceiling exists."""
         self._write_baseline(
             _baseline(_ceiling(file_path="foo.md", rule_id="other-rule", value=100))
