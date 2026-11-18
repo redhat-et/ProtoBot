@@ -673,6 +673,26 @@ The validator reads the plain `spec/` layout and reduced records in
   `supersedes`, and a retired predecessor in the same specification change;
 - test tags may reference retired IDs, but unknown IDs fail.
 
+Those checks emit deterministic diagnostic codes. Current codes include
+layout codes (`layout.read_failed`, `layout.unexpected_file`,
+`layout.parse_failed`), revision check codes (`revision.not_found`,
+`revision.read_failed`, `revision.unsupported_entry`,
+`revision.unexpected_file`, `revision.parse_failed`), requirement check
+codes (`requirement.missing_field`, `requirement.invalid_status`,
+`requirement.unexpected_field`, `requirement.invalid_id`,
+`requirement.duplicate_id`, `requirement.deleted`, `requirement.reused_id`,
+`requirement.text_immutable`, `requirement.invalid_basename`,
+`requirement.id_basename_mismatch`), interface check codes
+(`interface.missing_field`, `interface.unexpected_field`,
+`interface.name_basename_mismatch`), reference check codes
+(`reference.not_found`, `reference.ambiguous`), specification check codes
+(`relationship.invalid_type`, `relationship.cycle`,
+`relationship.superseded_requirement_active`,
+`relationship.superseded_requirement_not_in_change`), EARS check codes
+(`ears.shall_count`, `ears.pattern_mismatch`, `ears.invalid_type`), and
+test-tag codes (`testtags.read_failed`, `testtags.unexpected_file`,
+`testtags.unresolved`).
+
 It does not check tracker issues or issue-closed state. It takes the checkout
 and comparison base as arguments. It is deterministic, network-free, reads only
 the checkout, and never reads the tracker. The CI evidence script separately
