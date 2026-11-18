@@ -685,6 +685,7 @@ codes (`requirement.missing_field`, `requirement.invalid_status`,
 `requirement.text_immutable`, `requirement.invalid_basename`,
 `requirement.id_basename_mismatch`), interface check codes
 (`interface.missing_field`, `interface.unexpected_field`,
+`interface.invalid_name`, `interface.invalid_basename`,
 `interface.name_basename_mismatch`), reference check codes
 (`reference.not_found`, `reference.ambiguous`), specification check codes
 (`relationship.invalid_type`, `relationship.cycle`,

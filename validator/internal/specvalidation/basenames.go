@@ -58,22 +58,20 @@ func validateRequirementBasename(document layout.Document[records.Requirement]) 
 
 func validateInterfaceBasename(document layout.Document[records.InterfaceRecord]) []Diagnostic {
 	base := yamlBasename(document.Path)
-	name := document.Record.Name
-
-	var diagnostics []Diagnostic
 	if err := records.ValidateInterfaceName(base); err != nil {
-		diagnostics = append(diagnostics, Diagnostic{
+		return []Diagnostic{{
 			Code: CodeInterfaceInvalidBasename,
 			Path: document.Path,
 			Message: fmt.Sprintf(
 				"Interface file basename %q is invalid. Use a single path segment without leading or trailing dots or path separators.",
 				base,
 			),
-		})
+		}}
 	}
 
+	name := document.Record.Name
 	if strings.TrimSpace(name) == "" || name == base {
-		return diagnostics
+		return nil
 	}
 	message := fmt.Sprintf(
 		"Interface name %q does not match file basename %q.",
@@ -87,12 +85,12 @@ func validateInterfaceBasename(document layout.Document[records.InterfaceRecord]
 			base,
 		)
 	}
-	return append(diagnostics, Diagnostic{
+	return []Diagnostic{{
 		Code:    CodeInterfaceNameBasenameMismatch,
 		Path:    document.Path,
 		Field:   "name",
 		Message: message,
-	})
+	}}
 }
 
 func yamlBasename(relPath string) string {

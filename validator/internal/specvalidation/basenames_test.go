@@ -114,6 +114,18 @@ func TestValidateBasenames(t *testing.T) {
 			wantPath:  "spec/interfaces/service..yaml",
 			wantInMsg: []string{"service."},
 		},
+		{
+			name: "invalid interface basename does not emit spurious name mismatch when name differs",
+			snapshot: layout.Snapshot{
+				Interfaces: []layout.Document[records.InterfaceRecord]{{
+					Path:   "spec/interfaces/...yaml",
+					Record: records.InterfaceRecord{Name: "billing-api"},
+				}},
+			},
+			wantCode:  CodeInterfaceInvalidBasename,
+			wantPath:  "spec/interfaces/...yaml",
+			wantInMsg: []string{".."},
+		},
 	}
 
 	for _, tc := range cases {
