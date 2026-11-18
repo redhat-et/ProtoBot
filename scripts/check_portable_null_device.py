@@ -30,7 +30,9 @@ import re
 import sys
 
 _NULL_DEVICE_LITERAL = re.compile(r'"[^"]*/dev/null[^"]*"')
-_COMPARISON_EXEMPTION = re.compile(r'(==|!=)\s*"[^"]*/dev/null[^"]*"')
+_COMPARISON_EXEMPTION = re.compile(
+    r'(==|!=)\s*"[^"]*/dev/null[^"]*"|"[^"]*/dev/null[^"]*"\s*(==|!=)'
+)
 
 
 def is_test_file(path: str) -> bool:
@@ -43,9 +45,9 @@ def find_violations(text: str) -> list[tuple[int, str]]:
 
     *text* is the full contents of one Go source file. A line is a
     violation when it contains a quoted string literal that embeds
-    ``/dev/null``, unless every such occurrence on the line is the
-    right-hand side of an ``==``/``!=`` comparison (see module
-    docstring for why comparisons are exempt).
+    ``/dev/null``, unless every such occurrence on the line is part
+    of an ``==``/``!=`` comparison (see module docstring for why
+    comparisons are exempt).
     """
     violations: list[tuple[int, str]] = []
     for line_number, line in enumerate(text.splitlines(), start=1):

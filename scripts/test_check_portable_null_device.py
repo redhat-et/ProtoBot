@@ -63,6 +63,16 @@ class FindViolationsTests(unittest.TestCase):
         text = 'if optionValue != "/dev/null" {\n'
         self.assertEqual([], checker.find_violations(text))
 
+    def test_exempts_lhs_equality_comparison(self) -> None:
+        """Do not flag a == comparison with the literal on the left."""
+        text = 'if "/dev/null" == path {\n'
+        self.assertEqual([], checker.find_violations(text))
+
+    def test_exempts_lhs_inequality_comparison(self) -> None:
+        """Do not flag a != comparison with the literal on the left."""
+        text = 'if "/dev/null" != optionValue {\n'
+        self.assertEqual([], checker.find_violations(text))
+
     def test_no_literal_present(self) -> None:
         """Return no violations when the line has no /dev/null literal."""
         text = 'fmt.Println("hello world")\n'
