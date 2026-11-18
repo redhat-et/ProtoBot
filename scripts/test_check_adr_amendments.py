@@ -73,21 +73,87 @@ class HistoricalMutationTests(unittest.TestCase):
         self.assertEqual([], checker.historical_mutations(old, new))
 
     def test_replaced_line_is_reported(self) -> None:
-        """Rewriting a historical line is a mutation at that HEAD line."""
+        """Rewriting a historical line is a mutation at its baseline/HEAD lines."""
         old = ["alpha", "bravo", "charlie"]
         new = ["alpha", "bravo changed", "charlie"]
-        self.assertEqual([(2, "bravo")], checker.historical_mutations(old, new))
+        self.assertEqual([(2, 2, "bravo")], checker.historical_mutations(old, new))
 
     def test_deleted_line_is_reported(self) -> None:
-        """Removing a historical line is a mutation at that HEAD line."""
+        """Removing a historical line is a mutation with no HEAD line."""
         old = ["alpha", "bravo", "charlie"]
         new = ["alpha", "charlie"]
-        self.assertEqual([(2, "bravo")], checker.historical_mutations(old, new))
+        self.assertEqual([(2, None, "bravo")], checker.historical_mutations(old, new))
 
     def test_identical_files_have_no_mutations(self) -> None:
         """Unchanged accepted text is not a mutation."""
         lines = ["alpha", "bravo"]
         self.assertEqual([], checker.historical_mutations(lines, list(lines)))
+
+    def test_mutation_reports_accurate_baseline_and_head_lines(self) -> None:
+        """Baseline and HEAD line numbers diverge once insertions precede a mutation."""
+        old = [f"line {n}" for n in range(1, 11)]
+        new = (
+            old[:4]
+            + [
+                "**[Amended November 2026]** Note one.",
+                "**[Amended November 2026]** Note two.",
+                "**[Amended November 2026]** Note three.",
+            ]
+            + old[4:9]
+            + ["line 10 changed"]
+        )
+        self.assertEqual(
+            [(10, 13, "line 10")],
+            checker.historical_mutations(old, new),
+        )
+
+    def test_authorized_status_supersession_is_allowed(self) -> None:
+        """An authorized status-line supersession transition is not a mutation."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Body.",
+            "",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_status_supersession_outside_header_is_not_authorized(self) -> None:
+        """A status-line-shaped replace outside the header window still fails."""
+        old = [""] * 35 + ["> Status: **Accepted** \u2014 September 2026"]
+        new = [""] * 35 + ["> Status: **Superseded by ADR-0004** \u2014 November 2026"]
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(1, len(mutations))
+
+    def test_superseded_status_combined_with_other_edit_is_still_a_mutation(
+        self,
+    ) -> None:
+        """The status-line exception does not license other accepted-text edits."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Use one file per record.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Use JSONL storage instead.",
+        ]
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual([(5, 5, "Use one file per record.")], mutations)
 
 
 class AcceptedStatusTests(unittest.TestCase):
@@ -182,6 +248,42 @@ class GitRepoCheckTests(unittest.TestCase):
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(0, rc)
         self.assertEqual("", output)
+
+    def test_superseded_status_transition_passes(self) -> None:
+        """Transitioning an accepted ADR's status line to Superseded passes."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            )
+            + (
+                "\n**[Amended November 2026]** Superseded by ADR-0004; see "
+                "docs/decisions/0004-adopt-protobot-v2.md.\n"
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_superseded_status_combined_with_rewrite_fails(self) -> None:
+        """The status-line exception does not license other accepted-text edits."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            ).replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
+        self.assertIn("Use one file per record.", output)
 
     def test_rewritten_decision_text_fails(self) -> None:
         """In-place rewriting of accepted decision prose fails."""

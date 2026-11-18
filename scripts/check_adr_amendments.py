@@ -5,7 +5,10 @@ Used as the ``adr-amendments`` local pre-commit hook (and via
 ``scripts/lint.py``). Accepted architecture decision records under
 ``docs/decisions/`` are immutable historical records: git diffs may
 insert dated amendment blocks, but must not delete or modify lines
-from the baseline copy of an accepted ADR.
+from the baseline copy of an accepted ADR, and must never delete or
+rename an accepted ADR file (AGENTS.md Rule 7). The sole exception is
+a supersession: the accepted-status header line may transition in
+place to ``> Status: **Superseded by ADR-NNNN**``.
 
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
@@ -30,6 +33,10 @@ _ACCEPTED_STATUS = re.compile(
     r"^> Status:\s*\*\*Accepted\*\*",
     re.MULTILINE,
 )
+_SUPERSEDED_STATUS = re.compile(
+    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*",
+    re.MULTILINE,
+)
 _HEADER_LINE_LIMIT = 30
 _MAX_REPORTED_LINES = 10
 
@@ -50,26 +57,66 @@ def is_accepted(text: str) -> bool:
     return _ACCEPTED_STATUS.search(header) is not None
 
 
+def _is_authorized_status_supersession(
+    old_segment: list[str],
+    new_segment: list[str],
+    i1: int,
+) -> bool:
+    """Return True when a replace opcode is an authorized status supersession.
+
+    AGENTS.md Rule 7 allows exactly one accepted-decision-text edit: an
+    in-place transition of the accepted-status header line to
+    ``> Status: **Superseded by ADR-NNNN**``. This matches only a
+    single-line replace of that header line, within the header window,
+    with a single-line superseded-status replacement — it does not
+    authorize any other rewrite, nor a file deletion or rename.
+    """
+    if i1 >= _HEADER_LINE_LIMIT:
+        return False
+    if len(old_segment) != 1 or len(new_segment) != 1:
+        return False
+    return bool(_ACCEPTED_STATUS.match(old_segment[0])) and bool(
+        _SUPERSEDED_STATUS.match(new_segment[0])
+    )
+
+
 def historical_mutations(
     old_lines: list[str],
     new_lines: list[str],
-) -> list[tuple[int, str]]:
-    """Return ``(HEAD line number, text)`` for deleted or replaced lines.
+) -> list[tuple[int, int | None, str]]:
+    """Return ``(baseline line number, HEAD line number, text)`` for lines
+    that were deleted or replaced in place.
 
-    Insertions are allowed so dated amendment blocks can be added.
-    Any delete or replace opcode means accepted decision text was
-    rewritten or replaced in place.
+    Insertions are allowed so dated amendment blocks can be added. An
+    authorized status supersession (see ``_is_authorized_status_supersession``)
+    is also allowed and is not reported as a mutation. Any other delete or
+    replace opcode means accepted decision text was rewritten or replaced in
+    place.
+
+    The HEAD line number is the 1-based line in *new_lines* that a replaced
+    baseline line maps to, computed from the opcode's ``j1``/``j2`` indices.
+    A deleted baseline line — including the tail of a replace opcode whose
+    HEAD range is shorter than its baseline range — has no corresponding
+    HEAD line and is reported as ``None``.
     """
     matcher = difflib.SequenceMatcher(
         a=old_lines,
         b=new_lines,
         autojunk=False,
     )
-    mutations: list[tuple[int, str]] = []
-    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
-        if tag in {"replace", "delete"}:
-            for idx in range(i1, i2):
-                mutations.append((idx + 1, old_lines[idx]))
+    mutations: list[tuple[int, int | None, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag not in {"replace", "delete"}:
+            continue
+        if tag == "replace" and _is_authorized_status_supersession(
+            old_lines[i1:i2], new_lines[j1:j2], i1
+        ):
+            continue
+        for offset, idx in enumerate(range(i1, i2)):
+            head_line_no = (
+                j1 + offset + 1 if tag == "replace" and j1 + offset < j2 else None
+            )
+            mutations.append((idx + 1, head_line_no, old_lines[idx]))
     return mutations
 
 
@@ -449,11 +496,24 @@ def _display_line(text: str, limit: int = 80) -> str:
     return text[: limit - 3] + "..."
 
 
-def _report_mutations(rel_posix: str, mutations: list[tuple[int, str]]) -> None:
-    """Print a diagnostic for rewritten or deleted historical lines."""
+def _report_mutations(
+    rel_posix: str,
+    mutations: list[tuple[int, int | None, str]],
+) -> None:
+    """Print a diagnostic for rewritten or deleted historical lines.
+
+    Each entry reports the baseline line number where the historical text
+    lived, and -- for a replace opcode -- the distinct HEAD line number the
+    rewritten text now occupies. A deleted baseline line has no
+    corresponding HEAD line.
+    """
     print(f"{rel_posix}: accepted decision text was rewritten or replaced in place")
-    for line_no, line in mutations[:_MAX_REPORTED_LINES]:
-        print(f"  HEAD line {line_no}: {_display_line(line)}")
+    for baseline_line_no, head_line_no, line in mutations[:_MAX_REPORTED_LINES]:
+        if head_line_no is not None:
+            location = f"baseline line {baseline_line_no} (HEAD line {head_line_no})"
+        else:
+            location = f"baseline line {baseline_line_no} (deleted)"
+        print(f"  {location}: {_display_line(line)}")
     remaining = len(mutations) - _MAX_REPORTED_LINES
     if remaining > 0:
         print(f"  … ({remaining} more line(s))")

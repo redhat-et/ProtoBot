@@ -221,16 +221,18 @@ must follow these rules:
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
-   immutable historical records. Never rewrite or replace accepted
-   decision text in place. When design evolution amends an accepted
-   architecture decision record, append a dated amendment block
-   (`**[Amended Month Year]**`) with the change, its rationale, and
+   immutable historical records: never rewrite, replace, delete, or
+   rename one in place, except to record a supersession as an
+   in-place status-line transition to
+   `> Status: **Superseded by ADR-NNNN**`. Amendments and
+   supersessions append a dated amendment block
+   (`**[Amended Month Year]**`) with the change, rationale, and
    references to updated architecture documents. Review agents must
-   verify that accepted decision text is never rewritten or replaced
-   in place, and that when design evolution amends an accepted
-   architecture decision record, the change appends the dated
-   amendment block (`**[Amended Month Year]**`) with the change, its
-   rationale, and references to updated architecture documents.
+   verify accepted decision text is never rewritten, replaced,
+   deleted, or renamed except via that in-place status-line
+   transition, and each appends the dated amendment block
+   (`**[Amended Month Year]**`) with the change, rationale, and
+   references to updated architecture documents.
 
 ## Agent skills
 
