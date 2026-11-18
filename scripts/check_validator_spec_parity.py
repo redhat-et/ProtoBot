@@ -163,8 +163,10 @@ def is_listed_in_spec(code: str, spec_text: str) -> bool:
     if pattern.search(spec_text):
         return True
     humanized = humanize_code(code)
+    prose_suffixes = r"(?:\s+(?:checks?|checking|rules?|codes?|diagnostics?))"
     humanized_pattern = re.compile(
-        rf"(?<![A-Za-z0-9_]){re.escape(humanized)}(?![A-Za-z0-9_])",
+        rf"(?<![A-Za-z0-9_]){re.escape(humanized)}"
+        rf"(?:{prose_suffixes}(?![A-Za-z0-9_])|(?!\s*[A-Za-z0-9_]))",
         re.IGNORECASE,
     )
     return bool(humanized_pattern.search(spec_text))

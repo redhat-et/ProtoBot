@@ -213,8 +213,15 @@ class IsListedInSpecTests(unittest.TestCase):
         self.assertFalse(
             checker.is_listed_in_spec("layout.read", "`layout.read_failed`")
         )
+        self.assertFalse(checker.is_listed_in_spec("layout.read", "layout read failed"))
+        self.assertFalse(
+            checker.is_listed_in_spec("layout.read", "layout read failed check")
+        )
         self.assertFalse(
             checker.is_listed_in_spec("requirement.invalid", "`requirement.invalid_id`")
+        )
+        self.assertFalse(
+            checker.is_listed_in_spec("requirement.invalid", "requirement invalid id")
         )
         self.assertTrue(
             checker.is_listed_in_spec(
@@ -532,6 +539,24 @@ class EvaluateAndCheckTests(unittest.TestCase):
             )
             _write(readme, "`layout.read` is documented.\n")
             _write(spec, "# Spec\n\n### Validator\n\n`layout.read_failed`\n")
+            report = checker.evaluate(root)
+        self.assertFalse(report.ok)
+        self.assertIn("layout.read", report.missing_in_protobot_v2)
+        self.assertEqual([], list(report.missing_in_readme))
+
+    def test_prefix_constant_fails_when_only_longer_sibling_is_in_prose(
+        self,
+    ) -> None:
+        """A prefix constant fails evaluate when only its longer sibling is in prose."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            go_path, readme, spec = _layout(root)
+            _write(
+                go_path,
+                'package sample\nconst CodeLayoutRead = "layout.read"\n',
+            )
+            _write(readme, "`layout.read` is documented.\n")
+            _write(spec, "# Spec\n\n### Validator\n\n- layout read failed check\n")
             report = checker.evaluate(root)
         self.assertFalse(report.ok)
         self.assertIn("layout.read", report.missing_in_protobot_v2)
