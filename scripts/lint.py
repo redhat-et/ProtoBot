@@ -517,6 +517,12 @@ _REGISTRY: dict[str, dict[str, Any]] = {
                 "pass_filenames": False,
                 "default_files": r"^\.fullsend/harness/[^/]+\.ya?ml$",
             },
+            "test-harness-integrity": {
+                "cmd": "python3",
+                "fixed_args": ["scripts/test_check_harness_integrity.py"],
+                "pass_filenames": False,
+                "default_files": r"^scripts/(check_harness_integrity|test_check_harness_integrity)\.py$",
+            },
             "baseline-ratchet": {
                 "cmd": "python3",
                 "fixed_args": ["scripts/check_baseline_ratchet.py"],
