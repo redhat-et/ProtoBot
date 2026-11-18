@@ -62,6 +62,7 @@ agents:
     - name: retro
       runtime: pi
       model: google-vertex/gemini-3.8-flash
+      source: harness/retro.yaml
     - name: triage
       runtime: pi
       model: google-vertex/gemini-3.8-flash
