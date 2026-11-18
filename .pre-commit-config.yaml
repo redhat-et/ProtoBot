@@ -168,6 +168,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$
+      - id: test-lint-wrapper
+        name: test-lint-wrapper
+        entry: python3 scripts/test_lint.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(lint|test_lint)\.py$
       - id: adr-amendments
         name: adr-amendments
         entry: python3 scripts/check_adr_amendments.py

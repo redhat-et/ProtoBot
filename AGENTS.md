@@ -5,7 +5,8 @@
   (tools must be pre-installed) as an alternative to `pre-commit run`.
   Key flags: `--all-files` (check every tracked file),
   `--files FILE [FILE ...]` (check specific files),
-  `--check-parity` (verify registry covers all configured hooks).
+  `--check-parity` (validate config and offline hook cache).
+  The hook cache must be pre-populated for offline runs.
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests

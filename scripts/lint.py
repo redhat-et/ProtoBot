@@ -1,42 +1,42 @@
 #!/usr/bin/env python3
-"""Offline pre-commit hook runner for sandboxed environments.
+"""Thin wrapper around ``pre-commit`` for offline and CI lint runs.
 
-Reads ``.pre-commit-config.yaml`` and runs each configured hook using
-locally installed tools, without network access to pre-commit's hook
-repository cache.
+``.pre-commit-config.yaml`` is the single source of truth for which
+hooks run and how. This script adds only the behaviour needed for
+sandboxed coding agents that lack network access:
+
+* It pins ``PRE_COMMIT_HOME`` so a pre-seeded cache is used.
+* It pre-flights every non-local hook repository/revision against that
+  cache and fails with an actionable message (naming the missing
+  repository, revision, and bootstrap command) instead of letting
+  ``pre-commit`` crash with an opaque traceback.
+* It exports ``ZIZMOR_NO_ONLINE_AUDITS=true`` while offline, so the
+  ``zizmor`` hook skips audits that require network access.
+* It replicates the previous script's default file-selection
+  behaviour (changed files vs ``HEAD``, including unstaged edits)
+  instead of ``pre-commit run``'s own default (staged files only).
 
 Usage::
 
     python scripts/lint.py --all-files          # every tracked file
     python scripts/lint.py --files a.py b.yaml  # specific files
     python scripts/lint.py                      # changed files vs HEAD
-    python scripts/lint.py --check-parity       # verify registry coverage
+    python scripts/lint.py --check-parity       # validate config + cache
+    python scripts/lint.py --online             # allow network access
 
-Tool provenance
----------------
-Tools are resolved from ``PATH`` first (with version verification for
-pip-installed packages); when absent, they are installed via ``pip`` or
-``npx``, pinned to the version recorded in the frozen comment of
-``.pre-commit-config.yaml``.  Installation requires network access —
-in a fully offline sandbox, all tools must be pre-installed.
-The YAML config is the **single source of truth** for which hooks run
-and with what arguments (except for hooks with ``fixed_args`` in the
-registry); this script only provides the *how* — a registry mapping
-each repo URL to an installation method and command template.
-
-When a hook has no registered handler the script reports it as
-**UNSUPPORTED** and exits non-zero, ensuring silent coverage reduction
-cannot happen.
+Because ``.pre-commit-config.yaml`` is the only configuration this
+script reads, adding, removing, or reconfiguring a hook requires no
+change here — edit the YAML file and (if network access is available)
+run ``pre-commit install-hooks`` to refresh the cache.
 """
 
 from __future__ import annotations
 
 import argparse
-import re
-import shutil
+import os
+import sqlite3
 import subprocess
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -48,116 +48,42 @@ except ImportError:
         "       Install with:  pip install pyyaml"
     )
 
-# ── Paths ──────────────────────────────────────────────────────
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
 
-# ── File-type detection ────────────────────────────────────────
-
-_EXT_TO_TYPE: dict[str, str] = {
-    ".py": "python",
-    ".pyi": "python",
-    ".ipynb": "jupyter",
-    ".json": "json",
-    ".json5": "json5",
-    ".jsonc": "json5",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".toml": "toml",
-    ".xml": "xml",
-    ".md": "markdown",
-    ".markdown": "markdown",
-    ".sh": "shell",
-    ".bash": "shell",
-    ".zsh": "shell",
-    ".ksh": "shell",
-    ".go": "go",
-}
-
-_NAME_PREFIX_TYPES: list[tuple[str, str]] = [
-    ("Dockerfile", "dockerfile"),
-    ("Containerfile", "dockerfile"),
-]
+# ``repo:`` values pre-commit never clones over the network.
+_NON_CLONED_REPOS = {"local", "meta"}
 
 
-def _is_binary(path: str) -> bool:
-    """Return *True* if *path* looks like a binary file.
+# ── Environment helpers ─────────────────────────────────────────
 
-    Checks the first 8 KB for null bytes — the same heuristic used by
-    ``git diff`` and the ``identify`` library that pre-commit relies on.
+
+def _ci_is_enabled() -> bool:
+    """Return whether the environment explicitly enables online checks.
+
+    Mirrors ``scripts/check_harness_integrity.py``'s identically named
+    helper, which establishes this repository's ``CI=true`` convention
+    for opting ``--online-if-ci`` flags into network access.
     """
-    try:
-        with open(REPO_ROOT / path, "rb") as fh:
-            chunk = fh.read(8192)
-    except OSError:
-        return False
-    return b"\x00" in chunk
+    return os.environ.get("CI", "").strip().casefold() == "true"
 
 
-def _file_type(path: str) -> str:
-    """Return a type tag for *path* based on name / extension."""
-    name = Path(path).name
-    for prefix, ftype in _NAME_PREFIX_TYPES:
-        if name == prefix or name.startswith(prefix + "."):
-            return ftype
-    return _EXT_TO_TYPE.get(Path(path).suffix.lower(), "text")
+def _pre_commit_home() -> Path:
+    """Return the effective ``PRE_COMMIT_HOME``.
 
-
-def _filter_by_types(
-    files: list[str],
-    types: list[str] | None,
-) -> list[str]:
-    """Filter *files* to those matching any type in *types* (OR semantics).
-
-    This intentionally uses OR semantics — a file matches if its type
-    is any of the listed types.  Pre-commit's ``types`` field uses AND
-    semantics via the ``identify`` library (where files carry multiple
-    tags), but this script assigns a single tag per file, making AND
-    over multiple tags impractical.  Prefer single-element ``types``
-    lists in the registry to avoid semantic surprises; combining
-    ``"text"`` with specific types is rejected to prevent silent
-    misfiltering.
+    Matches ``pre_commit.store.Store.get_default_directory``'s own
+    resolution order so the pre-flight check inspects the same cache
+    directory that ``pre-commit`` itself will use.
     """
-    if not types:
-        return files
-    ts = set(types)
-    if "all" in ts:
-        return files
-    if "text" in ts:
-        if len(ts) > 1:
-            raise ValueError(
-                f"Cannot combine 'text' with specific types in types list: {types}. "
-                "Use single-element types or separate hooks."
-            )
-        # "text" matches every recognised extension *except* binary files.
-        # Pre-commit uses the ``identify`` library to make this distinction;
-        # we approximate it by checking for null bytes in the first 8 KB.
-        return [f for f in files if not _is_binary(f)]
-    return [f for f in files if _file_type(f) in ts]
+    configured = os.environ.get("PRE_COMMIT_HOME")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
+    return (base / "pre-commit").resolve()
 
 
-def _filter_by_regex(
-    files: list[str],
-    include: str | None = None,
-    exclude: str | None = None,
-) -> list[str]:
-    """Filter *files* using include and exclude regular expressions.
-
-    Applies *include* first (retaining files matching via ``re.search``),
-    then filters out files matching *exclude* (also via ``re.search``).
-    """
-    result = files
-    if include:
-        pat = re.compile(include)
-        result = [f for f in result if pat.search(f)]
-    if exclude:
-        pat = re.compile(exclude)
-        result = [f for f in result if not pat.search(f)]
-    return result
-
-
-# ── Config helpers ─────────────────────────────────────────────
+# ── Config helpers ──────────────────────────────────────────────
 
 
 def _load_config() -> dict[str, Any]:
@@ -165,830 +91,233 @@ def _load_config() -> dict[str, Any]:
         return yaml.safe_load(fh)
 
 
-def _extract_frozen_versions() -> dict[str, str]:
-    """Return ``{rev_sha: version}`` from ``# frozen: vX.Y.Z`` comments."""
-    mapping: dict[str, str] = {}
-    with open(CONFIG_PATH) as fh:
-        for line in fh:
-            m = re.match(r"\s*rev:\s*(\S+)\s+#\s*frozen:\s*v?([\d.]+)", line)
-            if m:
-                mapping[m.group(1)] = m.group(2)
-    return mapping
+def _configured_repos(config: dict[str, Any]) -> list[tuple[str, str]]:
+    """Return ``[(repo_url, rev), ...]`` for cloned hook repositories.
 
-
-def _normalize_url(url: str) -> str:
-    url = re.sub(r"^https?://", "", url)
-    url = url.rstrip("/")
-    url = url.removesuffix(".git")
-    return url
-
-
-# ── Tool installation ──────────────────────────────────────────
-
-
-def _pip_install(package: str, version: str | None) -> bool:
-    spec = f"{package}=={version}" if version else package
-    r = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", spec],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if r.returncode != 0:
-        print(f"  pip install {spec} failed:\n  {r.stderr.strip()}")
-        return False
-    return True
-
-
-def _ensure_tool(
-    cmd: str,
-    installer: str,
-    package: str | None,
-    version: str | None,
-) -> bool:
-    """Return *True* when *cmd* is (or becomes) available on ``PATH``."""
-    if shutil.which(cmd):
-        # Verify the installed version matches the frozen pin for
-        # pip-installed packages.  Other installers (system, npx)
-        # either specify the version at invocation time or lack a
-        # reliable version query.
-        #
-        # Fail-closed: a definite version mismatch rejects the tool
-        # to prevent running an outdated or attacker-placed binary.
-        if installer == "pip" and package and version:
-            try:
-                from importlib.metadata import (
-                    PackageNotFoundError,
-                )
-                from importlib.metadata import (
-                    version as pkg_version,
-                )
-
-                try:
-                    installed = pkg_version(package)
-                except PackageNotFoundError:
-                    print(
-                        f"  REJECTED: cannot verify version for {package} on PATH"
-                        f" (package not found in pip metadata; expected {version})",
-                        file=sys.stderr,
-                    )
-                    return False
-
-                if installed != version:
-                    print(
-                        f"  REJECTED: {package} {installed} on PATH"
-                        f" does not match frozen version {version}",
-                        file=sys.stderr,
-                    )
-                    return False
-            except ImportError:
-                # importlib.metadata module itself unavailable
-                print(
-                    f"  REJECTED: cannot verify version for {package} on PATH"
-                    f" (importlib.metadata unavailable; expected {version})",
-                    file=sys.stderr,
-                )
-                return False
-        return True
-    if installer == "pip" and package:
-        if version is None:
-            print(f"  Refusing to install {package}: no frozen version available")
-            return False
-        print(f"  Installing {package} via pip …")
-        if _pip_install(package, version):
-            return shutil.which(cmd) is not None
-        return False
-    if installer == "system":
-        return False
-    return installer in ("npx", "builtin")
-
-
-# ── Built-in hook implementations ─────────────────────────────
-
-# Pinned versions for builtin dependencies that are installed at runtime.
-# These are Python library packages used by builtin hook implementations,
-# not the hook tools themselves (which are pinned via .pre-commit-config.yaml).
-#
-# Cross-reference with .pre-commit-config.yaml:
-#   - json5: runtime dependency for check-json5
-#     (repo: https://gitlab.com/bmares/check-json5)
-#
-# NOTE: _BUILTIN_DEP_VERSIONS is intentionally decoupled from the repo
-# revision in .pre-commit-config.yaml. The YAML entry's frozen comment
-# (e.g. v1.0.1) records the Git tag of the upstream check-json5 wrapper
-# repository, whereas the 'json5' package installed here is an independent
-# PyPI parser library with its own semantic versioning (0.15.0).
-_BUILTIN_DEP_VERSIONS: dict[str, str] = {
-    "json5": "0.15.0",
-}
-
-
-def _builtin_unicode_replacement(files: list[str]) -> int:
-    """Detect the UTF-8 replacement character U+FFFD."""
-    bad = False
-    replacement = b"\xef\xbf\xbd"
-    for fp in files:
-        try:
-            data = (REPO_ROOT / fp).read_bytes()
-        except OSError:
-            continue
-        if replacement in data:
-            print(f"  {fp}: contains Unicode replacement character (U+FFFD)")
-            bad = True
-    return 1 if bad else 0
-
-
-def _builtin_check_json5(files: list[str]) -> int:
-    """Validate JSON5 files using the ``json5`` Python package."""
-    try:
-        import json5  # type: ignore[import-untyped]
-    except ImportError:
-        if not _pip_install("json5", _BUILTIN_DEP_VERSIONS["json5"]):
-            print("  Cannot install json5 package")
-            return 1
-        import json5  # type: ignore[import-untyped]
-
-    bad = False
-    for fp in files:
-        try:
-            with open(REPO_ROOT / fp) as fh:
-                json5.load(fh)
-        except (ValueError, OSError) as exc:
-            print(f"  {fp}: {exc}")
-            bad = True
-    return 1 if bad else 0
-
-
-_BUILTINS: dict[str, Callable[[list[str]], int]] = {
-    "check_unicode_replacement": _builtin_unicode_replacement,
-    "check_json5": _builtin_check_json5,
-}
-
-# ── Hook registry ─────────────────────────────────────────────
-#
-# Maps normalised repo URLs → tool metadata.  The YAML config is
-# the single source of truth for WHICH hooks to run and with what
-# arguments; this registry only says HOW to install and invoke
-# each tool.
-#
-# If a hook is added to the YAML without a corresponding entry
-# here, the script reports it as UNSUPPORTED and exits non-zero.
-#
-# Argument-passing mechanisms (in command-line order):
-#
-#   1. ``prepend_args`` — inserted immediately after the base
-#      command.  Use for sub-commands and their flags that must
-#      always appear (e.g. ``["check"]`` → ``ruff check …``).
-#
-#   2. ``fixed_args`` — appended after prepend_args.  When present
-#      these REPLACE the YAML-configured ``args`` entirely, so the
-#      hook ignores per-repo argument overrides.
-#
-#   3. YAML ``args`` — appended after prepend_args when
-#      ``fixed_args`` is absent.  This is the normal per-repo
-#      configuration from ``.pre-commit-config.yaml``.
-
-_REGISTRY: dict[str, dict[str, Any]] = {
-    # ── Python: pre-commit-hooks ───────────────────────────────
-    "github.com/pre-commit/pre-commit-hooks": {
-        "installer": "pip",
-        "package": "pre-commit-hooks",
-        "hooks": {
-            "check-added-large-files": {"types": ["all"]},
-            "check-docstring-first": {"types": ["python"]},
-            "check-json": {"types": ["json"]},
-            "check-merge-conflict": {"types": ["text"]},
-            "check-symlinks": {"types": ["all"]},
-            "check-toml": {"types": ["toml"]},
-            "check-xml": {"types": ["xml"]},
-            "debug-statements": {
-                "cmd": "debug-statement-hook",
-                "types": ["python"],
-            },
-            "end-of-file-fixer": {"types": ["text"]},
-            "fix-byte-order-marker": {"types": ["text"]},
-            "trailing-whitespace": {
-                "cmd": "trailing-whitespace-fixer",
-                "types": ["text"],
-            },
-        },
-    },
-    # ── Python: pygrep-hooks (builtin) ─────────────────────────
-    "github.com/pre-commit/pygrep-hooks": {
-        "installer": "builtin",
-        "hooks": {
-            "text-unicode-replacement-char": {
-                "builtin_fn": "check_unicode_replacement",
-                "types": ["text"],
-            },
-        },
-    },
-    # ── Python: yamllint ───────────────────────────────────────
-    "github.com/adrienverge/yamllint": {
-        "installer": "pip",
-        "package": "yamllint",
-        "hooks": {
-            "yamllint": {"types": ["yaml"]},
-        },
-    },
-    # ── Python/Rust: ruff ──────────────────────────────────────
-    "github.com/astral-sh/ruff-pre-commit": {
-        "installer": "pip",
-        "package": "ruff",
-        "hooks": {
-            "ruff-check": {
-                "cmd": "ruff",
-                "prepend_args": ["check"],
-                "types": ["python", "jupyter"],
-            },
-            "ruff-format": {
-                "cmd": "ruff",
-                "prepend_args": ["format", "--check", "--diff"],
-                "types": ["python", "jupyter"],
-            },
-        },
-    },
-    # ── Python: skillsaw ───────────────────────────────────────
-    "github.com/stbenjam/skillsaw": {
-        "installer": "pip",
-        "package": "skillsaw",
-        "hooks": {
-            "skillsaw": {"pass_filenames": False},
-        },
-    },
-    # ── Node: markdownlint-cli2 ────────────────────────────────
-    "github.com/DavidAnson/markdownlint-cli2": {
-        "installer": "npx",
-        "package": "markdownlint-cli2",
-        "hooks": {
-            "markdownlint-cli2": {"types": ["markdown"]},
-        },
-    },
-    # ── System binary: hadolint ────────────────────────────────
-    "github.com/hadolint/hadolint": {
-        "installer": "system",
-        "hooks": {
-            "hadolint": {"types": ["dockerfile"]},
-        },
-    },
-    # ── Python (bundles binary): shellcheck ────────────────────
-    "github.com/shellcheck-py/shellcheck-py": {
-        "installer": "pip",
-        "package": "shellcheck-py",
-        "hooks": {
-            "shellcheck": {"types": ["shell"]},
-        },
-    },
-    # ── Python: detect-secrets ─────────────────────────────────
-    "github.com/Yelp/detect-secrets": {
-        "installer": "pip",
-        "package": "detect-secrets",
-        "hooks": {
-            "detect-secrets": {
-                "cmd": "detect-secrets-hook",
-                "types": ["text"],
-            },
-        },
-    },
-    # ── Builtin (json5 package): check-json5 ───────────────────
-    "gitlab.com/bmares/check-json5": {
-        "installer": "builtin",
-        "hooks": {
-            "check-json5": {
-                "builtin_fn": "check_json5",
-                "types": ["json5"],
-            },
-        },
-    },
-    # ── Python/Rust: zizmor ────────────────────────────────────
-    "github.com/zizmorcore/zizmor-pre-commit": {
-        "installer": "pip",
-        "package": "zizmor",
-        "hooks": {
-            "zizmor": {
-                "types": ["yaml"],
-                "default_files": r"^\.github/",
-                # --offline avoids network-dependent audits that
-                # cannot run in sandboxed environments.
-                "prepend_args": ["--offline"],
-            },
-        },
-    },
-    # ── Node: renovate-config-validator ────────────────────────
-    "github.com/renovatebot/pre-commit-hooks": {
-        "installer": "npx",
-        "package": "renovate",
-        "hooks": {
-            "renovate-config-validator": {
-                "pass_filenames": False,
-                "default_files": r"(^|/)\.?renovate(rc)?\.json5?$",
-            },
-        },
-    },
-    # ── Local: gofmt, go vet, baseline ratchet, ADR amendments ────
-    "local": {
-        "installer": "system",
-        "hooks": {
-            "gofmt": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/check_gofmt.py"],
-                "types": ["go"],
-                "default_files": r"\.go$",
-            },
-            "go-vet": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/check_govet.py"],
-                "types": ["go"],
-                "default_files": r"\.go$",
-            },
-            "eval-corpus-schema": {
-                "cmd": "python3",
-                "fixed_args": ["eval/corpus/validate.py"],
-                "pass_filenames": False,
-                "default_files": (
-                    r"^(eval/corpus/.+|docs/architecture/evaluation-corpus\.md)$"
-                ),
-            },
-            # The offline runner intentionally uses the default offline mode;
-            # the pre-commit entry uses --online-if-ci.
-            "harness-integrity": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/check_harness_integrity.py"],
-                "pass_filenames": False,
-                "default_files": r"^\.fullsend/harness/[^/]+\.ya?ml$",
-            },
-            "test-harness-integrity": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/test_check_harness_integrity.py"],
-                "pass_filenames": False,
-                "default_files": r"^scripts/(check_harness_integrity|test_check_harness_integrity)\.py$",
-            },
-            "baseline-ratchet": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/check_baseline_ratchet.py"],
-                "pass_filenames": False,
-                "default_files": r"^\.skillsaw-baseline\.json$",
-            },
-            "test-baseline-ratchet": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/test_check_baseline_ratchet.py"],
-                "pass_filenames": False,
-                "default_files": r"^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$",
-            },
-            "adr-amendments": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/check_adr_amendments.py"],
-                "pass_filenames": False,
-                "always_run": True,
-                "types": ["markdown"],
-                "default_files": r"^docs/decisions/.*\.md$",
-            },
-            "validator-spec-parity": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/check_validator_spec_parity.py"],
-                "pass_filenames": False,
-                "default_files": (
-                    r"^(validator/internal/.+|validator/README\.md|"
-                    r"docs/architecture/ProtoBotV2\.md|"
-                    r"scripts/check_validator_spec_parity\.py)$"
-                ),
-            },
-            "test-validator-spec-parity": {
-                "cmd": "python3",
-                "fixed_args": ["scripts/test_check_validator_spec_parity.py"],
-                "pass_filenames": False,
-                "default_files": (
-                    r"^scripts/(check_validator_spec_parity|"
-                    r"test_check_validator_spec_parity)\.py$"
-                ),
-            },
-        },
-    },
-}
-
-
-# ── Hook execution ─────────────────────────────────────────────
-
-
-def _run_hook(
-    hook_id: str,
-    hook_info: dict[str, Any],
-    repo_info: dict[str, Any],
-    hook_yaml: dict[str, Any],
-    files: list[str],
-    version: str | None,
-    deleted_files: list[str] | None = None,
-) -> tuple[str, str]:
-    """Run one hook.  Returns ``(status, detail)``."""
-
-    # ── Common file filtering ─────────────────────────────────
-    # The YAML config may override the upstream hook's ``files``
-    # pattern.  When absent, fall back to the registry's
-    # ``default_files`` (which mirrors the upstream definition).
-    files_pattern = hook_yaml.get("files") or hook_info.get("default_files")
-    exclude_pattern = hook_yaml.get("exclude")
-
-    # ── Early file filtering (all hook types) ───────────────────
-    # Determine matching files BEFORE installing or locating the
-    # tool so that hooks with no applicable files are skipped
-    # cheaply (e.g. hadolint in a repo with no Dockerfiles).
-    pass_filenames = hook_info.get("pass_filenames", True)
-    # always_run mirrors pre-commit: the hook runs even when no file
-    # matches its filter. Only pass_filenames-false hooks declare it;
-    # a pass_filenames-true hook with no matches keeps skipping.
-    always_run = bool(hook_yaml.get("always_run") or hook_info.get("always_run"))
-    candidate_files = list(files)
-    if not pass_filenames and deleted_files:
-        candidate_files.extend(deleted_files)
-
-    hook_files = _filter_by_types(candidate_files, hook_info.get("types"))
-    hook_files = _filter_by_regex(
-        hook_files,
-        files_pattern,
-        exclude_pattern,
-    )
-    if pass_filenames:
-        hook_files = [f for f in hook_files if (REPO_ROOT / f).is_file()]
-
-    if not hook_files and not (always_run and not pass_filenames):
-        return "skip", "no matching files"
-
-    # ── Builtin hooks ──────────────────────────────────────────
-    if "builtin_fn" in hook_info:
-        fn = _BUILTINS.get(hook_info["builtin_fn"])
-        if fn is None:
-            return "unsupported", f"Unknown builtin: {hook_info['builtin_fn']}"
-        rc = fn(hook_files)
-        return ("fail" if rc else "pass"), ""
-
-    # ── External tools ─────────────────────────────────────────
-    cmd = hook_info.get("cmd", hook_id)
-    installer = repo_info["installer"]
-    package = repo_info.get("package")
-
-    # For npx tools, the command is run via npx
-    if installer == "npx":
-        pkg = package or cmd
-        if version is None:
-            return "unavailable", f"no frozen version for {pkg}"
-        pkg_spec = f"{pkg}@{version}"
-        if cmd != pkg:
-            # When the hook command differs from the package name
-            # (e.g. renovate-config-validator from renovate), use
-            # --package to specify the package and then the command.
-            base_cmd: list[str] = [
-                "npx",
-                "--yes",
-                "--package",
-                pkg_spec,
-                cmd,
-            ]
-        else:
-            base_cmd = ["npx", "--yes", pkg_spec]
-    else:
-        if not _ensure_tool(cmd, installer, package, version):
-            return "unavailable", f"{cmd} is not installed"
-        base_cmd = [cmd]
-
-    full_cmd = list(base_cmd)
-
-    # Sub-commands (e.g. "ruff check", "ruff format --check")
-    if "prepend_args" in hook_info:
-        full_cmd.extend(hook_info["prepend_args"])
-
-    # Fixed args replace the YAML-configured args entirely
-    if "fixed_args" in hook_info:
-        if "args" in hook_yaml:
-            print(
-                f"WARNING: {hook_id}: YAML args {hook_yaml['args']} "
-                f"discarded in favor of fixed_args {hook_info['fixed_args']}",
-                file=sys.stderr,
-            )
-        full_cmd.extend(hook_info["fixed_args"])
-    elif "args" in hook_yaml:
-        full_cmd.extend(hook_yaml["args"])
-
-    if pass_filenames:
-        full_cmd.append("--")
-        full_cmd.extend(hook_files)
-
-    try:
-        result = subprocess.run(
-            full_cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(REPO_ROOT),
-            timeout=300,
-            check=False,
-        )
-    except FileNotFoundError:
-        return "unavailable", f"command not found: {full_cmd[0]}"
-    except PermissionError:
-        return "unavailable", f"permission denied: {full_cmd[0]}"
-    except subprocess.TimeoutExpired:
-        return "fail", "timed out after 300 s"
-
-    if result.returncode == 0:
-        return "pass", ""
-
-    detail = (result.stdout + result.stderr).strip()
-    return "fail", detail
-
-
-# ── File collection ────────────────────────────────────────────
-
-
-def _git(*args: str, critical: bool = False) -> str:
-    """Run a git command and return its stdout.
-
-    When *critical* is ``True`` and the command fails, the script exits
-    non-zero instead of silently returning empty output — preventing a
-    broken git from masking lint violations.
+    Skips ``repo: local`` and ``repo: meta`` entries, which pre-commit
+    never fetches over the network.
     """
-    r = subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-        check=False,
-    )
-    if r.returncode != 0:
-        stderr = r.stderr.strip()
-        msg = f"git {' '.join(args)} exited {r.returncode}" + (
-            f": {stderr}" if stderr else ""
-        )
-        if critical:
-            sys.exit(f"ERROR: {msg}")
-        print(f"WARNING: {msg}", file=sys.stderr)
-    return r.stdout.strip()
-
-
-def _get_files(args: argparse.Namespace) -> list[str]:
-    if args.files:
-        validated: list[str] = []
-        for f in args.files:
-            resolved = (REPO_ROOT / f).resolve()
-            if not resolved.is_relative_to(REPO_ROOT):
-                print(f"WARNING: skipping path outside repo root: {f}")
-                continue
-            validated.append(str(f))
-        return validated
-
-    if args.all_files:
-        raw = [f for f in _git("ls-files", critical=True).splitlines() if f]
-    else:
-        # Changed + staged files vs HEAD
-        changed = _git(
-            "diff",
-            "--name-only",
-            "--diff-filter=ACMR",
-            "HEAD",
-            critical=True,
-        )
-        staged = _git(
-            "diff",
-            "--name-only",
-            "--cached",
-            "--diff-filter=ACMR",
-            critical=True,
-        )
-        combined: set[str] = set()
-        for line in (changed + "\n" + staged).splitlines():
-            if line.strip():
-                combined.add(line.strip())
-        raw = sorted(combined)
-
-    # Keep only paths that exist as files on disk. ``git ls-files``
-    # includes tracked paths missing from the working tree (unstaged
-    # deletions) and directory symlinks; file-oriented hooks raise
-    # FileNotFoundError on those paths.
-    return [f for f in raw if (REPO_ROOT / f).is_file()]
-
-
-def _get_deleted_files(args: argparse.Namespace) -> list[str]:
-    """Return paths deleted in the working tree or index vs HEAD."""
-    if args.all_files:
-        return []
-    if args.files:
-        return [
-            str(f)
-            for f in args.files
-            if (REPO_ROOT / f).resolve().is_relative_to(REPO_ROOT)
-            and not (REPO_ROOT / f).is_file()
-        ]
-    changed = _git(
-        "diff",
-        "--name-only",
-        "--diff-filter=D",
-        "HEAD",
-        critical=True,
-    )
-    staged = _git(
-        "diff",
-        "--name-only",
-        "--cached",
-        "--diff-filter=D",
-        critical=True,
-    )
-    unstaged = _git(
-        "diff",
-        "--name-only",
-        "--diff-filter=D",
-        critical=True,
-    )
-    combined: set[str] = set()
-    for line in (changed + "\n" + staged + "\n" + unstaged).splitlines():
-        if line.strip():
-            combined.add(line.strip())
-    return sorted(combined)
-
-
-# ── Parity check ───────────────────────────────────────────────
-
-
-def _check_parity(config: dict[str, Any]) -> bool:
-    """Verify bidirectional parity between config and registry."""
-    ok = True
-    config_hooks: set[tuple[str, str]] = set()
-    for repo in config.get("repos", []):
-        key = _normalize_url(repo["repo"])
-        reg = _REGISTRY.get(key)
-        if reg is None:
-            print(f"MISSING REPO: {repo['repo']}")
-            for h in repo.get("hooks", []):
-                print(f"  - {h['id']}")
-            ok = False
+    repos = []
+    for entry in config.get("repos", []):
+        repo = entry.get("repo", "")
+        if repo in _NON_CLONED_REPOS:
             continue
-        for h in repo.get("hooks", []):
-            config_hooks.add((key, h["id"]))
-            if h["id"] not in reg.get("hooks", {}):
-                print(f"MISSING HOOK: {h['id']} (from {repo['repo']})")
-                ok = False
-
-    # Reverse parity: detect registry entries not in config
-    for repo_url, reg in _REGISTRY.items():
-        for hid, hinfo in reg.get("hooks", {}).items():
-            if (repo_url, hid) not in config_hooks:
-                print(
-                    f"ORPHANED REGISTRY ENTRY: {hid} "
-                    f"(in {repo_url}, not configured in .pre-commit-config.yaml)"
-                )
-                ok = False
-            # Also validate that 'text' is not mixed with other types
-            htypes = hinfo.get("types", [])
-            if "text" in htypes and len(htypes) > 1:
-                print(
-                    f"INVALID HOOK TYPES in {repo_url} / {hid}: "
-                    f"'text' cannot be combined with other types"
-                )
-                ok = False
-
-    if ok:
-        print(
-            "PARITY CHECK PASSED: all hooks in "
-            ".pre-commit-config.yaml have registered handlers "
-            "and no orphaned registry entries exist."
-        )
-    else:
-        print(
-            "\nPARITY CHECK FAILED: parity mismatch between config and registry — see above."
-        )
-    return ok
+        repos.append((repo, entry.get("rev", "")))
+    return repos
 
 
 def _any_always_run(config: dict[str, Any]) -> bool:
     """Return True when any configured hook is marked ``always_run``."""
     for repo in config.get("repos", []):
-        reg = _REGISTRY.get(_normalize_url(repo["repo"])) or {}
-        for h in repo.get("hooks", []):
-            hinfo = reg.get("hooks", {}).get(h["id"], {})
-            if h.get("always_run") or hinfo.get("always_run"):
+        for hook in repo.get("hooks", []):
+            if hook.get("always_run"):
                 return True
     return False
 
 
-# ── Entrypoint ─────────────────────────────────────────────────
-
-_STATUS_ICON: dict[str, str] = {
-    "pass": "\033[32m✓\033[0m",
-    "fail": "\033[31m✗\033[0m",
-    "skip": "\033[33m○\033[0m",
-    "unsupported": "\033[35m?\033[0m",
-    "unavailable": "\033[35m!\033[0m",
-}
+# ── Cache pre-flight ────────────────────────────────────────────
 
 
-def main() -> int:
+def _cached_repos(pre_commit_home: Path) -> set[tuple[str, str]]:
+    """Return ``{(repo, ref), ...}`` already cloned into *pre_commit_home*.
+
+    Reads the ``repos`` table from pre-commit's own ``db.db`` SQLite
+    store directly (see ``pre_commit.store.Store``), so this check
+    needs no network access and no dependency on pre-commit's internal
+    Python API. None of this repository's hooks declare
+    ``additional_dependencies``, so pre-commit's stored ``repo`` key
+    always equals the bare repo URL from ``.pre-commit-config.yaml``
+    (a ``:dep1,dep2`` suffix is only appended when dependencies are
+    declared).
+    """
+    db_path = pre_commit_home / "db.db"
+    if not db_path.exists():
+        return set()
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            rows = conn.execute("SELECT repo, ref FROM repos").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return set()
+    return {(repo, ref) for repo, ref in rows}
+
+
+def _missing_repos(
+    configured: list[tuple[str, str]],
+    cached: set[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    return [pair for pair in configured if pair not in cached]
+
+
+def _bootstrap_command(pre_commit_home: Path) -> str:
+    return f'PRE_COMMIT_HOME="{pre_commit_home}" pre-commit install-hooks'
+
+
+def _report_missing_repos(
+    missing: list[tuple[str, str]],
+    pre_commit_home: Path,
+) -> None:
+    plural = "" if len(missing) == 1 else "s"
+    print(
+        f"ERROR: the offline pre-commit cache ({pre_commit_home}) is "
+        f"missing {len(missing)} hook repository revision{plural}:",
+        file=sys.stderr,
+    )
+    for repo, rev in missing:
+        print(f"  - {repo} @ {rev}", file=sys.stderr)
+    print(
+        "\nNo network access is assumed for this run, so the missing "
+        "revision(s) cannot be fetched. With network access, run:\n"
+        f"  {_bootstrap_command(pre_commit_home)}\n"
+        "then retry. Alternatively, re-run with --online (or "
+        "--online-if-ci under CI=true) to let pre-commit fetch them "
+        "directly.",
+        file=sys.stderr,
+    )
+
+
+def _preflight(online: bool, pre_commit_home: Path, config: dict[str, Any]) -> int:
+    """Verify the cache covers every configured hook repository revision.
+
+    Returns ``0`` when the cache is sufficient or network access is
+    assumed available, and non-zero when a hook repository/revision
+    would require network access that is not available.
+    """
+    if online:
+        return 0
+    missing = _missing_repos(_configured_repos(config), _cached_repos(pre_commit_home))
+    if missing:
+        _report_missing_repos(missing, pre_commit_home)
+        return 1
+    return 0
+
+
+# ── File selection ──────────────────────────────────────────────
+
+
+def _changed_files() -> list[str]:
+    """Return paths changed in the working tree relative to ``HEAD``.
+
+    This differs from ``pre-commit run``'s own default scope (staged
+    files only, via ``git diff --staged``): it also covers unstaged
+    edits, matching the previous ``scripts/lint.py`` offline engine's
+    default so routine incremental runs keep seeing in-progress edits.
+    Deleted paths are excluded (``--diff-filter=ACMR``) because hooks
+    that take filenames cannot act on a path that no longer exists;
+    hooks that must still react to deletions declare ``always_run``
+    in ``.pre-commit-config.yaml``, which ``pre-commit`` honours
+    independently of the file list passed here.
+    """
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        sys.exit(
+            f"ERROR: git diff --name-only HEAD exited {result.returncode}"
+            + (f": {stderr}" if stderr else "")
+        )
+    return [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip() and (REPO_ROOT / line.strip()).is_file()
+    ]
+
+
+# ── Entrypoint ───────────────────────────────────────────────────
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    grp = parser.add_mutually_exclusive_group()
-    grp.add_argument(
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
         "--all-files",
         action="store_true",
-        help="check all tracked files",
+        help="check all tracked files (passed through to `pre-commit run --all-files`)",
     )
-    grp.add_argument(
+    scope.add_argument(
         "--files",
         nargs="+",
         metavar="FILE",
-        help="check only these files",
+        help="check only these files (passed through to `pre-commit run --files`)",
     )
     parser.add_argument(
         "--check-parity",
         action="store_true",
-        help="verify every configured hook has a registered handler",
+        help=(
+            "validate .pre-commit-config.yaml and confirm every configured "
+            "hook repository revision is present in the offline cache, "
+            "without running any hooks"
+        ),
     )
-    args = parser.parse_args()
+    online_group = parser.add_mutually_exclusive_group()
+    online_group.add_argument(
+        "--online",
+        action="store_true",
+        help=(
+            "assume network access: skip the cache pre-flight (letting "
+            "pre-commit fetch missing hook repositories itself) and allow "
+            "zizmor's online audits"
+        ),
+    )
+    online_group.add_argument(
+        "--online-if-ci",
+        action="store_true",
+        help="behave as --online only when CI=true",
+    )
+    args = parser.parse_args(argv)
+
+    online = args.online or (args.online_if_ci and _ci_is_enabled())
+
+    pre_commit_home = _pre_commit_home()
+    os.environ.setdefault("PRE_COMMIT_HOME", str(pre_commit_home))
+    if not online:
+        os.environ.setdefault("ZIZMOR_NO_ONLINE_AUDITS", "true")
 
     config = _load_config()
 
+    rc = _preflight(online, pre_commit_home, config)
+    if rc != 0:
+        return rc
+
     if args.check_parity:
-        return 0 if _check_parity(config) else 1
-
-    frozen = _extract_frozen_versions()
-    files = _get_files(args)
-    deleted_files = _get_deleted_files(args)
-
-    if not files and not deleted_files and not _any_always_run(config):
-        print("No files to check.")
-        return 0
-
-    results: list[tuple[str, str, str]] = []
-
-    for repo in config.get("repos", []):
-        repo_url = _normalize_url(repo["repo"])
-        rev = repo.get("rev", "")
-        version = frozen.get(rev)
-
-        reg = _REGISTRY.get(repo_url)
-        if reg is None:
-            for h in repo.get("hooks", []):
-                hid = h["id"]
-                msg = f"unknown repo: {repo['repo']}"
-                print(f"{_STATUS_ICON['unsupported']} {hid}  ({msg})")
-                results.append(("unsupported", hid, msg))
-            continue
-
-        for h in repo.get("hooks", []):
-            hid = h["id"]
-            hinfo = reg.get("hooks", {}).get(hid)
-
-            if hinfo is None:
-                msg = f"unknown hook in {repo['repo']}"
-                print(f"{_STATUS_ICON['unsupported']} {hid}  ({msg})")
-                results.append(("unsupported", hid, msg))
-                continue
-
-            # Progress indicator (overwritten by result line)
-            print(f"  Running {hid} …", end="\r", flush=True)
-            status, detail = _run_hook(
-                hid, hinfo, reg, h, files, version, deleted_files=deleted_files
+        validate_rc = subprocess.run(
+            ["pre-commit", "validate-config", str(CONFIG_PATH)],
+            cwd=str(REPO_ROOT),
+            check=False,
+        ).returncode
+        if validate_rc == 0:
+            print(
+                "PARITY CHECK PASSED: .pre-commit-config.yaml is valid and "
+                "every configured hook repository revision is present in "
+                f"the offline cache ({pre_commit_home})."
             )
+        return validate_rc
 
-            icon = _STATUS_ICON.get(status, "?")
-            suffix = f"  ({detail})" if detail and status == "skip" else ""
-            print(f"{icon} {hid}{suffix}")
+    cmd = ["pre-commit", "run"]
+    if args.all_files:
+        cmd.append("--all-files")
+    elif args.files:
+        cmd.append("--files")
+        cmd.extend(args.files)
+    else:
+        changed = _changed_files()
+        if not changed and not _any_always_run(config):
+            print("No files to check.")
+            return 0
+        cmd.append("--files")
+        cmd.extend(changed)
 
-            if detail and status == "fail":
-                for line in detail.splitlines()[:30]:
-                    print(f"  {line}")
-                total = len(detail.splitlines())
-                if total > 30:
-                    print(f"  … ({total} lines total)")
-
-            if detail and status in ("unsupported", "unavailable"):
-                print(f"  {detail}")
-
-            results.append((status, hid, detail))
-
-    # ── Summary ────────────────────────────────────────────────
-    print()
-    print("─" * 60)
-    passed = sum(1 for s, *_ in results if s == "pass")
-    failed = sum(1 for s, *_ in results if s == "fail")
-    skipped = sum(1 for s, *_ in results if s == "skip")
-    unsup = sum(1 for s, *_ in results if s in ("unsupported", "unavailable"))
-    total = len(results)
-    print(
-        f"Results: {passed} passed, {failed} failed, "
-        f"{skipped} skipped, {unsup} unsupported  ({total} hooks)"
-    )
-
-    if failed:
-        print("\nFailed hooks:")
-        for s, h, _ in results:
-            if s == "fail":
-                print(f"  - {h}")
-
-    if unsup:
-        print("\nUnsupported / unavailable hooks:")
-        for s, h, d in results:
-            if s in ("unsupported", "unavailable"):
-                print(f"  - {h}: {d}")
-
-    return 1 if (failed or unsup) else 0
+    os.execvp(cmd[0], cmd)  # intentional process replacement
 
 
 if __name__ == "__main__":
