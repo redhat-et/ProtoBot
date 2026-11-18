@@ -22,7 +22,7 @@ Agents must follow these rules:
    GitHub workflows must not create or modify any file under
    `.github/workflows/`. Local coding agents may create or modify
    files under `.github/workflows/`, except as restricted by
-   Rule 2, when required and authorized by the user.
+   Rule 2, when the change requires it and the user authorizes it.
 
 2. **Defer CI integration for new modules.** When implementing an issue
    that introduces a new Go module, package, or tool, implement the
@@ -43,9 +43,9 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
 1. **Respect the prompt context budget.** Do not raise a
    `.skillsaw-baseline.json` ceiling value to fit new prose; after a
    genuine prose shrink, regenerate the baseline with
-   `skillsaw baseline` so the ceiling ratchets downward — do not edit
-   the `agents-md` warn limit in `.skillsaw.yaml`, which is intentionally
-   kept at or below the current size.
+   `skillsaw baseline` so the ceiling ratchets downward. The
+   `agents-md` warn limit in `.skillsaw.yaml` is lowered when
+   `AGENTS.md` shrinks below it (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset a new rule or
    explanation by consolidating existing prose or extracting
    detail into an on-demand skill under `.agents/skills/`.
@@ -149,8 +149,8 @@ must follow these rules:
    New or revised specification documents must account for every
    component, interface, and constraint enumerated in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md`, omitting none
-   relevant to the document's scope.
+   `docs/architecture/overview.md`, and must address, not
+   silently omit, those relevant to the document's scope.
 
 2. **Verify deployment topology, security posture, and
    persistent state coverage.** Cross-check against
