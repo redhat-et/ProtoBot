@@ -245,6 +245,42 @@ func TestGitOutputRejectsUnknownRef(t *testing.T) {
 	}
 }
 
+func TestGitOutputCapturesStderrOnFailure(t *testing.T) {
+	root := gitRepo(t)
+	_, err := gitOutput(root, "ls-tree", strings.Repeat("a", 40), "spec")
+	if err == nil {
+		t.Fatal("expected error from gitOutput on invalid commit")
+	}
+	if !strings.Contains(err.Error(), "fatal:") {
+		t.Fatalf("expected error to contain Git stderr diagnostics, got: %v", err)
+	}
+}
+
+func TestResolveCommitUnknownRefIncludesGitStderr(t *testing.T) {
+	root := gitRepo(t)
+	_, err := resolveCommit(root, "not-a-ref")
+	if err == nil {
+		t.Fatal("expected error for unknown ref")
+	}
+	if !strings.Contains(err.Error(), "Needed a single revision") {
+		t.Fatalf("err=%v, want Git stderr diagnostic text", err)
+	}
+}
+
+func TestCheckTreeContainerDiagnosticIncludesGitStderr(t *testing.T) {
+	root := gitRepo(t)
+	_, diagnostics := checkTreeContainer(root, strings.Repeat("a", 40), "HEAD", "spec")
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want exactly one", diagnostics)
+	}
+	if !hasCode(diagnostics, CodeReadFailed) {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeReadFailed)
+	}
+	if !strings.Contains(diagnostics[0].Message, "fatal:") {
+		t.Fatalf("message %q missing Git stderr diagnostic", diagnostics[0].Message)
+	}
+}
+
 func TestReadOversizedBaseFile(t *testing.T) {
 	root := gitRepo(t)
 	oversized := make([]byte, layout.MaxYAMLBytes+10)

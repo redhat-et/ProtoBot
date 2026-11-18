@@ -102,7 +102,7 @@ func Read(target, ref string, opts Options) (layout.Snapshot, []layout.Diagnosti
 
 	entries, listDiags, err := listRequirements(absolute, commit, ref)
 	if err != nil {
-		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q", ref)}
+		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q: %s", ref, err)}
 	}
 	if len(entries) == 0 && len(listDiags) == 0 {
 		return layout.Snapshot{Root: absolute}, emptyBaseNote(ref), nil
@@ -176,7 +176,7 @@ func requireCheckoutRoot(target string) error {
 }
 
 func resolveCommit(target, ref string) (string, error) {
-	out, err := gitOutput(target, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	out, err := gitOutput(target, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	if err != nil {
 		return "", err
 	}
@@ -388,5 +388,12 @@ func gitOutput(dir string, args ...string) ([]byte, error) {
 	cmd := gitcmd.Command(append([]string{"-C", dir}, args...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	return cmd.Output()
+	out, err := cmd.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%w: %s", err, msg)
+		}
+		return nil, err
+	}
+	return out, nil
 }
