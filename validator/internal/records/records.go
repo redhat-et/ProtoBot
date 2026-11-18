@@ -8,6 +8,7 @@ package records
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // EARS type values from the V2 requirement record.
@@ -73,6 +74,25 @@ var requirementIDPattern = regexp.MustCompile(`^REQ-[A-Z][A-Z0-9]*(-[A-Z0-9]+)*-
 func ValidateRequirementID(id string) error {
 	if !requirementIDPattern.MatchString(id) {
 		return fmt.Errorf("invalid requirement id %q", id)
+	}
+	return nil
+}
+
+// ValidateInterfaceName returns an error if name is not a well-formed
+// single path segment: non-empty, free of path separators ("/" or
+// "\"), and without a leading or trailing dot. This rejects the
+// degenerate segments "." and ".." (both start with a dot) along with
+// hidden-file-style and trailing-dot names, while still permitting
+// interior dots such as "service..api" or "api.v1".
+func ValidateInterfaceName(name string) error {
+	if name == "" {
+		return fmt.Errorf("invalid interface name %q", name)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("invalid interface name %q", name)
+	}
+	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") {
+		return fmt.Errorf("invalid interface name %q", name)
 	}
 	return nil
 }

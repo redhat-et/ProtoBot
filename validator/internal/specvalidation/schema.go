@@ -16,6 +16,7 @@ const (
 	CodeRequirementUnexpectedField = "requirement.unexpected_field"
 	CodeInterfaceMissingField      = "interface.missing_field"
 	CodeInterfaceUnexpectedField   = "interface.unexpected_field"
+	CodeInterfaceInvalidName       = "interface.invalid_name"
 )
 
 var (
@@ -139,6 +140,19 @@ func validateInterfaceSchema(document layout.Document[records.InterfaceRecord]) 
 			continue
 		}
 		diagnostics = append(diagnostics, missingFieldDiagnostic(CodeInterfaceMissingField, document.Path, field))
+	}
+	if fieldPresent(document.Fields, "name") && strings.TrimSpace(record.Name) != "" {
+		if err := records.ValidateInterfaceName(record.Name); err != nil {
+			diagnostics = append(diagnostics, Diagnostic{
+				Code:  CodeInterfaceInvalidName,
+				Path:  document.Path,
+				Field: "name",
+				Message: fmt.Sprintf(
+					"Interface name %q is invalid. Use a single path segment without leading or trailing dots or path separators.",
+					record.Name,
+				),
+			})
+		}
 	}
 	for _, field := range unexpectedFields(document.Fields, allowedInterfaceField) {
 		diagnostics = append(diagnostics, Diagnostic{
