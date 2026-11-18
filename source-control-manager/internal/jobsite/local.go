@@ -1162,7 +1162,7 @@ func sandboxEnv(scratch string) []string {
 		env = append(env, "TZ=UTC")
 	}
 	env = append(env, "HOME="+scratch)
-	env = append(env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	env = append(env, "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 	env = append(env, fixtureIdentity...)
 	return env
 }
