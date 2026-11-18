@@ -90,6 +90,30 @@ func TestValidateBasenames(t *testing.T) {
 			wantField: "name",
 			wantInMsg: []string{"service", "billing/api", "path separator"},
 		},
+		{
+			name: "degenerate basename matching a degenerate name is still rejected",
+			snapshot: layout.Snapshot{
+				Interfaces: []layout.Document[records.InterfaceRecord]{{
+					Path:   "spec/interfaces/...yaml",
+					Record: records.InterfaceRecord{Name: ".."},
+				}},
+			},
+			wantCode:  CodeInterfaceInvalidBasename,
+			wantPath:  "spec/interfaces/...yaml",
+			wantInMsg: []string{".."},
+		},
+		{
+			name: "trailing dot basename matching a trailing dot name is still rejected",
+			snapshot: layout.Snapshot{
+				Interfaces: []layout.Document[records.InterfaceRecord]{{
+					Path:   "spec/interfaces/service..yaml",
+					Record: records.InterfaceRecord{Name: "service."},
+				}},
+			},
+			wantCode:  CodeInterfaceInvalidBasename,
+			wantPath:  "spec/interfaces/service..yaml",
+			wantInMsg: []string{"service."},
+		},
 	}
 
 	for _, tc := range cases {
@@ -228,11 +252,41 @@ description: Billing API.
 	}
 }
 
+func TestValidateBasenamesRejectsDegenerateInterfaceFixtureAfterLayoutRead(t *testing.T) {
+	target := t.TempDir()
+	writeFile(t, target, "spec/interfaces/...yaml", `name: ".."
+kind: http
+description: Degenerate interface name.
+`)
+
+	snapshot, layoutDiagnostics := layout.Read(target)
+	if len(layoutDiagnostics) != 0 {
+		t.Fatalf("layout diagnostics=%v", layoutDiagnostics)
+	}
+	if len(snapshot.Interfaces) != 1 {
+		t.Fatalf("interfaces=%d, want 1", len(snapshot.Interfaces))
+	}
+
+	diagnostics := Validate(snapshot)
+	var sawInvalidName, sawInvalidBasename bool
+	for _, diagnostic := range diagnostics {
+		switch diagnostic.Code {
+		case CodeInterfaceInvalidName:
+			sawInvalidName = true
+		case CodeInterfaceInvalidBasename:
+			sawInvalidBasename = true
+		}
+	}
+	if !sawInvalidName && !sawInvalidBasename {
+		t.Fatalf("diagnostics=%v, want %s or %s for a degenerate interface name", diagnostics, CodeInterfaceInvalidName, CodeInterfaceInvalidBasename)
+	}
+}
+
 func basenameDiagnostics(diagnostics []Diagnostic) []Diagnostic {
 	var out []Diagnostic
 	for _, diagnostic := range diagnostics {
 		switch diagnostic.Code {
-		case CodeRequirementInvalidBasename, CodeRequirementIDBasenameMismatch, CodeInterfaceNameBasenameMismatch:
+		case CodeRequirementInvalidBasename, CodeRequirementIDBasenameMismatch, CodeInterfaceInvalidBasename, CodeInterfaceNameBasenameMismatch:
 			out = append(out, diagnostic)
 		}
 	}

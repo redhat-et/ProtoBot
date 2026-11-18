@@ -24,8 +24,8 @@ reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
 (issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
-and #459, #462, #463, #468, and #479). The command line accepts the checkout
-path and comparison base.
+and #459, #462, #463, #468, #479, and #497). The command line accepts the
+checkout path and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
 empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
@@ -59,7 +59,16 @@ match `REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must
 not be deleted or reused relative to the comparison base. Requirement
 file basenames must use that same identifier pattern and equal the
 in-record `id`. Interface file basenames must equal the declared
-`name`. It also scans Gherkin `.feature` files under `tests/` for `@req:<ID>`
+`name`. An interface `name` (and its file basename) must be a well-formed
+single path segment: non-empty, free of path separators (`/` or `\`), and
+without a leading or trailing dot. This rejects the degenerate segments `.`
+and `..`, hidden-file-style names such as `.hidden`, and trailing-dot names
+such as `service.`, while still permitting interior dots such as
+`service..api` or `api.v1`. A violation in the declared `name` fails with
+`interface.invalid_name`; a violation in the file basename fails with
+`interface.invalid_basename` even when the basename equals an equally
+degenerate `name`. It also scans Gherkin `.feature` files under `tests/`
+for `@req:<ID>`
 tags and fails when a tag does not resolve to a known requirement record.
 Active and retired IDs both count as known; unknown or misspelled IDs fail
 with line-level diagnostics. Requirement records must include `id`, `type`,
@@ -206,7 +215,8 @@ include layout codes (`layout.read_failed`, `layout.unexpected_file`,
 `requirement.reused_id`, `requirement.text_immutable`,
 `requirement.invalid_basename`, `requirement.id_basename_mismatch`),
 interface check codes (`interface.missing_field`,
-`interface.unexpected_field`, `interface.name_basename_mismatch`), reference
+`interface.unexpected_field`, `interface.invalid_name`,
+`interface.invalid_basename`, `interface.name_basename_mismatch`), reference
 check codes (`reference.not_found`, `reference.ambiguous`),
 specification check codes (`relationship.invalid_type`,
 `relationship.cycle`, `relationship.superseded_requirement_active`,
