@@ -40,6 +40,7 @@ _SUPERSEDED_STATUS = re.compile(
 )
 _HEADER_LINE_LIMIT = 30
 _MAX_REPORTED_LINES = 10
+_AMENDMENT_MARKER = "**[Amended "
 
 
 def is_adr_markdown(rel_path: Path) -> bool:
@@ -113,12 +114,23 @@ def historical_mutations(
         b=new_lines,
         autojunk=False,
     )
+    opcodes = matcher.get_opcodes()
+    has_amendment = any(
+        line.startswith(_AMENDMENT_MARKER)
+        for tag, _, _, j1, j2 in opcodes
+        if tag in {"insert", "replace"}
+        for line in new_lines[j1:j2]
+    )
     mutations: list[tuple[int, int | None, str]] = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag not in {"replace", "delete"}:
             continue
-        if tag == "replace" and _is_authorized_status_supersession(
-            old_lines[i1:i2], new_lines[j1:j2], i1
+        if (
+            tag == "replace"
+            and _is_authorized_status_supersession(
+                old_lines[i1:i2], new_lines[j1:j2], i1
+            )
+            and has_amendment
         ):
             continue
         for offset, idx in enumerate(range(i1, i2)):
@@ -599,7 +611,7 @@ def check(
             new_path_posix = renames.get(rel_posix)
             if new_path_posix:
                 print(
-                    f"{rel_posix}: accepted architecture decision record "
+                    f"{rel_posix}: accepted or superseded architecture decision record "
                     f"was deleted (renamed to {new_path_posix})"
                 )
                 failed = True
@@ -625,7 +637,9 @@ def check(
                         if mutations:
                             _report_mutations(new_path_posix, mutations)
             else:
-                print(f"{rel_posix}: accepted architecture decision record was deleted")
+                print(
+                    f"{rel_posix}: accepted or superseded architecture decision record was deleted"
+                )
                 failed = True
             continue
 

@@ -230,6 +230,8 @@ class HistoricalMutationTests(unittest.TestCase):
             "> Status: **Superseded by ADR-0004** \u2014 November 2026",
             "",
             "Use JSONL storage instead.",
+            "",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
         ]
         mutations = checker.historical_mutations(old, new)
         self.assertEqual([(5, 5, "Use one file per record.")], mutations)
@@ -277,6 +279,48 @@ class HistoricalMutationTests(unittest.TestCase):
             [(3, 3, "> Status: **Superseded by ADR-0002** \u2014 November 2026")],
             mutations,
         )
+
+    def test_status_flip_with_no_amendment_block_fails(self) -> None:
+        """A status flip with no amendment block must fail."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Body.",
+        ]
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 3, "> Status: **Accepted** \u2014 September 2026")],
+            mutations,
+        )
+
+    def test_status_flip_with_appended_amendment_block_passes(self) -> None:
+        """A status flip with an appended amendment block must pass."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Body.",
+            "",
+            "**[Amended November 2026]**",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
 
 
 class AcceptedStatusTests(unittest.TestCase):
