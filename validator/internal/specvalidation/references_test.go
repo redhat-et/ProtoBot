@@ -1,6 +1,7 @@
 package specvalidation
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
@@ -140,20 +141,14 @@ func TestValidateRejectsDanglingRelationshipTarget(t *testing.T) {
 }
 
 func TestValidateRejectsEmptyInterfaceAndTargetReferences(t *testing.T) {
-	const path = "spec/requirements/REQ-API-00002.yaml"
+	document := validRequirementDocument()
+	document.Record.AppliesTo.Interfaces = []string{""}
+	document.Record.Relationships = []records.Relationship{
+		{Type: records.RelRelatedTo, Target: ""},
+	}
 	snapshot := layout.Snapshot{
-		Requirements: []layout.Document[records.Requirement]{{
-			Path: path,
-			Record: records.Requirement{
-				ID: "REQ-API-00002",
-				AppliesTo: records.Applicability{
-					Interfaces: []string{""},
-				},
-				Relationships: []records.Relationship{
-					{Type: records.RelRelatedTo, Target: ""},
-				},
-			},
-		}},
+		Interfaces:   []layout.Document[records.InterfaceRecord]{validInterfaceDocument()},
+		Requirements: []layout.Document[records.Requirement]{document},
 	}
 
 	diagnostics := Validate(snapshot)
@@ -167,14 +162,14 @@ func TestValidateRejectsEmptyInterfaceAndTargetReferences(t *testing.T) {
 		t.Errorf("second field=%q, want relationships[0].target", diagnostics[1].Field)
 	}
 	for _, got := range diagnostics {
-		if got.Code != CodeReferenceNotFound {
-			t.Errorf("code=%q, want %q", got.Code, CodeReferenceNotFound)
+		if got.Code != CodeRequirementMissingField {
+			t.Errorf("code=%q, want %q", got.Code, CodeRequirementMissingField)
 		}
-		if got.Path != path {
-			t.Errorf("path=%q, want %q", got.Path, path)
+		if got.Path != document.Path {
+			t.Errorf("path=%q, want %q", got.Path, document.Path)
 		}
-		if !identifiesType(got.Message, "") {
-			t.Errorf("message %q does not identify empty reference", got.Message)
+		if !strings.Contains(got.Message, got.Field) {
+			t.Errorf("message %q does not identify field %q", got.Message, got.Field)
 		}
 	}
 }
