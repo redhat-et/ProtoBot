@@ -63,8 +63,8 @@ func declaredInterfaceNames(interfaces []layout.Document[records.InterfaceRecord
 // to load. Suppression is keyed on dir/target.yaml in the same store, so
 // interface attachments assume the file stem matches the declared name
 // (enforced by interface.name_basename_mismatch). Targets that contain
-// "/", "\", or ".." are not eligible: path.Join would otherwise clean
-// ".." out of the store directory and suppress a diagnostic for a file
+// "/" or "\" are not eligible: path.Join would otherwise clean
+// separators out of the store directory and suppress a diagnostic for a file
 // in another store.
 func targetFailedToLoad(dir, target string, failedPaths map[string]bool) bool {
 	if len(failedPaths) == 0 || !storeLocalTarget(target) {
@@ -78,13 +78,10 @@ func targetFailedToLoad(dir, target string, failedPaths map[string]bool) bool {
 }
 
 func storeLocalTarget(target string) bool {
-	if target == "" {
+	if target == "" || target == "." || target == ".." {
 		return false
 	}
-	if strings.ContainsAny(target, `/\`) || strings.Contains(target, "..") {
-		return false
-	}
-	return path.Base(target) == target
+	return !strings.ContainsAny(target, `/\`)
 }
 
 func validateInterfaceAttachments(

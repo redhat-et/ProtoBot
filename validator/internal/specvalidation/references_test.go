@@ -651,3 +651,28 @@ func TestValidateInterfaceNameMismatchParseFailureSuppression(t *testing.T) {
 		t.Errorf("message %q does not identify health-api", got.Message)
 	}
 }
+
+func TestValidateInterfaceWithDotDotSuppressesReferenceNotFound(t *testing.T) {
+	const path = "spec/requirements/REQ-API-00002.yaml"
+	snapshot := layout.Snapshot{
+		Requirements: []layout.Document[records.Requirement]{{
+			Path: path,
+			Record: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{"service..api"},
+				},
+			},
+		}},
+	}
+	layoutDiagnostics := []layout.Diagnostic{{
+		Code:    layout.CodeParseFailed,
+		Path:    "spec/interfaces/service..api.yaml",
+		Message: "parse YAML: failed",
+	}}
+
+	diagnostics := Validate(snapshot, layoutDiagnostics...)
+	if len(diagnostics) != 0 {
+		t.Fatalf("expected reference.not_found to be suppressed for service..api, got %+v", diagnostics)
+	}
+}

@@ -41,8 +41,8 @@ without a successor is allowed. Retired records must not be deleted. Each
 must resolve to declared records; retired requirement targets satisfy
 resolution. A missing interface name or requirement target fails with
 `reference.not_found`. An interface name declared by more than one
-interface record fails with `reference.ambiguous` when a requirement
-attaches that name. Duplicate requirement IDs fail with
+interface record fails with `reference.ambiguous` when an
+`applies_to.interfaces` entry names it. Duplicate requirement IDs fail with
 `requirement.duplicate_id` on the declaring records, not with
 `reference.ambiguous`. Requirement IDs must match `REQ-<SCOPE>-<NNNNN>`, be
 unique in the working tree, and must not be deleted or reused relative to
@@ -88,8 +88,8 @@ the snapshot so other checks still run. When a target record fails to load,
 referring records do not receive a cascading `reference.not_found`; the layout
 diagnostic remains the actionable error. Parse-failure suppression looks up
 `<store>/<target>.yaml` in the same store directory, so interface suppression
-assumes the file stem matches the declared `name`. A target that contains `/`,
-`\`, or `..` is not eligible for suppression. Requirement identity is
+assumes the file stem matches the declared `name`. A target that contains `/`
+or `\` is not eligible for suppression. Requirement identity is
 path-keyed: moving a record to a new file path with the same ID emits
 `requirement.reused_id` at the new path and no `requirement.deleted`. Two
 exceptions apply: moving a record from a non-canonical path to its canonical
