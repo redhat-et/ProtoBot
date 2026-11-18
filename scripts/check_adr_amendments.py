@@ -70,18 +70,21 @@ def _is_authorized_status_supersession(
     new_segment: list[str],
     i1: int,
 ) -> bool:
-    """Return True when a replace opcode is an authorized status supersession.
+    """Return True when a replace opcode begins with an authorized status supersession.
 
     AGENTS.md Rule 7 allows exactly one accepted-decision-text edit: an
     in-place transition of an accepted record's status line to
-    ``> Status: **Superseded by ADR-NNNN**``. This matches only a
-    single-line replace of that header line, within the header window,
-    with a single-line superseded-status replacement — it does not
-    authorize any other rewrite, nor a file deletion or rename.
+    ``> Status: **Superseded by ADR-NNNN**``. This matches when the
+    replace opcode's old segment within the header window contains
+    exactly one line matching the accepted status pattern, that line is
+    the first line of the old segment, and the new segment's first line
+    is a superseded-status replacement.
     """
     if i1 >= _HEADER_LINE_LIMIT:
         return False
-    if len(old_segment) != 1 or len(new_segment) != 1:
+    if not old_segment or not new_segment:
+        return False
+    if sum(bool(_ACCEPTED_STATUS.match(line.rstrip())) for line in old_segment) != 1:
         return False
     old_line = old_segment[0].rstrip()
     new_line = new_segment[0].rstrip()
@@ -125,15 +128,16 @@ def historical_mutations(
     for tag, i1, i2, j1, j2 in opcodes:
         if tag not in {"replace", "delete"}:
             continue
-        if (
+        authorized_supersession = (
             tag == "replace"
             and _is_authorized_status_supersession(
                 old_lines[i1:i2], new_lines[j1:j2], i1
             )
             and has_amendment
-        ):
-            continue
-        for offset, idx in enumerate(range(i1, i2)):
+        )
+        start_idx = i1 + 1 if authorized_supersession else i1
+        for idx in range(start_idx, i2):
+            offset = idx - i1
             head_line_no = (
                 j1 + offset + 1 if tag == "replace" and j1 + offset < j2 else None
             )

@@ -322,6 +322,49 @@ class HistoricalMutationTests(unittest.TestCase):
         ]
         self.assertEqual([], checker.historical_mutations(old, new))
 
+    def test_status_flip_with_immediately_adjacent_amendment_block_passes(
+        self,
+    ) -> None:
+        """A status flip with an amendment block directly following the status line passes."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
+            "",
+            "Body.",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_status_flip_with_blank_line_before_amendment_block_passes(
+        self,
+    ) -> None:
+        """A status flip with only a blank line before the amendment block passes."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
+            "",
+            "Body.",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
+
 
 class AcceptedStatusTests(unittest.TestCase):
     def test_accepted_header_is_detected(self) -> None:
@@ -519,6 +562,24 @@ class GitRepoCheckTests(unittest.TestCase):
             + (
                 "\n**[Amended November 2026]** Superseded by ADR-0004; see "
                 "docs/decisions/0004-adopt-protobot-v2.md.\n"
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_superseded_status_transition_with_adjacent_amendment_passes(self) -> None:
+        """A superseded status line with an immediately adjacent amendment passes check."""
+        amendment = (
+            "\n**[Amended November 2026]** Superseded by ADR-0004; see "
+            "docs/decisions/0004-adopt-protobot-v2.md."
+        )
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026" + amendment,
             ),
             encoding="utf-8",
         )
