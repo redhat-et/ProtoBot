@@ -80,7 +80,7 @@ def _run_check(repo: Path, env: dict[str, str] | None = None) -> tuple[int, str]
 
 
 @unittest.skipUnless(shutil.which("go") and shutil.which("git"), "go and git required")
-class CheckEndToEndTest(unittest.TestCase):
+class CheckEndToEndTests(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -88,11 +88,13 @@ class CheckEndToEndTest(unittest.TestCase):
         self.req = self.repo / "spec" / "requirements" / "REQ-CLI-00001.yaml"
 
     def test_valid_spec_passes_quietly(self) -> None:
+        """Pass with no output when the specification is valid."""
         rc, err = _run_check(self.repo)
         self.assertEqual(0, rc, err)
         self.assertEqual("", err)
 
     def test_invalid_spec_fails_with_diagnostic_and_path(self) -> None:
+        """Fail with the diagnostic code and record path for an invalid record."""
         self.req.write_text(_NO_SHALL)
         rc, err = _run_check(self.repo)
         self.assertEqual(1, rc)
@@ -101,18 +103,21 @@ class CheckEndToEndTest(unittest.TestCase):
         self.assertIn("REQ-CLI-00001.yaml", err)
 
     def test_reworded_text_fails_against_default_base(self) -> None:
+        """Fail when requirement text changes relative to the default base."""
         self.req.write_text(_REWORDED)
         rc, err = _run_check(self.repo)
         self.assertEqual(1, rc)
         self.assertIn("requirement.text_immutable", err)
 
     def test_deleted_record_fails(self) -> None:
+        """Fail when a requirement record is deleted."""
         self.req.unlink()
         rc, err = _run_check(self.repo)
         self.assertEqual(1, rc)
         self.assertIn("requirement.deleted", err)
 
     def test_feature_branch_compares_against_merge_base(self) -> None:
+        """Compare a feature branch against its merge base with the default branch."""
         _git(self.repo, "checkout", "-q", "-b", "feature")
         self.req.write_text(_REWORDED)
         _git(self.repo, "commit", "-q", "-am", "reword")
@@ -121,6 +126,7 @@ class CheckEndToEndTest(unittest.TestCase):
         self.assertIn("requirement.text_immutable", err)
 
     def test_base_override_is_honoured(self) -> None:
+        """Use the revision named by the base override variable."""
         self.req.write_text(_REWORDED)
         _git(self.repo, "commit", "-q", "-am", "reword")
         rc, _ = _run_check(self.repo, {checker.BASE_ENV: "HEAD"})
@@ -131,7 +137,7 @@ class CheckEndToEndTest(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("git"), "git required")
-class ResolveBaseTest(unittest.TestCase):
+class ResolveBaseTests(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -147,13 +153,16 @@ class ResolveBaseTest(unittest.TestCase):
         self.head = _git(self.repo, "rev-parse", "HEAD")
 
     def test_falls_back_to_head_without_default_branch(self) -> None:
+        """Use HEAD as the base when no default branch resolves."""
         self.assertEqual(("HEAD", True), checker.resolve_base(self.repo, {}))
 
     def test_default_branch_at_head_uses_self_comparison(self) -> None:
+        """Allow self-comparison when the default branch is at HEAD."""
         _git(self.repo, "branch", "main")
         self.assertEqual((self.head, True), checker.resolve_base(self.repo, {}))
 
     def test_diverged_branch_uses_merge_base(self) -> None:
+        """Use the merge base when the branch has diverged from the default branch."""
         _git(self.repo, "branch", "main")
         _git(self.repo, "checkout", "-q", "-b", "feature")
         (self.repo / "b.txt").write_text("b")
@@ -162,6 +171,7 @@ class ResolveBaseTest(unittest.TestCase):
         self.assertEqual((self.head, False), checker.resolve_base(self.repo, {}))
 
     def test_upstream_main_preferred_over_main(self) -> None:
+        """Prefer upstream/main over a local main branch."""
         _git(self.repo, "branch", "main")
         (self.repo / "b.txt").write_text("b")
         _git(self.repo, "add", "-A")
@@ -171,6 +181,7 @@ class ResolveBaseTest(unittest.TestCase):
         self.assertEqual((new_head, True), checker.resolve_base(self.repo, {}))
 
     def test_override_wins(self) -> None:
+        """Prefer the base override over any default branch."""
         _git(self.repo, "branch", "main")
         self.assertEqual(
             ("HEAD", True),
@@ -178,17 +189,19 @@ class ResolveBaseTest(unittest.TestCase):
         )
 
     def test_unresolvable_override_is_passed_through(self) -> None:
+        """Pass an unresolvable override through so the validator reports it."""
         self.assertEqual(
             ("no-such-ref", False),
             checker.resolve_base(self.repo, {checker.BASE_ENV: "no-such-ref"}),
         )
 
 
-class BuildValidatorTest(unittest.TestCase):
+class BuildValidatorTests(unittest.TestCase):
     def _completed(self, rc: int, stderr: str = "") -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess([], rc, stdout="", stderr=stderr)
 
     def test_build_is_offline(self) -> None:
+        """Build with module downloads, workspaces and network lookups disabled."""
         with patch.object(
             checker.subprocess, "run", return_value=self._completed(0)
         ) as run:
@@ -201,6 +214,7 @@ class BuildValidatorTest(unittest.TestCase):
         self.assertEqual("-mod=readonly", env["GOFLAGS"])
 
     def test_dependency_failure_is_reported_as_offline_problem(self) -> None:
+        """Report unresolved module dependencies as an offline problem."""
         failure = self._completed(1, "go: module lookup disabled by GOPROXY=off")
         with patch.object(checker.subprocess, "run", return_value=failure):
             ok, message = checker.build_validator(Path("/tmp/out"), REAL_REPO)
@@ -208,6 +222,7 @@ class BuildValidatorTest(unittest.TestCase):
         self.assertIn("could not be resolved offline", message)
 
     def test_compile_failure_is_reported_verbatim(self) -> None:
+        """Report a compile failure without the offline explanation."""
         failure = self._completed(1, "main.go:3: syntax error")
         with patch.object(checker.subprocess, "run", return_value=failure):
             ok, message = checker.build_validator(Path("/tmp/out"), REAL_REPO)
@@ -216,12 +231,14 @@ class BuildValidatorTest(unittest.TestCase):
         self.assertNotIn("offline", message)
 
     def test_missing_go_fails_with_message(self) -> None:
+        """Fail with a clear message when go is not on PATH."""
         with patch.object(checker.subprocess, "run", side_effect=FileNotFoundError):
             ok, message = checker.build_validator(Path("/tmp/out"), REAL_REPO)
         self.assertFalse(ok)
         self.assertIn("go not found", message)
 
     def test_check_returns_failure_when_build_fails(self) -> None:
+        """Return failure and print the message when the build fails."""
         with (
             patch.object(checker, "resolve_base", return_value=("HEAD", True)),
             patch.object(checker, "build_validator", return_value=(False, "boom")),
@@ -231,8 +248,9 @@ class BuildValidatorTest(unittest.TestCase):
         self.assertIn("boom", err)
 
 
-class MainTest(unittest.TestCase):
+class MainTests(unittest.TestCase):
     def test_main_returns_check_result(self) -> None:
+        """Return the exit code produced by check."""
         with patch.object(checker, "check", return_value=1) as check:
             self.assertEqual(1, checker.main([]))
         check.assert_called_once_with()

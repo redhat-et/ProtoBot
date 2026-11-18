@@ -100,10 +100,7 @@ def build_validator(
 ) -> tuple[bool, str]:
     """Build the validator binary offline. Returns ``(ok, message)``."""
     module = repo_root / VALIDATOR_MODULE
-    cmd = ["go", "build", "-o", str(output)]
-    if (module / "vendor").is_dir():
-        cmd.append("-mod=vendor")
-    cmd.append(VALIDATOR_PACKAGE)
+    cmd = ["go", "build", "-o", str(output), VALIDATOR_PACKAGE]
     env = os.environ.copy()
     env["GOWORK"] = "off"
     env["GOPROXY"] = "off"
