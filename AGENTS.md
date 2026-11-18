@@ -220,17 +220,16 @@ must follow these rules:
    that prescribes `ears-manager artifact put`, not a hand edit.
 
 7. **Preserve accepted architecture decision records.**
-   Never rewrite, replace, delete, or rename an accepted architecture
-   decision record in place, except for an in-place status-line
-   transition to `> Status: **Superseded by ADR-NNNN**`. Amendments
-   and supersessions append a dated amendment block
+   Never rewrite, replace, delete, or rename an accepted or
+   superseded architecture decision record in place, except for a
+   status-line transition to `> Status: **Superseded by ADR-NNNN**`.
+   Amendments and supersessions append a dated amendment block
    (`**[Amended Month Year]**`) citing change, rationale, and
    updated architecture documents. Review agents must verify an
-   accepted architecture decision record is never rewritten,
-   replaced, deleted, or renamed in place, except for an in-place
-   status-line transition to
-   `> Status: **Superseded by ADR-NNNN**`, and amendments and
-   supersessions append a dated amendment block
+   accepted or superseded architecture decision record is never
+   rewritten, replaced, deleted, or renamed in place, except for a
+   status-line transition to `> Status: **Superseded by ADR-NNNN**`,
+   and amendments and supersessions append a dated amendment block
    (`**[Amended Month Year]**`) citing change, rationale, and
    updated architecture documents.
 

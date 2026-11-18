@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Fail if accepted ADR historical text is rewritten in place.
+"""Fail if accepted or superseded ADR historical text is rewritten in place.
 
 Used as the ``adr-amendments`` local pre-commit hook (and via
-``scripts/lint.py``). Accepted architecture decision records under
-``docs/decisions/`` are immutable historical records: git diffs may
-insert dated amendment blocks, but must not delete or modify lines
-from the baseline copy of an accepted ADR, and must never delete or
-rename an accepted ADR file (AGENTS.md Rule 7). The sole exception is
-a supersession: the accepted-status header line may transition in
-place to ``> Status: **Superseded by ADR-NNNN**``.
+``scripts/lint.py``). Accepted and superseded architecture decision
+records under ``docs/decisions/`` are immutable historical records: git
+diffs may insert dated amendment blocks, but must not delete or modify
+lines from the baseline copy of an accepted or superseded ADR, and must
+never delete or rename an accepted or superseded ADR file (AGENTS.md Rule
+7). The sole exception is a supersession: the accepted-status header line
+may transition in place to ``> Status: **Superseded by ADR-NNNN**``.
 
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
@@ -55,6 +55,12 @@ def is_accepted(text: str) -> bool:
     """Return True when *text* declares ADR status Accepted in its header."""
     header = "\n".join(text.splitlines()[:_HEADER_LINE_LIMIT])
     return _ACCEPTED_STATUS.search(header) is not None
+
+
+def is_superseded(text: str) -> bool:
+    """Return True when *text* declares ADR status Superseded in its header."""
+    header = "\n".join(text.splitlines()[:_HEADER_LINE_LIMIT])
+    return _SUPERSEDED_STATUS.search(header) is not None
 
 
 def _is_authorized_status_supersession(
@@ -571,7 +577,7 @@ def check(
             continue
         if hist_text is None:
             continue
-        if not is_accepted(hist_text):
+        if not (is_accepted(hist_text) or is_superseded(hist_text)):
             continue
 
         try:

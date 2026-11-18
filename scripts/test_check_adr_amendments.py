@@ -26,6 +26,21 @@ Use one file per record.
 Keep diffs small.
 """
 
+_SUPERSEDED_ADR = """# ADR-0001: Example
+
+> Status: **Superseded by ADR-0004** — November 2026
+
+## Decision
+
+Use one file per record.
+
+## Consequences
+
+Keep diffs small.
+
+**[Amended November 2026]** Superseded by ADR-0004.
+"""
+
 _PROPOSED_ADR = """# ADR-0009: Draft
 
 > Status: **Proposed** — November 2026
@@ -211,6 +226,15 @@ class AcceptedStatusTests(unittest.TestCase):
         """Proposed ADRs are not locked by the immutability check."""
         self.assertFalse(checker.is_accepted(_PROPOSED_ADR))
 
+    def test_superseded_header_is_detected(self) -> None:
+        """Detect the Superseded status line used by superseded ADRs."""
+        self.assertTrue(checker.is_superseded(_SUPERSEDED_ADR))
+        self.assertFalse(checker.is_accepted(_SUPERSEDED_ADR))
+
+    def test_accepted_header_is_not_superseded(self) -> None:
+        """Accepted ADRs are not detected as superseded."""
+        self.assertFalse(checker.is_superseded(_ACCEPTED_ADR))
+
     def test_status_outside_header_is_ignored(self) -> None:
         """A quoted Accepted status below the header does not lock the file."""
         body = "\n".join(
@@ -364,6 +388,57 @@ class GitRepoCheckTests(unittest.TestCase):
         self.assertEqual(1, rc)
         self.assertIn("rewritten or replaced in place", output)
         self.assertIn("Use one file per record.", output)
+
+    def test_superseded_adr_on_baseline_cannot_be_deleted(self) -> None:
+        """A superseded ADR on baseline cannot be deleted."""
+        path = self.root / self.adr_rel
+        path.write_text(_SUPERSEDED_ADR, encoding="utf-8")
+        _git(self.root, "commit", "-a", "--no-gpg-sign", "-m", "supersede ADR-0001")
+        path.unlink()
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("was deleted", output)
+
+    def test_superseded_adr_on_baseline_cannot_be_renamed(self) -> None:
+        """A superseded ADR on baseline cannot be renamed."""
+        path = self.root / self.adr_rel
+        path.write_text(_SUPERSEDED_ADR, encoding="utf-8")
+        _git(self.root, "commit", "-a", "--no-gpg-sign", "-m", "supersede ADR-0001")
+        new_rel = Path("docs") / "decisions" / "0001-renamed.md"
+        _git(self.root, "mv", str(self.adr_rel), str(new_rel))
+        rc, output = self._check(self.adr_rel.as_posix(), new_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn(f"was deleted (renamed to {new_rel.as_posix()})", output)
+
+    def test_superseded_adr_on_baseline_cannot_be_rewritten(self) -> None:
+        """In-place rewriting of superseded ADR decision prose fails."""
+        path = self.root / self.adr_rel
+        path.write_text(_SUPERSEDED_ADR, encoding="utf-8")
+        _git(self.root, "commit", "-a", "--no-gpg-sign", "-m", "supersede ADR-0001")
+        path.write_text(
+            _SUPERSEDED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
+        self.assertIn("Use one file per record.", output)
+
+    def test_superseded_adr_on_baseline_amendment_passes(self) -> None:
+        """Appending a dated amendment block to a superseded ADR passes."""
+        path = self.root / self.adr_rel
+        path.write_text(_SUPERSEDED_ADR, encoding="utf-8")
+        _git(self.root, "commit", "-a", "--no-gpg-sign", "-m", "supersede ADR-0001")
+        path.write_text(
+            _SUPERSEDED_ADR + "\n**[Amended December 2026]** Follow-up amendment.\n",
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
 
     def test_proposed_adr_may_be_rewritten(self) -> None:
         """Proposed ADRs are still mutable, including becoming Accepted."""
