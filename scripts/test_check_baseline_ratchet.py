@@ -173,14 +173,27 @@ class CompareCeilingsTests(unittest.TestCase):
         self.assertIn("docs/vision.md", diagnostics[0])
         self.assertIn("increased from 2000 to 2050", diagnostics[0])
 
-    def test_equivalent_paths_with_equal_ceilings_are_accepted(self) -> None:
+    def test_trailing_separator_matches_canonical_base_path(self) -> None:
+        """A trailing path separator on the head path must still ratchet."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(_ceiling(file_path="AGENTS.md/", value=4100)),
+            _baseline(_ceiling(file_path="AGENTS.md", value=4000)),
+        )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("AGENTS.md", diagnostics[0])
+        self.assertIn("increased from 4000 to 4100", diagnostics[0])
+
+    def test_equivalent_paths_ratchet_against_canonical_base_path(self) -> None:
         """Normalization is applied to both head and base before matching."""
         diagnostics = checker.compare_ceilings(
-            _baseline(_ceiling(file_path="./docs//vision.md", value=2050)),
+            _baseline(_ceiling(file_path="./docs//vision.md", value=2100)),
             _baseline(_ceiling(file_path="docs/vision.md", value=2050)),
         )
 
-        self.assertEqual([], diagnostics)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("docs/vision.md", diagnostics[0])
+        self.assertIn("increased from 2050 to 2100", diagnostics[0])
 
 
 class ParseBaselineTests(unittest.TestCase):
@@ -233,6 +246,43 @@ class ParseBaselineTests(unittest.TestCase):
             checker.ceiling_values(_baseline(entry), "working tree")
 
         self.assertIn("missing file_path", str(raised.exception))
+
+    def test_whitespace_file_path_is_rejected(self) -> None:
+        """Reject a ceiling entry whose file_path is only whitespace."""
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(_baseline(_ceiling(file_path="   ")), "working tree")
+
+        self.assertIn("missing file_path", str(raised.exception))
+
+    def test_absolute_file_path_is_rejected(self) -> None:
+        """Reject a ceiling entry whose file_path is absolute."""
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(
+                _baseline(_ceiling(file_path="/AGENTS.md")), "working tree"
+            )
+
+        self.assertIn("invalid file_path", str(raised.exception))
+
+    def test_parent_directory_file_path_is_rejected(self) -> None:
+        """Reject a ceiling entry whose file_path contains parent directory segments."""
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(
+                _baseline(_ceiling(file_path="../AGENTS.md")), "working tree"
+            )
+
+        self.assertIn("invalid file_path", str(raised.exception))
+
+    def test_invalid_file_path_sanitizes_file_path(self) -> None:
+        """Strip control bytes and :: from file_path in invalid file_path error messages."""
+        malicious_path = "/AGENTS.md\n::warning::payload"
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(
+                _baseline(_ceiling(file_path=malicious_path)), "working tree"
+            )
+        msg = str(raised.exception)
+        self.assertNotIn("\n", msg)
+        self.assertNotIn("::", msg)
+        self.assertIn("invalid file_path", msg)
 
     def test_non_integer_ceiling_sanitizes_file_path(self) -> None:
         """Strip control bytes and :: from file_path in non-integer error messages."""
