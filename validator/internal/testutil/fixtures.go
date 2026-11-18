@@ -101,9 +101,11 @@ func ValidInterfaceYAML(opts ...Option) string {
 
 // WithID sets the requirement id and, unless WithPath was already
 // applied, the canonical spec/requirements/<id>.yaml path.
-// When applied to an interface fixture, WithID does not rewrite the path.
 func WithID(id string) Option {
 	return func(f *fixture) {
+		if f.isInterface {
+			panic("testutil: WithID is a requirement option; do not pass it to ValidInterfaceDocument")
+		}
 		f.req.ID = id
 		if !f.pathSet && !f.isInterface {
 			f.path = path.Join(layout.RequirementsDir, id+".yaml")
@@ -122,6 +124,9 @@ func WithPath(relPath string) Option {
 // WithType sets the requirement EARS type.
 func WithType(earsType string) Option {
 	return func(f *fixture) {
+		if f.isInterface {
+			panic("testutil: WithType is a requirement option; do not pass it to ValidInterfaceDocument")
+		}
 		f.req.Type = earsType
 	}
 }
@@ -129,6 +134,9 @@ func WithType(earsType string) Option {
 // WithText sets the requirement text.
 func WithText(text string) Option {
 	return func(f *fixture) {
+		if f.isInterface {
+			panic("testutil: WithText is a requirement option; do not pass it to ValidInterfaceDocument")
+		}
 		f.req.Text = text
 	}
 }
@@ -136,6 +144,9 @@ func WithText(text string) Option {
 // WithStatus sets the requirement status.
 func WithStatus(status string) Option {
 	return func(f *fixture) {
+		if f.isInterface {
+			panic("testutil: WithStatus is a requirement option; do not pass it to ValidInterfaceDocument")
+		}
 		f.req.Status = status
 	}
 }
@@ -143,6 +154,9 @@ func WithStatus(status string) Option {
 // WithAppliesTo replaces applies_to.
 func WithAppliesTo(applies records.Applicability) Option {
 	return func(f *fixture) {
+		if f.isInterface {
+			panic("testutil: WithAppliesTo is a requirement option; do not pass it to ValidInterfaceDocument")
+		}
 		f.req.AppliesTo = records.Applicability{
 			Interfaces: copyStrings(applies.Interfaces),
 			Scopes:     copyStrings(applies.Scopes),
@@ -154,6 +168,9 @@ func WithAppliesTo(applies records.Applicability) Option {
 // a non-nil empty slice, which remains schema-valid.
 func WithRelationships(rels ...records.Relationship) Option {
 	return func(f *fixture) {
+		if f.isInterface {
+			panic("testutil: WithRelationships is a requirement option; do not pass it to ValidInterfaceDocument")
+		}
 		f.req.Relationships = copyRelationships(rels)
 	}
 }
@@ -161,15 +178,20 @@ func WithRelationships(rels ...records.Relationship) Option {
 // WithoutFields leaves Fields nil so schema presence checks are skipped.
 func WithoutFields() Option {
 	return func(f *fixture) {
+		if f.isInterface {
+			panic("testutil: WithoutFields is a requirement option; do not pass it to ValidInterfaceDocument")
+		}
 		f.nilFields = true
 	}
 }
 
 // WithName sets the interface name and, unless WithPath was already
 // applied, the canonical spec/interfaces/<name>.yaml path.
-// When applied to a requirement fixture, WithName does not rewrite the path.
 func WithName(name string) Option {
 	return func(f *fixture) {
+		if !f.isInterface {
+			panic("testutil: WithName is an interface option; do not pass it to ValidRequirementDocument")
+		}
 		f.iface.Name = name
 		if !f.pathSet && f.isInterface {
 			f.path = path.Join(layout.InterfacesDir, name+".yaml")
@@ -180,6 +202,9 @@ func WithName(name string) Option {
 // WithKind sets the interface kind.
 func WithKind(kind string) Option {
 	return func(f *fixture) {
+		if !f.isInterface {
+			panic("testutil: WithKind is an interface option; do not pass it to ValidRequirementDocument")
+		}
 		f.iface.Kind = kind
 	}
 }
@@ -187,6 +212,9 @@ func WithKind(kind string) Option {
 // WithDescription sets the interface description.
 func WithDescription(description string) Option {
 	return func(f *fixture) {
+		if !f.isInterface {
+			panic("testutil: WithDescription is an interface option; do not pass it to ValidRequirementDocument")
+		}
 		f.iface.Description = description
 	}
 }
@@ -221,10 +249,13 @@ func newInterfaceFixture() *fixture {
 
 func requirementFields(req records.Requirement) map[string]bool {
 	fields := map[string]bool{
-		"id":                    true,
-		"type":                  true,
-		"text":                  true,
-		"applies_to":            true,
+		"id":         true,
+		"type":       true,
+		"text":       true,
+		"applies_to": true,
+		// The presence map records the keys a canonical document would carry,
+		// including empty selector lists, so synthetic fixtures match a real
+		// YAML parse.
 		"applies_to.interfaces": true,
 		"applies_to.scopes":     true,
 		"relationships":         true,
