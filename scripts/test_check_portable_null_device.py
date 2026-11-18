@@ -247,7 +247,7 @@ class CheckTests(unittest.TestCase):
         """Pass a file using portability:allow-null-device suppression."""
         path = self.write_go(
             "suppressed.go",
-            '// portability:allow-null-device\n'
+            "// portability:allow-null-device\n"
             'env = append(env, "GIT_CONFIG_GLOBAL=/dev/null")\n',
         )
         self.assertEqual(0, checker.check([path]))
@@ -268,9 +268,7 @@ class CheckTests(unittest.TestCase):
         """Pass a file that only mentions /dev/null in comments."""
         path = self.write_go(
             "comments.go",
-            '// Note: /dev/null is used on Unix\n'
-            '/* e.g. "/dev/null" */\n'
-            'var x = 1\n',
+            '// Note: /dev/null is used on Unix\n/* e.g. "/dev/null" */\nvar x = 1\n',
         )
         self.assertEqual(0, checker.check([path]))
 

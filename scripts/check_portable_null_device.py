@@ -31,14 +31,11 @@ from __future__ import annotations
 
 import argparse
 import re
+import string
 import sys
 
-_PATH_CHARS_BEFORE = (
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-"
-)
-_PATH_CHARS_AFTER = (
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_/-"
-)
+_PATH_CHARS_BEFORE = set(string.ascii_letters + string.digits + "_./-")
+_PATH_CHARS_AFTER = set(string.ascii_letters + string.digits + "_/-")
 
 _LITERAL_PATTERN = (
     r"(?:"
@@ -51,9 +48,7 @@ _NULL_DEVICE_LITERAL = re.compile(_LITERAL_PATTERN)
 _COMPARISON_EXEMPTION = re.compile(
     rf"(?:(==|!=)\s*{_LITERAL_PATTERN}|{_LITERAL_PATTERN}\s*(==|!=))"
 )
-_CASE_EXEMPTION = re.compile(
-    rf"\bcase\s+[^:]*?({_LITERAL_PATTERN})[^:]*:"
-)
+_CASE_EXEMPTION = re.compile(rf"\bcase\s+[^:]*?({_LITERAL_PATTERN})[^:]*:")
 _PRAGMA_PATTERN = re.compile(r"(?://|/\*)\s*portability:allow-null-device")
 
 
@@ -211,10 +206,7 @@ def find_violations(text: str) -> list[tuple[int, str]]:
             if null_idx == -1:
                 break
             is_boundary = True
-            if (
-                null_idx > 0
-                and clean_text[null_idx - 1] in _PATH_CHARS_BEFORE
-            ):
+            if null_idx > 0 and clean_text[null_idx - 1] in _PATH_CHARS_BEFORE:
                 is_boundary = False
             after_idx = null_idx + len("/dev/null")
             if (
