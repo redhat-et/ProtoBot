@@ -7,8 +7,9 @@ records under ``docs/decisions/`` are immutable historical records: git
 diffs may insert dated amendment blocks, but must not delete or modify
 lines from the baseline copy of an accepted or superseded ADR, and must
 never delete or rename an accepted or superseded ADR file (AGENTS.md Rule
-7). The sole exception is a supersession: the accepted-status header line
-may transition in place to ``> Status: **Superseded by ADR-NNNN**``.
+7). The sole exception is a supersession: an accepted record's status
+header line may transition in place to ``> Status: **Superseded by
+ADR-NNNN**``.
 
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
@@ -30,12 +31,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _DECISIONS_DIR = Path("docs") / "decisions"
 _ACCEPTED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Accepted\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
+    r"^> Status:\s*\*\*Accepted\*\*",
     re.MULTILINE,
 )
 _SUPERSEDED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
+    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*",
     re.MULTILINE,
+)
+_AUTHORIZED_ACCEPTED_STATUS = re.compile(
+    r"^> Status:\s*\*\*Accepted\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
+)
+_AUTHORIZED_SUPERSEDED_STATUS = re.compile(
+    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
 )
 _HEADER_LINE_LIMIT = 30
 _MAX_REPORTED_LINES = 10
@@ -53,13 +60,13 @@ def is_adr_markdown(rel_path: Path) -> bool:
 
 def is_accepted(text: str) -> bool:
     """Return True when *text* declares ADR status Accepted in its header."""
-    header = "\n".join(text.splitlines()[:_HEADER_LINE_LIMIT])
+    header = "\n".join(line.rstrip() for line in text.splitlines()[:_HEADER_LINE_LIMIT])
     return _ACCEPTED_STATUS.search(header) is not None
 
 
 def is_superseded(text: str) -> bool:
     """Return True when *text* declares ADR status Superseded in its header."""
-    header = "\n".join(text.splitlines()[:_HEADER_LINE_LIMIT])
+    header = "\n".join(line.rstrip() for line in text.splitlines()[:_HEADER_LINE_LIMIT])
     return _SUPERSEDED_STATUS.search(header) is not None
 
 
@@ -71,7 +78,7 @@ def _is_authorized_status_supersession(
     """Return True when a replace opcode is an authorized status supersession.
 
     AGENTS.md Rule 7 allows exactly one accepted-decision-text edit: an
-    in-place transition of the accepted-status header line to
+    in-place transition of an accepted record's status line to
     ``> Status: **Superseded by ADR-NNNN**``. This matches only a
     single-line replace of that header line, within the header window,
     with a single-line superseded-status replacement — it does not
@@ -81,8 +88,10 @@ def _is_authorized_status_supersession(
         return False
     if len(old_segment) != 1 or len(new_segment) != 1:
         return False
-    return bool(_ACCEPTED_STATUS.match(old_segment[0])) and bool(
-        _SUPERSEDED_STATUS.match(new_segment[0])
+    old_line = old_segment[0].rstrip()
+    new_line = new_segment[0].rstrip()
+    return bool(_AUTHORIZED_ACCEPTED_STATUS.match(old_line)) and bool(
+        _AUTHORIZED_SUPERSEDED_STATUS.match(new_line)
     )
 
 

@@ -221,15 +221,17 @@ must follow these rules:
 
 7. **Preserve accepted architecture decision records.**
    Never rewrite, replace, delete, or rename an accepted or
-   superseded architecture decision record in place, except for a
-   status-line transition to `> Status: **Superseded by ADR-NNNN**`.
-   Amendments and supersessions append a dated amendment block
+   superseded architecture decision record in place, except to
+   supersede an accepted record via
+   `> Status: **Superseded by ADR-NNNN**`. Amendments and
+   supersessions append a dated amendment block
    (`**[Amended Month Year]**`) citing change, rationale, and
    updated architecture documents. Review agents must verify an
    accepted or superseded architecture decision record is never
-   rewritten, replaced, deleted, or renamed in place, except for a
-   status-line transition to `> Status: **Superseded by ADR-NNNN**`,
-   and amendments and supersessions append a dated amendment block
+   rewritten, replaced, deleted, or renamed in place, except to
+   supersede an accepted record via
+   `> Status: **Superseded by ADR-NNNN**`, and amendments and
+   supersessions append a dated amendment block
    (`**[Amended Month Year]**`) citing change, rationale, and
    updated architecture documents.
 

@@ -216,6 +216,50 @@ class HistoricalMutationTests(unittest.TestCase):
         mutations = checker.historical_mutations(old, new)
         self.assertEqual([(5, 5, "Use one file per record.")], mutations)
 
+    def test_authorized_status_supersession_with_trailing_whitespace_is_allowed(
+        self,
+    ) -> None:
+        """An authorized status supersession with trailing whitespace or CRLF is allowed."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted**   \r",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026  \r",
+            "",
+            "Body.",
+            "",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_superseded_to_superseded_transition_is_not_authorized(self) -> None:
+        """Re-pointing an already-superseded ADR status line is not authorized."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0002** \u2014 November 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0003** \u2014 December 2026",
+            "",
+            "Body.",
+        ]
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 3, "> Status: **Superseded by ADR-0002** \u2014 November 2026")],
+            mutations,
+        )
+
 
 class AcceptedStatusTests(unittest.TestCase):
     def test_accepted_header_is_detected(self) -> None:
@@ -247,6 +291,53 @@ class AcceptedStatusTests(unittest.TestCase):
             + ["> Status: **Accepted** — quoted example"]
         )
         self.assertFalse(checker.is_accepted(body))
+
+    def test_accepted_header_with_trailing_whitespace_is_detected(self) -> None:
+        """Trailing whitespace on the status line does not prevent detection."""
+        adr = "# ADR-0001: Example\n\n> Status: **Accepted**   \n\n## Decision\n"
+        self.assertTrue(checker.is_accepted(adr))
+
+    def test_accepted_header_with_crlf_is_detected(self) -> None:
+        """CRLF line endings on the status line do not prevent detection."""
+        adr = "# ADR-0001: Example\r\n\r\n> Status: **Accepted**\r\n\r\n## Decision\r\n"
+        self.assertTrue(checker.is_accepted(adr))
+
+    def test_accepted_header_with_additional_annotation_is_detected(self) -> None:
+        """Additional annotations on the status line do not prevent detection."""
+        adr = (
+            "# ADR-0001: Example\n\n"
+            "> Status: **Accepted** (supersedes ADR-0000)\n\n"
+            "## Decision\n"
+        )
+        self.assertTrue(checker.is_accepted(adr))
+
+    def test_superseded_header_with_trailing_whitespace_is_detected(self) -> None:
+        """Trailing whitespace on superseded status line does not prevent detection."""
+        adr = (
+            "# ADR-0001: Example\n\n"
+            "> Status: **Superseded by ADR-0004**   \n\n"
+            "## Decision\n"
+        )
+        self.assertTrue(checker.is_superseded(adr))
+        self.assertFalse(checker.is_accepted(adr))
+
+    def test_superseded_header_with_crlf_is_detected(self) -> None:
+        """CRLF line endings on superseded status line do not prevent detection."""
+        adr = (
+            "# ADR-0001: Example\r\n\r\n"
+            "> Status: **Superseded by ADR-0004**\r\n\r\n"
+            "## Decision\r\n"
+        )
+        self.assertTrue(checker.is_superseded(adr))
+
+    def test_superseded_header_with_additional_annotation_is_detected(self) -> None:
+        """Additional annotations on superseded status line do not prevent detection."""
+        adr = (
+            "# ADR-0001: Example\n\n"
+            "> Status: **Superseded by ADR-0004** (see ADR-0004)\n\n"
+            "## Decision\n"
+        )
+        self.assertTrue(checker.is_superseded(adr))
 
 
 class PathFilterTests(unittest.TestCase):
@@ -439,6 +530,53 @@ class GitRepoCheckTests(unittest.TestCase):
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(0, rc)
         self.assertEqual("", output)
+
+    def test_accepted_adr_with_format_drift_on_baseline_is_protected(self) -> None:
+        """An accepted ADR with format drift on baseline is not skipped by check()."""
+        path = self.root / self.adr_rel
+        drifted_adr = _ACCEPTED_ADR.replace(
+            "> Status: **Accepted** \u2014 September 2026",
+            "> Status: **Accepted** (amended)   ",
+        )
+        path.write_text(drifted_adr, encoding="utf-8")
+        _git(
+            self.root,
+            "commit",
+            "-a",
+            "--no-gpg-sign",
+            "-m",
+            "add drifted accepted ADR",
+        )
+        path.write_text(
+            drifted_adr.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
+        self.assertIn("Use one file per record.", output)
+
+    def test_superseded_to_superseded_transition_fails_check(self) -> None:
+        """Attempting to re-point an already superseded ADR fails check()."""
+        path = self.root / self.adr_rel
+        path.write_text(_SUPERSEDED_ADR, encoding="utf-8")
+        _git(self.root, "commit", "-a", "--no-gpg-sign", "-m", "supersede ADR-0001")
+        path.write_text(
+            _SUPERSEDED_ADR.replace(
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+                "> Status: **Superseded by ADR-0005** \u2014 December 2026",
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
+        self.assertIn(
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026", output
+        )
 
     def test_proposed_adr_may_be_rewritten(self) -> None:
         """Proposed ADRs are still mutable, including becoming Accepted."""
