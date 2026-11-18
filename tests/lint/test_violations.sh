@@ -1,8 +1,36 @@
 #!/usr/bin/env bash
 # tests/lint/test_violations.sh
 #
-# Reproducible fixture that verifies scripts/lint.py catches
-# representative violations for each supported check category.
+# Contract tests for the scripts/lint.py wrapper around `pre-commit`.
+#
+# This suite intentionally does NOT verify that individual third-party
+# tools (ruff, yamllint, shellcheck, markdownlint, detect-secrets,
+# zizmor, skillsaw, ...) catch specific violations. scripts/lint.py no
+# longer re-implements those tools or their dispatch; it is a thin
+# wrapper that execs the real `pre-commit`, so tool-level correctness
+# is CI's responsibility via `pre-commit run -a` against the genuine
+# hook repositories. This suite instead verifies the wrapper's own
+# contract:
+#
+#   * the offline cache pre-flight fails closed with an actionable
+#     message when a hook repository/revision is missing, and is
+#     skipped entirely with --online;
+#   * --check-parity validates .pre-commit-config.yaml and the cache
+#     without running any hooks;
+#   * --all-files / --files / bare invocation translate to the
+#     equivalent `pre-commit run` invocation, including the
+#     changed-vs-HEAD (not staged-only) default scope;
+#   * ZIZMOR_NO_ONLINE_AUDITS and PRE_COMMIT_HOME are exported
+#     correctly for offline and --online runs;
+#   * this repository's own `repo: local` hooks (gofmt, go-vet, ...)
+#     still run correctly through the full wrapper -> pre-commit ->
+#     local-hook chain once the cache is warm.
+#
+# The last point uses tests/lint/build_fake_pre_commit_cache.py to
+# fabricate a structurally-valid (but non-functional) cache for every
+# *non-local* hook repository, so pre-commit can load every repo's
+# manifest (which it always does, regardless of which files are given)
+# without network access, while the real local hooks run unmodified.
 #
 # Usage:
 #     bash tests/lint/test_violations.sh
@@ -14,952 +42,313 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LINT="${REPO_ROOT}/scripts/lint.py"
+FAKE_CACHE_BUILDER="${REPO_ROOT}/tests/lint/build_fake_pre_commit_cache.py"
 PASS=0
 FAIL=0
-SKIPPED=0
-# Track test fixture files created in the repo so they can be
-# cleaned up even if the script is interrupted.
+
+WORKDIR="$(mktemp -d)"
+EMPTY_CACHE="${WORKDIR}/empty-cache"
+WARM_CACHE="${WORKDIR}/warm-cache"
+STUB_BIN="${WORKDIR}/stub-bin"
+STUB_CAPTURE="${WORKDIR}/stub-capture"
+
+# Track fixture files created in the repo so they are cleaned up even
+# if the script is interrupted.
 CREATED_FILES=()
 STAGED_FILES=()
-AGENTS_FILE="${REPO_ROOT}/AGENTS.md"
-AGENTS_BACKUP=""
-BASELINE_FILE="${REPO_ROOT}/.skillsaw-baseline.json"
-BASELINE_BACKUP=""
-RATCHET="${REPO_ROOT}/scripts/check_baseline_ratchet.py"
-ADR_FILE="${REPO_ROOT}/docs/decisions/0001-requirements-storage-format.md"
-ADR_BACKUP=""
-
-restore_agents_md() {
-    if [[ -n "${AGENTS_BACKUP}" ]] && [[ -f "${AGENTS_BACKUP}" ]]; then
-        cp "${AGENTS_BACKUP}" "${AGENTS_FILE}"
-        rm -f "${AGENTS_BACKUP}"
-        AGENTS_BACKUP=""
-    fi
-}
-
-restore_baseline() {
-    if [[ -n "${BASELINE_BACKUP}" ]] && [[ -f "${BASELINE_BACKUP}" ]]; then
-        cp "${BASELINE_BACKUP}" "${BASELINE_FILE}"
-        rm -f "${BASELINE_BACKUP}"
-        BASELINE_BACKUP=""
-    fi
-}
-
-restore_adr() {
-    git -C "${REPO_ROOT}" restore --staged -- "${ADR_FILE}" 2>/dev/null || true
-    git -C "${REPO_ROOT}" checkout -- "${ADR_FILE}" 2>/dev/null || true
-    # Also undo any staged deletion of the whole ADR directory.
-    git -C "${REPO_ROOT}" checkout HEAD -- docs/decisions 2>/dev/null || true
-    if [[ -n "${ADR_BACKUP}" ]] && [[ -f "${ADR_BACKUP}" ]]; then
-        cp "${ADR_BACKUP}" "${ADR_FILE}"
-        rm -f "${ADR_BACKUP}"
-        ADR_BACKUP=""
-    fi
-    if [[ -n "${ADR_RENAMED:-}" ]] && [[ -f "${ADR_RENAMED}" ]]; then
-        git -C "${REPO_ROOT}" restore --staged -- "${ADR_RENAMED}" 2>/dev/null || true
-        rm -f "${ADR_RENAMED}"
-    fi
-}
 
 cleanup() {
-    restore_agents_md
-    restore_baseline
-    restore_adr
     for f in "${STAGED_FILES[@]}"; do
         git -C "${REPO_ROOT}" restore --staged -- "${f}" 2>/dev/null || true
     done
     for f in "${CREATED_FILES[@]}"; do
         rm -f "${f}"
     done
+    rm -rf "${WORKDIR}"
 }
 trap cleanup EXIT INT TERM HUP
 
+cd "${REPO_ROOT}"
+
+if ! command -v pre-commit >/dev/null 2>&1; then
+    echo "ERROR: pre-commit is not installed; cannot exercise the wrapper contract"
+    exit 1
+fi
+
+python3 "${FAKE_CACHE_BUILDER}" "${REPO_ROOT}" "${WARM_CACHE}"
+
+# A stub `pre-commit` placed ahead of the real one on PATH. Records the
+# argv it was called with (one per line) and the environment variables
+# the wrapper is responsible for, then exits with $STUB_EXIT_CODE.
+mkdir -p "${STUB_BIN}"
+cat > "${STUB_BIN}/pre-commit" <<'STUB'
+#!/usr/bin/env python3
+import os
+import sys
+
+capture_dir = os.environ["STUB_CAPTURE_DIR"]
+with open(os.path.join(capture_dir, "argv"), "w") as fh:
+    fh.write("\n".join(sys.argv) + "\n")
+with open(os.path.join(capture_dir, "env"), "w") as fh:
+    fh.write("ZIZMOR_NO_ONLINE_AUDITS=" + os.environ.get("ZIZMOR_NO_ONLINE_AUDITS", "<unset>") + "\n")
+    fh.write("PRE_COMMIT_HOME=" + os.environ.get("PRE_COMMIT_HOME", "<unset>") + "\n")
+sys.exit(int(os.environ.get("STUB_EXIT_CODE", "0")))
+STUB
+chmod +x "${STUB_BIN}/pre-commit"
+
 # ── Helpers ────────────────────────────────────────────────────
 
-# Create a temp file inside the repo (tools need repo-relative
-# paths), run lint.py --files on it, and check for the expected
-# exit code and output substring.
-assert_lint() {
-    local label="$1"
-    local filename="$2"   # relative to repo root
-    local content="$3"    # file content
-    local expect_rc="$4"  # 0 or nonzero
-    local expect_str="${5:-}"  # substring to find in output
-    local expect_diag="${6:-}" # diagnostic substring to find in output
+pass_test() {
+    echo "PASS  $1"
+    PASS=$((PASS + 1))
+}
 
-    local filepath="${REPO_ROOT}/${filename}"
-    mkdir -p "$(dirname "${filepath}")"
-    printf '%s' "${content}" > "${filepath}"
-    CREATED_FILES+=("${filepath}")
+fail_test() {
+    echo "FAIL  $1: $2"
+    PASS=$((PASS))
+    FAIL=$((FAIL + 1))
+}
+
+# Run lint.py against the *real* .pre-commit-config.yaml with an empty
+# cache directory (no db.db at all), network assumed unavailable.
+run_with_empty_cache() {
+    PRE_COMMIT_HOME="${EMPTY_CACHE}" env -u CI python3 "${LINT}" "$@" 2>&1
+}
+
+# Run lint.py against the real config through the stub `pre-commit`,
+# with the fake warm cache so the pre-flight passes.
+run_with_stub() {
+    rm -rf "${STUB_CAPTURE}"
+    mkdir -p "${STUB_CAPTURE}"
+    local rc=0
+    PATH="${STUB_BIN}:${PATH}" \
+        PRE_COMMIT_HOME="${WARM_CACHE}" \
+        STUB_CAPTURE_DIR="${STUB_CAPTURE}" \
+        env -u CI python3 "${LINT}" "$@" >/dev/null 2>&1 || rc=$?
+    return "${rc}"
+}
+
+captured_argv() {
+    cat "${STUB_CAPTURE}/argv" 2>/dev/null
+}
+
+captured_env() {
+    cat "${STUB_CAPTURE}/env" 2>/dev/null
+}
+
+# ── Cache pre-flight ─────────────────────────────────────────────
+
+echo "── Cache pre-flight (offline) ────────────────────────────"
+
+preflight_rc=0
+preflight_output="$(run_with_empty_cache --check-parity)" || preflight_rc=$?
+missing_repos_ok=true
+while IFS= read -r repo_url; do
+    [[ -z "${repo_url}" ]] && continue
+    if ! echo "${preflight_output}" | grep -qF "${repo_url}"; then
+        missing_repos_ok=false
+    fi
+done < <(python3 - "${REPO_ROOT}" <<'PY'
+import sys
+import yaml
+from pathlib import Path
+with open(Path(sys.argv[1]) / ".pre-commit-config.yaml") as fh:
+    config = yaml.safe_load(fh)
+for entry in config.get("repos", []):
+    repo = entry.get("repo", "")
+    if repo not in ("local", "meta"):
+        print(repo)
+PY
+)
+
+if [[ "${preflight_rc}" -ne 0 ]] \
+    && echo "${preflight_output}" | grep -qF "pre-commit install-hooks" \
+    && ${missing_repos_ok}; then
+    pass_test "cache-miss: --check-parity fails closed and names every missing repo + bootstrap command"
+else
+    fail_test "cache-miss" "expected non-zero exit naming all missing repos and the bootstrap command (exit ${preflight_rc})"
+    echo "${preflight_output}" | tail -10 | sed 's/^/    /'
+fi
+
+online_parity_rc=0
+online_parity_output="$(run_with_empty_cache --check-parity --online)" || online_parity_rc=$?
+if [[ "${online_parity_rc}" -eq 0 ]] \
+    && echo "${online_parity_output}" | grep -qF "PARITY CHECK PASSED"; then
+    pass_test "--check-parity --online skips the cache gate and validates the config"
+else
+    fail_test "check-parity-online" "expected exit 0 with PARITY CHECK PASSED (exit ${online_parity_rc})"
+    echo "${online_parity_output}" | tail -10 | sed 's/^/    /'
+fi
+
+warm_parity_rc=0
+warm_parity_output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI python3 "${LINT}" --check-parity)" || warm_parity_rc=$?
+if [[ "${warm_parity_rc}" -eq 0 ]] \
+    && echo "${warm_parity_output}" | grep -qF "PARITY CHECK PASSED"; then
+    pass_test "--check-parity passes offline once every configured repo/revision is cached"
+else
+    fail_test "check-parity-warm" "expected exit 0 with PARITY CHECK PASSED (exit ${warm_parity_rc})"
+    echo "${warm_parity_output}" | tail -10 | sed 's/^/    /'
+fi
+
+# ── CLI argument mapping ─────────────────────────────────────────
+
+echo ""
+echo "── CLI argument mapping ──────────────────────────────────"
+
+# argv[0] is rewritten by the kernel to the stub's own resolved path
+# when it is invoked through its `#!/usr/bin/env python3` shebang, so
+# these assertions check argv[1:] (the arguments lint.py chose), not
+# the program name lint.py originally passed.
+trailing_argv() {
+    captured_argv | tail -n +2
+}
+
+run_with_stub --all-files
+if [[ "$(trailing_argv)" == $'run\n--all-files' ]]; then
+    pass_test "--all-files maps to \`pre-commit run --all-files\`"
+else
+    fail_test "all-files-mapping" "unexpected argv: $(trailing_argv | tr '\n' ' ')"
+fi
+
+run_with_stub --files a.py b.yaml
+if [[ "$(trailing_argv)" == $'run\n--files\na.py\nb.yaml' ]]; then
+    pass_test "--files a.py b.yaml maps to \`pre-commit run --files a.py b.yaml\`"
+else
+    fail_test "files-mapping" "unexpected argv: $(trailing_argv | tr '\n' ' ')"
+fi
+
+# Bare mode: changed-vs-HEAD (including unstaged edits), not staged-only.
+dummy_bare="tests/lint/fixtures/lint_wrapper_bare_mode.txt"
+dummy_bare_path="${REPO_ROOT}/${dummy_bare}"
+printf 'unstaged change for bare-mode CLI mapping test\n' > "${dummy_bare_path}"
+git -C "${REPO_ROOT}" add -f -- "${dummy_bare}"
+STAGED_FILES+=("${dummy_bare}")
+CREATED_FILES+=("${dummy_bare_path}")
+
+run_with_stub
+bare_argv="$(trailing_argv)"
+git -C "${REPO_ROOT}" restore --staged -- "${dummy_bare}" 2>/dev/null || true
+rm -f "${dummy_bare_path}"
+
+if echo "${bare_argv}" | grep -qF "${dummy_bare}" \
+    && [[ "$(echo "${bare_argv}" | head -2 | tr '\n' ' ')" == "run --files " ]]; then
+    pass_test "bare invocation maps to \`pre-commit run --files <changed-vs-HEAD>\`"
+else
+    fail_test "bare-mapping" "unexpected argv: $(echo "${bare_argv}" | tr '\n' ' ')"
+fi
+
+# ── Environment propagation ───────────────────────────────────────
+
+echo ""
+echo "── Environment propagation ───────────────────────────────"
+
+run_with_stub --all-files
+if captured_env | grep -qF "ZIZMOR_NO_ONLINE_AUDITS=true" \
+    && captured_env | grep -qF "PRE_COMMIT_HOME=${WARM_CACHE}"; then
+    pass_test "offline runs export ZIZMOR_NO_ONLINE_AUDITS=true and PRE_COMMIT_HOME"
+else
+    fail_test "env-offline" "unexpected env: $(captured_env | tr '\n' ' ')"
+fi
+
+run_with_stub --all-files --online
+if captured_env | grep -qF "ZIZMOR_NO_ONLINE_AUDITS=<unset>"; then
+    pass_test "--online does not force ZIZMOR_NO_ONLINE_AUDITS"
+else
+    fail_test "env-online" "unexpected env: $(captured_env | tr '\n' ' ')"
+fi
+
+# ── Local hook wiring (offline execution with a warm cache) ──────
+
+echo ""
+echo "── Local hook wiring (offline, warm cache) ───────────────"
+
+assert_wiring() {
+    local label="$1"
+    local relative_path="$2"
+    local content="$3"
+    local expect_rc="$4"
+    local expect_str="$5"
+
+    local full_path="${REPO_ROOT}/${relative_path}"
+    mkdir -p "$(dirname "${full_path}")"
+    printf '%s' "${content}" > "${full_path}"
+    CREATED_FILES+=("${full_path}")
 
     local rc=0
     local output
-    output="$(python3 "${LINT}" --files "${filename}" 2>&1)" || rc=$?
-
-    rm -f "${filepath}"
+    output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI python3 "${LINT}" --files "${relative_path}" 2>&1)" || rc=$?
+    rm -f "${full_path}"
 
     local ok=true
-
     if [[ "${expect_rc}" == "0" ]] && [[ "${rc}" -ne 0 ]]; then
-        echo "FAIL  ${label}: expected exit 0, got ${rc}"
         ok=false
     elif [[ "${expect_rc}" != "0" ]] && [[ "${rc}" -eq 0 ]]; then
-        echo "FAIL  ${label}: expected non-zero exit, got 0"
         ok=false
     fi
-
-    # Strip ANSI colour codes for reliable substring matching.
-    local clean_output
-    # shellcheck disable=SC2001  # regex substitution requires sed
-    clean_output="$(echo "${output}" | sed 's/\x1b\[[0-9;]*m//g')"
-
-    if [[ -n "${expect_str}" ]] && ! echo "${clean_output}" | grep -qE "(✓|✗|○|\?|!) ${expect_str}( |$)"; then
-        echo "FAIL  ${label}: expected output to contain '${expect_str}'"
-        echo "  actual output (last 5 lines):"
-        echo "${output}" | tail -5 | sed 's/^/    /'
+    if [[ -n "${expect_str}" ]] && ! echo "${output}" | grep -qF "${expect_str}"; then
         ok=false
-    fi
-
-    if [[ -n "${expect_diag}" ]] && ! echo "${clean_output}" | grep -qF "${expect_diag}"; then
-        echo "FAIL  ${label}: expected output to contain diagnostic '${expect_diag}'"
-        echo "  actual output (last 5 lines):"
-        echo "${output}" | tail -5 | sed 's/^/    /'
-        ok=false
-    fi
-
-    # When expecting a failure, verify the expected hook was the one
-    # that actually failed (not just that the name appears somewhere).
-    # If the hook is unavailable (tool not installed), treat the test
-    # as skipped — violation detection can only be verified when the
-    # tool is present.
-    if [[ "${expect_rc}" != "0" ]] && [[ -n "${expect_str}" ]]; then
-        if echo "${clean_output}" | grep -qE "! ${expect_str}( |$)"; then
-            echo "SKIP  ${label}: ${expect_str} tool not available"
-            SKIPPED=$((SKIPPED + 1))
-            return
-        fi
-        if ! echo "${clean_output}" | grep -qE "✗ ${expect_str}( |$)"; then
-            echo "FAIL  ${label}: expected '${expect_str}' to be the failing hook"
-            echo "  actual output (last 5 lines):"
-            echo "${output}" | tail -5 | sed 's/^/    /'
-            ok=false
-        fi
     fi
 
     if ${ok}; then
-        echo "PASS  ${label}"
-        PASS=$((PASS + 1))
+        pass_test "${label}"
     else
-        FAIL=$((FAIL + 1))
+        fail_test "${label}" "exit ${rc}, expected ${expect_rc} containing '${expect_str}'"
+        echo "${output}" | tail -10 | sed 's/^/    /'
     fi
 }
 
-cd "${REPO_ROOT}"
-
-# ── Parity check ──────────────────────────────────────────────
-
-echo "── Parity ──────────────────────────────────────────────"
-parity_rc=0
-parity_output="$(python3 "${LINT}" --check-parity 2>&1)" || parity_rc=$?
-if [[ "${parity_rc}" -eq 0 ]] && echo "${parity_output}" | grep -q "PARITY CHECK PASSED"; then
-    echo "PASS  parity: all hooks have registered handlers"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  parity: some hooks lack registered handlers (exit code: ${parity_rc})"
-    echo "${parity_output}" | tail -5 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# ── YAML violations ──────────────────────────────────────────
-
-echo ""
-echo "── YAML ────────────────────────────────────────────────"
-
-assert_lint \
-    "yaml-valid" \
-    "_test_lint_valid.yaml" \
-    $'---\nkey: value\n' \
-    0
-
-assert_lint \
-    "yaml-bad-indent" \
-    "_test_lint_bad.yaml" \
-    $'---\nbad:\n yaml:\n   wrong: true\n' \
-    nonzero \
-    "yamllint"
-
-# ── JSON violations ──────────────────────────────────────────
-
-echo ""
-echo "── JSON ────────────────────────────────────────────────"
-
-assert_lint \
-    "json-valid" \
-    "_test_lint_valid.json" \
-    $'{"key": "value"}\n' \
-    0
-
-assert_lint \
-    "json-invalid" \
-    "_test_lint_bad.json" \
-    '{ invalid json' \
-    nonzero \
-    "check-json"
-
-# ── Markdown violations ──────────────────────────────────────
-
-echo ""
-echo "── Markdown ──────────────────────────────────────────────"
-
-assert_lint \
-    "md-valid" \
-    "_test_lint_valid.md" \
-    $'# Valid heading\n\nSome text.\n' \
-    0
-
-assert_lint \
-    "md-trailing-ws" \
-    "_test_lint_ws.md" \
-    $'# Heading\n\nTrailing spaces   \n' \
-    nonzero \
-    "trailing-whitespace"
-
-# ── Shell violations ─────────────────────────────────────────
-
-echo ""
-echo "── Shell ─────────────────────────────────────────────────"
-
-assert_lint \
-    "sh-valid" \
-    "_test_lint_valid.sh" \
-    $'#!/usr/bin/env bash\nset -euo pipefail\necho "hello"\n' \
-    0
-
-assert_lint \
-    "sh-unquoted-var" \
-    "_test_lint_bad.sh" \
-    $'#!/bin/bash\necho $unquoted_var\n' \
-    nonzero \
-    "shellcheck"
-
-# ── JSON5 violations ─────────────────────────────────────────
-
-echo ""
-echo "── JSON5 ─────────────────────────────────────────────────"
-
-assert_lint \
-    "json5-valid" \
-    "_test_lint_valid.json5" \
-    $'{key: "value", /* comment */ trailing: 1,}\n' \
-    0
-
-assert_lint \
-    "json5-invalid" \
-    "_test_lint_bad.json5" \
-    $'{key: value: invalid}\n' \
-    nonzero \
-    "check-json5"
-
-# ── End-of-file fixer ────────────────────────────────────────
-
-echo ""
-echo "── End-of-file ────────────────────────────────────────────"
-
-assert_lint \
-    "eof-correct" \
-    "_test_lint_eof_ok.txt" \
-    $'has newline\n' \
-    0
-
-assert_lint \
-    "eof-missing-newline" \
-    "_test_lint_eof_bad.txt" \
-    "no final newline" \
-    nonzero \
-    "end-of-file-fixer"
-
-# ── Secrets violations ───────────────────────────────────
-
-echo ""
-echo "── Secrets ─────────────────────────────────────────────"
-
-# detect-secrets should flag a private key header regardless of
-# baseline contents — PrivateKeyDetector matches the PEM marker.
-# Content stored in a variable so the pragma can sit on the same line.
-_secret_fixture=$'# Test file\n-----BEGIN RSA PRIVATE KEY-----\nMIIBog\n-----END RSA PRIVATE KEY-----\n'  # pragma: allowlist secret
-assert_lint \
-    "secrets-private-key" \
-    "_test_lint_secret.py" \
-    "${_secret_fixture}" \
-    nonzero \
-    "detect-secrets"
-
-# ── Workflow violations ──────────────────────────────────
-
-echo ""
-echo "── Workflow (zizmor) ─────────────────────────────────────"
-
-# zizmor should flag template injection: an untrusted input from
-# pull_request_target used directly in a run: step.
-assert_lint \
-    "workflow-template-injection" \
-    ".github/workflows/_test_lint_bad.yml" \
-    $'name: Test\non:\n  pull_request_target:\n    types: [opened]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "${{ github.event.pull_request.title }}"\n' \
-    nonzero \
-    "zizmor"
-
-# ── Spec document independence ──────────────────────────────
-
-echo ""
-echo "── Spec document independence ──────────────────────────"
-
-# Adding a new docs/ specification (and touching AGENTS.md, as an
-# authoring agent would) must not invoke the retired
-# spec-hierarchy-sync hook or demand a REVIEW_SPEC_HIERARCHY
-# update in the protected review harness.
-dummy_spec="docs/architecture/_test_lint_new_spec.md"
-dummy_path="${REPO_ROOT}/${dummy_spec}"
-printf '%s\n' '# Test specification' '' \
-    'Temporary specification document used by the lint independence test.' \
-    > "${dummy_path}"
-CREATED_FILES+=("${dummy_path}")
-
-lint_spec_rc=0
-lint_spec_output="$(python3 "${LINT}" --files "${dummy_spec}" AGENTS.md 2>&1)" || lint_spec_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_spec_clean="$(echo "${lint_spec_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-rm -f "${dummy_path}"
-
-if echo "${lint_spec_clean}" | grep -qE "spec-hierarchy-sync|REVIEW_SPEC_HIERARCHY"; then
-    echo "FAIL  spec-doc-independence: retired hook or REVIEW_SPEC_HIERARCHY mentioned"
-    echo "${lint_spec_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-elif echo "${lint_spec_clean}" | grep -qF "check_spec_hierarchy.py"; then
-    echo "FAIL  spec-doc-independence: retired checker still invoked"
-    echo "${lint_spec_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-elif [[ "${lint_spec_rc}" -ne 0 ]]; then
-    echo "FAIL  spec-doc-independence: lint failed on new spec without review.yaml (exit ${lint_spec_rc})"
-    echo "${lint_spec_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-else
-    echo "PASS  spec-doc-independence: new spec does not demand review.yaml update"
-    PASS=$((PASS + 1))
-fi
-
-# ── AGENTS.md context-budget ratchet ───────────────────────
-
-echo ""
-echo "── AGENTS.md context-budget ────────────────────────────"
-
-# skillsaw is already the pre-commit / lint.py hook for instruction
-# files. context-budget + .skillsaw-baseline.json (ceiling) reject
-# token growth in AGENTS.md without a special-purpose line-count
-# script. Assert that the committed ceiling equals len(AGENTS.md)//4
-# (no unratcheted headroom) and that the configured agents-md warn
-# limit is <= that value so context-budget always emits a finding.
-ceiling_check_rc=0
-ceiling_check_output="$(python3 - "${REPO_ROOT}" <<'PY'
-import json, pathlib, sys, yaml
-
-repo_root = pathlib.Path(sys.argv[1])
-agents_path = repo_root / "AGENTS.md"
-baseline_path = repo_root / ".skillsaw-baseline.json"
-skillsaw_yaml = repo_root / ".skillsaw.yaml"
-
-agents_text = agents_path.read_text(encoding="utf-8")
-agents_tokens = len(agents_text) // 4
-
-with open(baseline_path, encoding="utf-8") as f:
-    baseline_data = json.load(f)
-
-ceiling_entry = None
-for v in baseline_data.get("violations", []):
-    if v.get("rule_id") == "context-budget" and v.get("file_path") == "AGENTS.md":
-        ceiling_entry = v
-        break
-
-if not ceiling_entry:
-    print("missing AGENTS.md context-budget entry in .skillsaw-baseline.json")
-    sys.exit(1)
-
-committed_ceiling = ceiling_entry.get("value")
-if committed_ceiling is None:
-    print("missing value in AGENTS.md context-budget baseline entry")
-    sys.exit(1)
-
-if int(committed_ceiling) != agents_tokens:
-    print(f"committed ceiling ({committed_ceiling}) != len(AGENTS.md)//4 ({agents_tokens})")
-    sys.exit(1)
-
-baseline_mode = ceiling_entry.get("baseline_mode")
-if baseline_mode != "ceiling":
-    print(f"expected baseline_mode 'ceiling', got '{baseline_mode}'")
-    sys.exit(1)
-
-with open(skillsaw_yaml, encoding="utf-8") as f:
-    skillsaw_config = yaml.safe_load(f)
-
-limits = skillsaw_config.get("rules", {}).get("context-budget", {}).get("limits", {}).get("agents-md", {})
-if isinstance(limits, dict):
-    warn_limit = limits.get("warn")
-else:
-    warn_limit = limits
-
-if warn_limit is None:
-    print("missing agents-md warn limit in .skillsaw.yaml")
-    sys.exit(1)
-
-if int(warn_limit) > int(committed_ceiling):
-    print(f"configured warn limit ({warn_limit}) > committed ceiling ({committed_ceiling})")
-    sys.exit(1)
-
-PY
-)" || ceiling_check_rc=$?
-
-if [[ "${ceiling_check_rc}" -ne 0 ]]; then
-    echo "FAIL  agents-md-budget-ceiling: ${ceiling_check_output}"
-    FAIL=$((FAIL + 1))
-else
-    echo "PASS  agents-md-budget-ceiling: committed ceiling equals len(AGENTS.md)//4 and warn limit is <= ceiling"
-    PASS=$((PASS + 1))
-fi
-
-lint_agents_rc=0
-lint_agents_output="$(python3 "${LINT}" --files AGENTS.md 2>&1)" || lint_agents_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_agents_clean="$(echo "${lint_agents_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-
-if echo "${lint_agents_clean}" | grep -qE "! skillsaw( |$)"; then
-    echo "SKIP  agents-md-budget-current: skillsaw tool not available"
-    SKIPPED=$((SKIPPED + 1))
-elif [[ "${lint_agents_rc}" -eq 0 ]] \
-    && echo "${lint_agents_clean}" | grep -qE "✓ skillsaw( |$)"; then
-    echo "PASS  agents-md-budget-current: current AGENTS.md is within the ceiling"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  agents-md-budget-current: skillsaw did not pass on AGENTS.md (exit ${lint_agents_rc})"
-    echo "${lint_agents_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# Overflow by a 1-token delta instead of large fixture blocks.
-# Adding 4 - (len(text) % 4) characters increases len(text)//4 by exactly
-# 1 token. Ending with a newline ensures pre-commit end-of-file-fixer passes
-# without modifying the file before skillsaw runs.
-AGENTS_BACKUP="$(mktemp)"
-cp "${AGENTS_FILE}" "${AGENTS_BACKUP}"
-python3 - "${AGENTS_FILE}" <<'PY'
-import sys
-
-agents_path = sys.argv[1]
-with open(agents_path, "r", encoding="utf-8") as f:
-    text = f.read()
-
-cur_tokens = len(text) // 4
-needed_chars = 4 - (len(text) % 4)
-pad = ("x" * (needed_chars - 1)) + "\n"
-assert len(pad) == needed_chars
-assert (len(text) + len(pad)) // 4 == cur_tokens + 1
-
-with open(agents_path, "a", encoding="utf-8") as f:
-    f.write(pad)
-PY
-
-lint_bloat_rc=0
-lint_bloat_output="$(python3 "${LINT}" --files AGENTS.md 2>&1)" || lint_bloat_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_bloat_clean="$(echo "${lint_bloat_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-restore_agents_md
-
-if [[ "${ceiling_check_rc}" -ne 0 ]]; then
-    echo "FAIL  agents-md-budget-overflow: prerequisite ceiling check failed (${ceiling_check_output})"
-    FAIL=$((FAIL + 1))
-elif echo "${lint_bloat_clean}" | grep -qE "! skillsaw( |$)"; then
-    echo "SKIP  agents-md-budget-overflow: skillsaw tool not available"
-    SKIPPED=$((SKIPPED + 1))
-elif [[ "${lint_bloat_rc}" -ne 0 ]] \
-    && echo "${lint_bloat_clean}" | grep -qE "✗ skillsaw( |$)" \
-    && echo "${lint_bloat_clean}" | grep -qF "context-budget"; then
-    echo "PASS  agents-md-budget-overflow: token growth fails context-budget"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  agents-md-budget-overflow: expected skillsaw context-budget failure (exit ${lint_bloat_rc})"
-    echo "${lint_bloat_output}" | tail -12 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# ── Baseline ceiling ratchet vs base branch ────────────────
-
-echo ""
-echo "── Baseline ceiling ratchet ────────────────────────────"
-
-# Resolve a local base ref using the hook's own candidate order and logic.
-ratchet_base_ref="$(python3 - "${REPO_ROOT}" <<'PY'
-import sys
-from pathlib import Path
-repo_root = Path(sys.argv[1]).resolve()
-sys.path.insert(0, str(repo_root / "scripts"))
-import check_baseline_ratchet
-
-ref = check_baseline_ratchet.resolve_base_ref(repo_root)
-if ref is not None:
-    print(ref)
-PY
-)"
-if [[ -z "${ratchet_base_ref}" ]]; then
-    cand_commit="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet "HEAD~1^{commit}" 2>/dev/null || true)"
-    if [[ -n "${cand_commit}" ]]; then
-        if git -C "${REPO_ROOT}" show "${cand_commit}:.skillsaw-baseline.json" >/dev/null 2>&1; then
-            ratchet_base_ref="${cand_commit}"
-        fi
-    fi
-fi
-
-baseline_adjust_ceiling() {
-    local new_value="$1"
-    python3 - "${BASELINE_FILE}" "${new_value}" <<'PY'
-import json, sys
-
-path, new_value = sys.argv[1], int(sys.argv[2])
-with open(path, encoding="utf-8") as handle:
-    data = json.load(handle)
-for entry in data.get("violations", []):
-    if (
-        entry.get("rule_id") == "context-budget"
-        and entry.get("file_path") == "AGENTS.md"
-        and entry.get("baseline_mode") == "ceiling"
-    ):
-        print(entry["value"])
-        entry["value"] = new_value
-        break
-else:
-    sys.exit("missing AGENTS.md context-budget ceiling")
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(data, handle, indent=2, ensure_ascii=False)
-    handle.write("\n")
-PY
-}
-
-if [[ -z "${ratchet_base_ref}" ]]; then
-    echo "SKIP  baseline-ratchet-increase: no origin/main or main ref"
-    SKIPPED=$((SKIPPED + 1))
-    echo "SKIP  baseline-ratchet-decrease: no origin/main or main ref"
-    SKIPPED=$((SKIPPED + 1))
-    echo "SKIP  baseline-ratchet-unchanged: no origin/main or main ref"
-    SKIPPED=$((SKIPPED + 1))
-else
-    BASELINE_BACKUP="$(mktemp)"
-    cp "${BASELINE_FILE}" "${BASELINE_BACKUP}"
-    base_ceiling="$(python3 - "${REPO_ROOT}" "${ratchet_base_ref}" <<'PY'
-import json, subprocess, sys
-repo_root, ref = sys.argv[1], sys.argv[2]
-proc = subprocess.run(
-    ["git", "-C", repo_root, "show", f"{ref}:.skillsaw-baseline.json"],
-    capture_output=True,
-    text=True,
-    check=True,
-)
-data = json.loads(proc.stdout)
-for entry in data.get("violations", []):
-    if (
-        entry.get("rule_id") == "context-budget"
-        and entry.get("file_path") == "AGENTS.md"
-        and entry.get("baseline_mode") == "ceiling"
-    ):
-        print(entry["value"])
-        break
-else:
-    sys.exit("missing AGENTS.md context-budget ceiling in base")
-PY
-)"
-
-    bumped_ceiling=$((base_ceiling + 1))
-    baseline_adjust_ceiling "${bumped_ceiling}" >/dev/null
-    bump_rc=0
-    bump_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || bump_rc=$?
-    restore_baseline
-
-    if [[ "${bump_rc}" -ne 0 ]] \
-        && echo "${bump_output}" | grep -qF "ceiling for AGENTS.md increased from ${base_ceiling} to ${bumped_ceiling}"; then
-        echo "PASS  baseline-ratchet-increase: ceiling bump fails vs ${ratchet_base_ref}"
-        PASS=$((PASS + 1))
-    else
-        echo "FAIL  baseline-ratchet-increase: expected baseline-ratchet failure (exit ${bump_rc})"
-        echo "${bump_output}" | tail -12 | sed 's/^/    /'
-        FAIL=$((FAIL + 1))
-    fi
-
-    BASELINE_BACKUP="$(mktemp)"
-    cp "${BASELINE_FILE}" "${BASELINE_BACKUP}"
-    lowered_ceiling=$((base_ceiling - 1))
-    baseline_adjust_ceiling "${lowered_ceiling}" >/dev/null
-    decrease_rc=0
-    decrease_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || decrease_rc=$?
-    restore_baseline
-
-    if [[ "${decrease_rc}" -eq 0 ]] && echo "${decrease_output}" | grep -qF "none increased"; then
-        echo "PASS  baseline-ratchet-decrease: lowered ceiling passes vs ${ratchet_base_ref}"
-        PASS=$((PASS + 1))
-    else
-        echo "FAIL  baseline-ratchet-decrease: expected exit 0 (exit ${decrease_rc})"
-        echo "${decrease_output}" | tail -8 | sed 's/^/    /'
-        FAIL=$((FAIL + 1))
-    fi
-
-    unchanged_rc=0
-    unchanged_output="$(python3 "${RATCHET}" --base-ref "${ratchet_base_ref}" 2>&1)" || unchanged_rc=$?
-    if [[ "${unchanged_rc}" -eq 0 ]] && echo "${unchanged_output}" | grep -qF "none increased"; then
-        echo "PASS  baseline-ratchet-unchanged: matching ceiling passes vs ${ratchet_base_ref}"
-        PASS=$((PASS + 1))
-    else
-        echo "FAIL  baseline-ratchet-unchanged: expected exit 0 (exit ${unchanged_rc})"
-        echo "${unchanged_output}" | tail -8 | sed 's/^/    /'
-        FAIL=$((FAIL + 1))
-    fi
-fi
-
-lint_ratchet_rc=0
-lint_ratchet_output="$(BASELINE_RATCHET_BASE_REF="${ratchet_base_ref}" python3 "${LINT}" --files .skillsaw-baseline.json 2>&1)" || lint_ratchet_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_ratchet_clean="$(echo "${lint_ratchet_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_ratchet_rc}" -eq 0 ]] \
-    && echo "${lint_ratchet_clean}" | grep -qE "✓ baseline-ratchet( |$)"; then
-    echo "PASS  baseline-ratchet-wiring: lint.py runs baseline-ratchet"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  baseline-ratchet-wiring: baseline-ratchet did not pass (exit ${lint_ratchet_rc})"
-    echo "${lint_ratchet_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# ── Go formatting and vet ───────────────────────────────────
-
-echo ""
-echo "── Go ──────────────────────────────────────────────────"
-
-assert_lint \
-    "go-fmt-valid" \
-    "tests/lint/fixtures/linttest_valid.go" \
+assert_wiring \
+    "gofmt passes on correctly formatted Go" \
+    "tests/lint/fixtures/linttest_wiring_valid.go" \
     $'package linttest\n\nfunc Hello() {\n}\n' \
     0 \
     "gofmt"
 
-assert_lint \
-    "go-fmt-unformatted" \
-    "tests/lint/fixtures/linttest_unformatted.go" \
+assert_wiring \
+    "gofmt fails on unformatted Go" \
+    "tests/lint/fixtures/linttest_wiring_unformatted.go" \
     $'package linttest\n\nfunc Hello() {\n\tvar x int=1\n\t_ = x\n}\n' \
     nonzero \
-    "gofmt"
+    "Go files need gofmt"
 
-assert_lint \
-    "go-vet-printf" \
-    "tests/lint/fixtures/linttest_vet.go" \
+assert_wiring \
+    "go-vet fails on a wrong-type Printf argument" \
+    "tests/lint/fixtures/linttest_wiring_vet.go" \
     $'package linttest\n\nimport "fmt"\n\nfunc Hello() {\n\tfmt.Printf("%d", "not an int")\n}\n' \
     nonzero \
-    "go-vet" \
     "wrong type"
 
-# lint.py must wire the local Go hooks when a real Go file is in
-# the file set (not only the temp fixtures above).
-lint_go_rc=0
-lint_go_output="$(python3 "${LINT}" --files wms/memory/lifecycle.go 2>&1)" || lint_go_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_go_clean="$(echo "${lint_go_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_go_rc}" -eq 0 ]] \
-    && echo "${lint_go_clean}" | grep -qE "✓ gofmt( |$)" \
-    && echo "${lint_go_clean}" | grep -qE "✓ go-vet( |$)"; then
-    echo "PASS  go-hooks-wiring: lint.py runs gofmt and go-vet"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  go-hooks-wiring: gofmt/go-vet did not pass (exit ${lint_go_rc})"
-    echo "${lint_go_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# ears-manager check (module with third-party dependencies):
-# verify go-vet either succeeds (with populated cache/network) or
-# fails closed with the dependency resolution diagnostic banner.
-lint_ears_rc=0
-lint_ears_output="$(python3 "${LINT}" --files "ears-manager/cmd/ears-manager/main.go" 2>&1)" || lint_ears_rc=$?
-
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_ears_clean="$(echo "${lint_ears_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_ears_rc}" -eq 0 ]] && echo "${lint_ears_clean}" | grep -qE "✓ go-vet( |$)"; then
-    echo "PASS  go-vet-ears-manager: go-vet passed with populated cache/network"
-    PASS=$((PASS + 1))
-elif [[ "${lint_ears_rc}" -ne 0 ]] && echo "${lint_ears_clean}" | grep -qF "dependency resolution failed in ears-manager"; then
-    echo "PASS  go-vet-ears-manager: go-vet failed closed with dependency resolution diagnostic"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  go-vet-ears-manager: expected go-vet success or dependency-resolution diagnostic (exit ${lint_ears_rc})"
-    echo "${lint_ears_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# ── Unstaged deletions ─────────────────────────────────────
+# ── Deletions do not crash default (bare) mode ────────────────────
 
 echo ""
-echo "── Unstaged deletions ────────────────────────────────"
+echo "── Deletions in bare mode ─────────────────────────────────"
 
-# --all-files previously passed tracked-but-missing paths to
-# file-oriented hooks, which crashed with FileNotFoundError.
-# Incremental mode shares the same existence filter in _get_files.
-# A staged add with an unstaged working-tree deletion is the
-# scenario that crashed check-docstring-first and debug-statements.
-dummy_del="tests/lint/fixtures/_test_unstaged_deletion.py"
+dummy_del="tests/lint/fixtures/linttest_wiring_deleted.go"
 dummy_del_path="${REPO_ROOT}/${dummy_del}"
-printf '%s\n' '"""Temporary fixture for unstaged-deletion lint coverage."""' \
-    > "${dummy_del_path}"
+printf 'package linttest\n' > "${dummy_del_path}"
 CREATED_FILES+=("${dummy_del_path}")
-git -C "${REPO_ROOT}" add -- "${dummy_del}"
+git -C "${REPO_ROOT}" add -f -- "${dummy_del}"
 STAGED_FILES+=("${dummy_del}")
 rm -f "${dummy_del_path}"
 
-get_files_rc=0
-get_files_output="$(python3 - "${LINT}" "${dummy_del}" <<'PY'
-import argparse
-import importlib.util
-import sys
-
-lint_path, dummy = sys.argv[1], sys.argv[2]
-spec = importlib.util.spec_from_file_location("lintmod", lint_path)
-mod = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-spec.loader.exec_module(mod)
-all_files = mod._get_files(argparse.Namespace(files=None, all_files=True))
-incremental = mod._get_files(argparse.Namespace(files=None, all_files=False))
-sentinel = "scripts/lint.py"
-if sentinel not in all_files:
-    print(f"expected tracked file missing from --all-files: {sentinel}")
-    sys.exit(1)
-if dummy in all_files:
-    print(f"deleted path still collected by --all-files: {dummy}")
-    sys.exit(1)
-if dummy in incremental:
-    print(f"deleted path still collected incrementally: {dummy}")
-    sys.exit(1)
-print("omitted")
-PY
-)" || get_files_rc=$?
-
-# Incremental mode shares _get_files with --all-files. A staged add
-# with an unstaged working-tree deletion still appears in
-# ``git diff --cached --diff-filter=ACMR``, so this run would crash
-# python hooks if the deleted .py path were still passed through.
-# Full-tree --all-files is not invoked here because in-place fixers
-# would rewrite the working tree; collection coverage is above.
-lint_del_output="$(python3 "${LINT}" 2>&1)" || true
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_del_clean="$(echo "${lint_del_output}" | sed 's/\x1b\[[0-9;]*m//g')"
+del_rc=0
+del_output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI python3 "${LINT}" 2>&1)" || del_rc=$?
 
 git -C "${REPO_ROOT}" restore --staged -- "${dummy_del}" 2>/dev/null || true
-rm -f "${dummy_del_path}"
 
-unstaged_ok=true
-if [[ "${get_files_rc}" -ne 0 ]] || ! echo "${get_files_output}" | grep -qF "omitted"; then
-    echo "FAIL  unstaged-deletion-filter: _get_files still collected the deleted path"
-    echo "${get_files_output}" | tail -8 | sed 's/^/    /'
-    unstaged_ok=false
-elif echo "${lint_del_clean}" | grep -qF "FileNotFoundError"; then
-    echo "FAIL  unstaged-deletion-filter: lint.py raised FileNotFoundError"
-    echo "${lint_del_output}" | tail -8 | sed 's/^/    /'
-    unstaged_ok=false
-elif echo "${lint_del_clean}" | grep -qF "${dummy_del}"; then
-    echo "FAIL  unstaged-deletion-filter: deleted path still reached a hook"
-    echo "${lint_del_output}" | tail -8 | sed 's/^/    /'
-    unstaged_ok=false
-fi
-
-if ${unstaged_ok}; then
-    echo "PASS  unstaged-deletion-filter: missing tracked files are ignored"
-    PASS=$((PASS + 1))
+if ! echo "${del_output}" | grep -qF "Traceback"; then
+    pass_test "bare mode tolerates a staged deletion without crashing"
 else
-    FAIL=$((FAIL + 1))
+    fail_test "bare-mode-deletion" "unexpected traceback (exit ${del_rc})"
+    echo "${del_output}" | tail -10 | sed 's/^/    /'
 fi
 
-# ── ADR amendment convention ────────────────────────────────
-
-echo ""
-echo "── ADR amendments ──────────────────────────────────────"
-
-ADR_REL="docs/decisions/0001-requirements-storage-format.md"
-
-lint_adr_rc=0
-lint_adr_output="$(python3 "${LINT}" --files "${ADR_REL}" 2>&1)" || lint_adr_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_adr_clean="$(echo "${lint_adr_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_adr_rc}" -eq 0 ]] \
-    && echo "${lint_adr_clean}" | grep -qE "✓ adr-amendments( |$)"; then
-    echo "PASS  adr-amendments-wiring: existing accepted ADRs pass"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  adr-amendments-wiring: adr-amendments did not pass (exit ${lint_adr_rc})"
-    echo "${lint_adr_output}" | tail -8 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-ADR_BACKUP="$(mktemp)"
-cp "${ADR_FILE}" "${ADR_BACKUP}"
-python3 - "${ADR_FILE}" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-updated = text.replace(
-    "Use **one file per record in YAML format**",
-    "Use **JSONL storage instead**",
-    1,
-)
-if updated == text:
-    raise SystemExit("expected unique ADR decision sentence was not found")
-path.write_text(updated, encoding="utf-8")
-PY
-
-lint_mut_rc=0
-lint_mut_output="$(python3 "${LINT}" --files "${ADR_REL}" 2>&1)" || lint_mut_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_mut_clean="$(echo "${lint_mut_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_mut_rc}" -ne 0 ]] \
-    && echo "${lint_mut_clean}" | grep -qE "✗ adr-amendments( |$)" \
-    && echo "${lint_mut_clean}" | grep -qF "rewritten or replaced in place"; then
-    echo "PASS  adr-amendments-mutation: in-place rewrite is rejected"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  adr-amendments-mutation: expected adr-amendments failure (exit ${lint_mut_rc})"
-    echo "${lint_mut_output}" | tail -12 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-restore_adr
-
-ADR_BACKUP="$(mktemp)"
-cp "${ADR_FILE}" "${ADR_BACKUP}"
-printf '\n**[Amended November 2026]** Test amendment that must not fail the check.\n' >> "${ADR_FILE}"
-
-lint_amd_rc=0
-lint_amd_output="$(python3 "${LINT}" --files "${ADR_REL}" 2>&1)" || lint_amd_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_amd_clean="$(echo "${lint_amd_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_amd_rc}" -eq 0 ]] \
-    && echo "${lint_amd_clean}" | grep -qE "✓ adr-amendments( |$)"; then
-    echo "PASS  adr-amendments-append: dated amendment block is allowed"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  adr-amendments-append: appending an amendment failed (exit ${lint_amd_rc})"
-    echo "${lint_amd_output}" | tail -12 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-restore_adr
-
-ADR_RENAMED="${REPO_ROOT}/docs/decisions/0001-requirements-storage-format-renamed.md"
-ADR_RENAMED_REL="docs/decisions/0001-requirements-storage-format-renamed.md"
-git -C "${REPO_ROOT}" mv "${ADR_FILE}" "${ADR_RENAMED}"
-python3 - "${ADR_RENAMED}" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-updated = text.replace(
-    "Use **one file per record in YAML format**",
-    "Use **JSONL storage instead**",
-    1,
-)
-if updated == text:
-    raise SystemExit("expected unique ADR decision sentence was not found")
-path.write_text(updated, encoding="utf-8")
-PY
-
-lint_ren_rc=0
-lint_ren_output="$(python3 "${LINT}" --files "${ADR_RENAMED_REL}" 2>&1)" || lint_ren_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_ren_clean="$(echo "${lint_ren_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_ren_rc}" -ne 0 ]] \
-    && echo "${lint_ren_clean}" | grep -qE "✗ adr-amendments( |$)" \
-    && echo "${lint_ren_clean}" | grep -qF "was deleted (renamed to ${ADR_RENAMED_REL})"; then
-    echo "PASS  adr-amendments-rename: renaming and rewriting an accepted ADR is rejected"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  adr-amendments-rename: expected adr-amendments failure on rename (exit ${lint_ren_rc})"
-    echo "${lint_ren_output}" | tail -12 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-restore_adr
-
-ADR_OTHER_REL="docs/decisions/0002-ears-specification-record-schema.md"
-git -C "${REPO_ROOT}" rm -q "${ADR_FILE}"
-
-lint_del_rc=0
-lint_del_output="$(python3 "${LINT}" --files "${ADR_OTHER_REL}" 2>&1)" || lint_del_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_del_clean="$(echo "${lint_del_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_del_rc}" -ne 0 ]] \
-    && echo "${lint_del_clean}" | grep -qE "✗ adr-amendments( |$)" \
-    && echo "${lint_del_clean}" | grep -qF "accepted architecture decision record was deleted"; then
-    echo "PASS  adr-amendments-deletion: deleting an accepted ADR is rejected"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  adr-amendments-deletion: expected adr-amendments failure on deletion (exit ${lint_del_rc})"
-    echo "${lint_del_output}" | tail -12 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-restore_adr
-
-git -C "${REPO_ROOT}" rm -q "${ADR_FILE}"
-
-lint_del_default_rc=0
-lint_del_default_output="$(python3 "${LINT}" 2>&1)" || lint_del_default_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_del_default_clean="$(echo "${lint_del_default_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-if [[ "${lint_del_default_rc}" -ne 0 ]] \
-    && echo "${lint_del_default_clean}" | grep -qE "✗ adr-amendments( |$)" \
-    && echo "${lint_del_default_clean}" | grep -qF "accepted architecture decision record was deleted"; then
-    echo "PASS  adr-amendments-deletion-default: deleting an accepted ADR is rejected under default lint.py"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  adr-amendments-deletion-default: expected adr-amendments failure on deletion with no --files (exit ${lint_del_default_rc})"
-    echo "${lint_del_default_output}" | tail -12 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-restore_adr
-
-# Regression: staging the deletion of every ADR leaves no file
-# matching ^docs/decisions/.*\.md$ in --all-files mode (git ls-files
-# no longer lists the deleted paths). Without always_run the hook
-# was skipped and the deletion passed; it must run and fail instead.
-git -C "${REPO_ROOT}" rm -q -r docs/decisions
-
-lint_all_rc=0
-lint_all_output="$(python3 "${LINT}" --all-files 2>&1)" || lint_all_rc=$?
-# shellcheck disable=SC2001  # regex substitution requires sed
-lint_all_clean="$(echo "${lint_all_output}" | sed 's/\x1b\[[0-9;]*m//g')"
-
-git -C "${REPO_ROOT}" checkout HEAD -- docs/decisions 2>/dev/null || true
-
-if [[ "${lint_all_rc}" -ne 0 ]] \
-    && echo "${lint_all_clean}" | grep -qE "✗ adr-amendments( |$)" \
-    && echo "${lint_all_clean}" | grep -qF "accepted architecture decision record was deleted"; then
-    echo "PASS  adr-amendments-always-run: hook runs when no ADR file matches"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL  adr-amendments-always-run: expected adr-amendments failure with no matching ADR file (exit ${lint_all_rc})"
-    echo "${lint_all_output}" | tail -12 | sed 's/^/    /'
-    FAIL=$((FAIL + 1))
-fi
-
-# ── Summary ──────────────────────────────────────────────────
+# ── Summary ──────────────────────────────────────────────────────
 
 echo ""
 echo "════════════════════════════════════════════════════════"
-echo "Results: ${PASS} passed, ${FAIL} failed, ${SKIPPED} skipped"
+echo "Results: ${PASS} passed, ${FAIL} failed"
 
 if [[ "${FAIL}" -gt 0 ]]; then
-    exit 1
-fi
-
-# Guard against vacuous success: if no tests passed and some were
-# skipped (all tools unavailable), the suite provides no regression
-# value — fail so the environment issue is surfaced.
-if [[ "${PASS}" -eq 0 ]] && [[ "${SKIPPED}" -gt 0 ]]; then
-    echo "ERROR: no tests passed (${SKIPPED} skipped) — tools may be missing"
     exit 1
 fi

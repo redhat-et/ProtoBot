@@ -1,11 +1,13 @@
 # AGENTS
 
 - All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py`
-  (tools must be pre-installed) as an alternative to `pre-commit run`.
-  Key flags: `--all-files` (check every tracked file),
-  `--files FILE [FILE ...]` (check specific files),
-  `--check-parity` (verify registry covers all configured hooks).
+  environments without network access, use `python scripts/lint.py` as a
+  wrapper around `pre-commit run`.
+  Key flags: `--all-files` (all tracked files), `--files FILE [FILE ...]`
+  (specific files), `--check-parity` (validate config and offline hook cache).
+  The hook cache must be pre-populated for offline runs (bootstrap with
+  `pre-commit install-hooks`).
+  Tools must be pre-installed when running without network access.
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
@@ -65,8 +67,7 @@ follow these rules:
 
 1. **Read all sibling entries first.** Before drafting or
    revising an entry, read every other entry in the same list
-   or governed collection. Consistency cannot be verified
-   without knowing what sibling entries say.
+   or governed collection.
 
 2. **Reuse established terminology.** Match sibling
    entries' terms for the same concepts. An undeclared alias
@@ -90,16 +91,15 @@ follow these rules:
    intra-entry terminology drift, not only sibling-entry
    terminology matching.
 
-Examples of sibling entries: numbered rules in `AGENTS.md` (the
-other numbered rules in the list); specification documents
-under `docs/` (every other governed Markdown document); skill
-files under `.agents/skills/` (every other skill file).
+Examples of sibling entries: numbered rules in `AGENTS.md` (other
+rules in the list); specification documents under `docs/` (other
+governed Markdown files); skill files under `.agents/skills/`
+(other skill files).
 
 ## Specification document hierarchy
 
-Every Markdown file under `docs/` is a governed hierarchy member,
-including files added later. Membership is the `docs/` prefix, not
-the list.
+Every Markdown file under `docs/` is a governed hierarchy member;
+membership is the `docs/` prefix, not the list.
 
 - `docs/vision.md` — registered Vision artifact (purpose, users,
   outcomes).
@@ -178,10 +178,9 @@ must follow these rules:
 4. **Review agents must also check for staleness introduced
    elsewhere.** When a PR changes a contract, lifecycle, or
    behavior description in a specification document, search
-   all other governed Markdown documents under `docs/` — not
-   only the ones the diff touches — for existing prose
-   describing the same behavior, and flag any that were not
-   updated to match.
+   all other governed Markdown documents under `docs/` for
+   existing prose describing the same behavior, and flag any
+   that were not updated to match.
 
 5. **Update registered specification artifacts through
    `ears-manager artifact put`.** Registered specification artifacts
@@ -243,10 +242,9 @@ agents must follow these rules:
 
 1. **Follow the formatting conventions observed in sibling files.**
    Match backtick-quoting of refs, command syntax style, and
-   structural patterns used by sibling skills. For example, quote
-   git refs as `` `upstream/main` `` rather than leaving them
-   unquoted. Inconsistent formatting with sibling skills is a
-   defect.
+   structural patterns used by sibling skills. Quote git refs as
+   `` `upstream/main` `` rather than unquoted. Inconsistent
+   formatting with sibling skills is a defect.
 
 2. **Match structural conventions, not behavioral fields.**
    Structural formatting conventions should match siblings,
