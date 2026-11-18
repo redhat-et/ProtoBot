@@ -159,10 +159,15 @@ def is_listed_in_spec(code: str, spec_text: str) -> bool:
     """Return True when *code* or its prose form appears in *spec_text*."""
     if not code or not spec_text.strip():
         return False
-    if code in spec_text:
+    pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])")
+    if pattern.search(spec_text):
         return True
     humanized = humanize_code(code)
-    return humanized.casefold() in spec_text.casefold()
+    humanized_pattern = re.compile(
+        rf"(?<![A-Za-z0-9_]){re.escape(humanized)}(?![A-Za-z0-9_])",
+        re.IGNORECASE,
+    )
+    return bool(humanized_pattern.search(spec_text))
 
 
 def find_raw_string_duplicates(

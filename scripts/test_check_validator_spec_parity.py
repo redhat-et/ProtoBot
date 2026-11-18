@@ -208,6 +208,20 @@ class IsListedInSpecTests(unittest.TestCase):
         """Reject specification text that names neither the code nor its prose."""
         self.assertFalse(checker.is_listed_in_spec("sample.error", "- other check"))
 
+    def test_prefix_of_longer_code_is_not_listed(self) -> None:
+        """A diagnostic code that is a prefix of a listed code is not listed."""
+        self.assertFalse(
+            checker.is_listed_in_spec("layout.read", "`layout.read_failed`")
+        )
+        self.assertFalse(
+            checker.is_listed_in_spec("requirement.invalid", "`requirement.invalid_id`")
+        )
+        self.assertTrue(
+            checker.is_listed_in_spec(
+                "layout.read", "(`layout.read_failed`, `layout.read`)"
+            )
+        )
+
 
 class RawStringDuplicateTests(unittest.TestCase):
     def test_declaration_is_not_a_duplicate(self) -> None:
@@ -504,6 +518,24 @@ class EvaluateAndCheckTests(unittest.TestCase):
         self.assertNotEqual(0, rc)
         self.assertIn("ProtoBotV2.md", output)
         self.assertNotIn("validator/README.md", output)
+
+    def test_prefix_constant_fails_when_only_longer_sibling_is_listed(
+        self,
+    ) -> None:
+        """A prefix constant fails evaluate when only its longer sibling is in spec."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            go_path, readme, spec = _layout(root)
+            _write(
+                go_path,
+                'package sample\nconst CodeLayoutRead = "layout.read"\n',
+            )
+            _write(readme, "`layout.read` is documented.\n")
+            _write(spec, "# Spec\n\n### Validator\n\n`layout.read_failed`\n")
+            report = checker.evaluate(root)
+        self.assertFalse(report.ok)
+        self.assertIn("layout.read", report.missing_in_protobot_v2)
+        self.assertEqual([], list(report.missing_in_readme))
 
     def test_duplicate_constant_values_are_reported_once(self) -> None:
         """Deduplicate the same diagnostic string declared twice."""
