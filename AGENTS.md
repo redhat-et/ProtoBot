@@ -8,8 +8,8 @@
   `--check-parity` (verify registry covers all configured hooks).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
-- The upstream repository is `redhat-et/protobot`. Ensure that pull requests
-  are made against this repository.
+- The upstream repository is `redhat-et/protobot`. Ensure pull requests
+  target this repository.
 - Agent skills live in `.agents/skills/`. `.claude/skills` is a symlink to
   that directory so Claude Code finds the same skills; do not add skills
   under `.claude/` directly.
@@ -22,8 +22,7 @@ Agents must follow these rules:
    GitHub workflows must not create or modify any file under
    `.github/workflows/`. Local coding agents may create or modify
    files under `.github/workflows/`, except as restricted by
-   Rule 2, when the requested change requires it and the user has
-   authorized the change.
+   Rule 2, when required and authorized by the user.
 
 2. **Defer CI integration for new modules.** When implementing an issue
    that introduces a new Go module, package, or tool, implement the
@@ -44,6 +43,8 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
 1. **Respect the prompt context budget.** Do not raise a
    `.skillsaw-baseline.json` ceiling value to fit new prose; the
    `baseline-ratchet` pre-commit and CI gate rejects ceiling increases.
+   Lower the `agents-md` warn limit in `.skillsaw.yaml` when
+   `AGENTS.md` shrinks below it.
 2. **Consolidate or extract when adding prose.** Offset a new rule or
    explanation with equivalent consolidation of existing prose, or
    extract detail into an on-demand skill under `.agents/skills/`.
@@ -144,11 +145,11 @@ When creating or modifying any document under `docs/`, agents
 must follow these rules:
 
 1. **Account for all components, interfaces, and constraints.**
-   New or revised specification documents must account for
-   every component, interface, and constraint enumerated in
+   New or revised specification documents must account for every
+   component, interface, and constraint enumerated in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md` relevant to the document's
-   scope — not silently omitted.
+   `docs/architecture/overview.md`, and must not silently omit
+   those relevant to the document's scope.
 
 2. **Verify deployment topology, security posture, and
    persistent state coverage.** Cross-check against
@@ -184,8 +185,8 @@ must follow these rules:
 5. **Update registered specification artifacts through
    `ears-manager artifact put`.** Registered specification artifacts
    (`docs/vision.md`, `docs/architecture.md`, and any other artifact
-   registered in `.protobot/project.yaml`) must never be edited by
-   hand, and `.protobot/project.yaml` must never be edited by hand.
+   registered in `.protobot/project.yaml`) and
+   `.protobot/project.yaml` must never be edited by hand.
    When a PR creates or modifies a registered specification artifact,
    or when Rule 4 identifies staleness in a registered specification
    artifact, apply the update exclusively via
@@ -247,11 +248,11 @@ agents must follow these rules:
    defect.
 
 2. **Match structural conventions, not behavioral fields.**
-   Structural formatting conventions should be matched to siblings,
+   Structural formatting conventions should match siblings,
    but behavioral fields like dispatch parameters must be determined
-   by the skill's own requirements, not copied from siblings.
-   Blindly copying behavioral configuration from a sibling can
-   produce incorrect dispatch or workflow behavior.
+   by the skill's own requirements. Blindly copying behavioral
+   configuration from a sibling can produce incorrect dispatch
+   or workflow behavior.
 
 3. **Link a GitHub issue or justify why none is needed.**
    When reversing or correcting a business rule, link an
