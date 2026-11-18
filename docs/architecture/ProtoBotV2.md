@@ -677,7 +677,8 @@ Those checks emit deterministic diagnostic codes. Current codes include
 layout codes (`layout.read_failed`, `layout.unexpected_file`,
 `layout.parse_failed`), revision check codes (`revision.not_found`,
 `revision.read_failed`, `revision.unsupported_entry`,
-`revision.unexpected_file`, `revision.parse_failed`), requirement check
+`revision.unexpected_file`, `revision.parse_failed`,
+`revision.self_comparison`, `revision.empty_base`), requirement check
 codes (`requirement.missing_field`, `requirement.invalid_status`,
 `requirement.unexpected_field`, `requirement.invalid_id`,
 `requirement.duplicate_id`, `requirement.deleted`, `requirement.reused_id`,
@@ -688,7 +689,8 @@ codes (`requirement.missing_field`, `requirement.invalid_status`,
 (`reference.not_found`, `reference.ambiguous`), specification check codes
 (`relationship.invalid_type`, `relationship.cycle`,
 `relationship.superseded_requirement_active`,
-`relationship.superseded_requirement_not_in_change`), EARS check codes
+`relationship.superseded_requirement_not_in_change`,
+`relationship.superseded_requirement_not_retired_in_change`), EARS check codes
 (`ears.shall_count`, `ears.pattern_mismatch`, `ears.invalid_type`), and
 test-tag codes (`testtags.read_failed`, `testtags.unexpected_file`,
 `testtags.unresolved`).

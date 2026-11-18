@@ -24,13 +24,16 @@ README_RELATIVE = Path("validator") / "README.md"
 SPEC_RELATIVE = Path("docs") / "architecture" / "ProtoBotV2.md"
 SPECVALIDATION_DIR = VALIDATOR_INTERNAL / "specvalidation"
 
-_CODE_VALUE = r"[a-z]+(?:_[a-z]+)*\.[a-z]+(?:_[a-z]+)*"
+_CODE_VALUE = r"[a-z0-9]+(?:_[a-z0-9]+)*\.[a-z0-9]+(?:_[a-z0-9]+)*"
 _CONST_ASSIGN = re.compile(
-    r"^\s*(?:const\s+)?(?P<name>Code[A-Za-z0-9]+)\s*=\s*"
+    r"^\s*(?:const\s+)?(?P<name>Code[A-Za-z0-9_]*)(?:\s+[A-Za-z0-9_.]+)?\s*=\s*"
     r"(?P<quote>[\"`])(?P<value>" + _CODE_VALUE + r")(?P=quote)"
 )
+_POTENTIAL_CODE_ASSIGN = re.compile(
+    r"^\s*(?:const\s+)?(?P<name>Code[A-Za-z0-9_]*)(?:\s+[A-Za-z0-9_.]+)?\s*="
+)
 _LINE_COMMENT = re.compile(r"^\s*//")
-_STRING_LIT = re.compile(r"[\"`](" + _CODE_VALUE + r")[\"`]")
+_STRING_LIT = re.compile(r"`[^`]*`|\"(?:[^\"\\]|\\.)*\"")
 _BACKTICK_CODE = re.compile(r"`(" + _CODE_VALUE + r")`")
 _VALIDATOR_HEADING = re.compile(r"(?m)^#{2,3}[ \t]+Validator[ \t]*$")
 _NEXT_HEADING = re.compile(r"(?m)^#{1,3}[ \t]+")
@@ -130,6 +133,24 @@ def parse_code_constants(text: str, rel_path: str) -> list[CodeConstant]:
     return constants
 
 
+def find_unmatched_code_constants(text: str, rel_path: str) -> list[str]:
+    """Return errors for lines with Code* assignments that do not match _CONST_ASSIGN."""
+    source = strip_block_comments(text)
+    errors: list[str] = []
+    for line_number, raw_line in enumerate(source.splitlines(), start=1):
+        if _LINE_COMMENT.match(raw_line):
+            continue
+        code_part, _, _trailing = raw_line.partition("//")
+        if _POTENTIAL_CODE_ASSIGN.match(code_part) and not _CONST_ASSIGN.match(
+            code_part
+        ):
+            errors.append(
+                f"{rel_path}:{line_number}: unmatched diagnostic code "
+                f"constant declaration: {code_part.strip()}"
+            )
+    return errors
+
+
 def extract_documented_codes(text: str) -> set[str]:
     """Return diagnostic-code strings quoted in Markdown backticks."""
     return set(_BACKTICK_CODE.findall(text))
@@ -156,20 +177,11 @@ def spec_listing_text(text: str) -> str:
 
 
 def is_listed_in_spec(code: str, spec_text: str) -> bool:
-    """Return True when *code* or its prose form appears in *spec_text*."""
+    """Return True when *code* appears as an exact token in *spec_text*."""
     if not code or not spec_text.strip():
         return False
     pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])")
-    if pattern.search(spec_text):
-        return True
-    humanized = humanize_code(code)
-    prose_suffixes = r"(?:\s+(?:checks?|checking|rules?|codes?|diagnostics?))"
-    humanized_pattern = re.compile(
-        rf"(?<![A-Za-z0-9_]){re.escape(humanized)}"
-        rf"(?:{prose_suffixes}(?![A-Za-z0-9_])|(?!\s*[A-Za-z0-9_]))",
-        re.IGNORECASE,
-    )
-    return bool(humanized_pattern.search(spec_text))
+    return bool(pattern.search(spec_text))
 
 
 def find_raw_string_duplicates(
@@ -179,24 +191,33 @@ def find_raw_string_duplicates(
 ) -> list[RawStringDuplicate]:
     """Return raw diagnostic strings that duplicate exported constants."""
     source = strip_block_comments(text)
+    lines_without_comments: list[str] = []
+    for line in source.splitlines(keepends=True):
+        code_part, _, _ = line.partition("//")
+        if not code_part.endswith("\n") and line.endswith("\n"):
+            code_part += "\n"
+        lines_without_comments.append(code_part)
+    cleaned_source = "".join(lines_without_comments)
+
     duplicates: list[RawStringDuplicate] = []
-    for line_number, raw_line in enumerate(source.splitlines(), start=1):
-        code_part, _, _trailing = raw_line.partition("//")
-        if _CONST_ASSIGN.match(code_part):
+    lines = cleaned_source.splitlines()
+    for match in _STRING_LIT.finditer(cleaned_source):
+        lit = match.group(0)[1:-1]
+        constant_name = constants_by_value.get(lit)
+        if constant_name is None:
             continue
-        for match in _STRING_LIT.finditer(code_part):
-            value = match.group(1)
-            constant_name = constants_by_value.get(value)
-            if constant_name is None:
-                continue
-            duplicates.append(
-                RawStringDuplicate(
-                    rel_path=rel_path,
-                    line=line_number,
-                    value=value,
-                    constant_name=constant_name,
-                )
+        line_number = cleaned_source[: match.start()].count("\n") + 1
+        line = lines[line_number - 1] if line_number <= len(lines) else ""
+        if _CONST_ASSIGN.match(line):
+            continue
+        duplicates.append(
+            RawStringDuplicate(
+                rel_path=rel_path,
+                line=line_number,
+                value=lit,
+                constant_name=constant_name,
             )
+        )
     return duplicates
 
 
@@ -259,6 +280,7 @@ def collect_constants(repo_root: Path) -> tuple[list[CodeConstant], list[str]]:
             errors.append(str(error))
             continue
         constants.extend(parse_code_constants(text, rel_path))
+        errors.extend(find_unmatched_code_constants(text, rel_path))
     constants.sort(key=lambda item: (item.value, item.rel_path, item.line))
     return constants, errors
 
@@ -297,6 +319,10 @@ def collect_raw_string_duplicates(
 def evaluate(repo_root: Path) -> ParityReport:
     """Compare declared diagnostic constants against README and ProtoBotV2.md."""
     constants, errors = collect_constants(repo_root)
+    if not constants:
+        errors.append(
+            f"no diagnostic constants found under {VALIDATOR_INTERNAL.as_posix()}"
+        )
     duplicates, duplicate_errors = collect_raw_string_duplicates(repo_root, constants)
     errors.extend(duplicate_errors)
 

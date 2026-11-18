@@ -34,7 +34,7 @@ _SAMPLE_SPEC = """# Spec
 
 The validator checks:
 
-- sample error check
+- `sample.error` check
 """
 
 
@@ -143,6 +143,28 @@ const CodeVisible = "see.me"
         constants = checker.parse_code_constants(source, "p.go")
         self.assertEqual(["see.me"], [item.value for item in constants])
 
+    def test_typed_and_digit_constants_are_parsed(self) -> None:
+        """Parse constants with explicit types and codes containing digits."""
+        source = """package p
+const CodeProbeTyped string = "layout.probe"
+CodeV2Check = "v2.check_1"
+"""
+        constants = checker.parse_code_constants(source, "p.go")
+        self.assertEqual(["layout.probe", "v2.check_1"], [c.value for c in constants])
+        self.assertEqual(["CodeProbeTyped", "CodeV2Check"], [c.name for c in constants])
+
+    def test_unmatched_code_assignment_is_an_error(self) -> None:
+        """Report lines with Code* assignments that do not match _CONST_ASSIGN."""
+        source = """package p
+const CodeBroken = 123
+CodeInvalid string = "not a valid code"
+const CodeValid = "valid.code"
+"""
+        errors = checker.find_unmatched_code_constants(source, "p.go")
+        self.assertEqual(2, len(errors))
+        self.assertIn("CodeBroken", errors[0])
+        self.assertIn("CodeInvalid", errors[1])
+
 
 class ExtractDocumentedCodesTests(unittest.TestCase):
     def test_backtick_codes_are_extracted(self) -> None:
@@ -198,9 +220,9 @@ class IsListedInSpecTests(unittest.TestCase):
         """Accept the diagnostic code string itself."""
         self.assertTrue(checker.is_listed_in_spec("sample.error", "`sample.error`"))
 
-    def test_humanized_phrase_is_listed(self) -> None:
-        """Accept a check-list phrase that contains the humanized code."""
-        self.assertTrue(
+    def test_prose_without_code_is_not_listed(self) -> None:
+        """Reject prose check-list phrases that omit the exact code."""
+        self.assertFalse(
             checker.is_listed_in_spec("sample.error", "- sample error check")
         )
 
@@ -218,6 +240,9 @@ class IsListedInSpecTests(unittest.TestCase):
             checker.is_listed_in_spec("layout.read", "layout read failed check")
         )
         self.assertFalse(
+            checker.is_listed_in_spec("layout.read", "layout read check failed")
+        )
+        self.assertFalse(
             checker.is_listed_in_spec("requirement.invalid", "`requirement.invalid_id`")
         )
         self.assertFalse(
@@ -228,6 +253,20 @@ class IsListedInSpecTests(unittest.TestCase):
                 "layout.read", "(`layout.read_failed`, `layout.read`)"
             )
         )
+
+    def test_spec_heading_collisions_and_prose_are_not_listed(self) -> None:
+        """Headings and prose phrases are not treated as diagnostic listings."""
+        self.assertFalse(
+            checker.is_listed_in_spec(
+                "requirement.check",
+                "requirement check codes (`requirement.missing_field`)",
+            )
+        )
+        self.assertFalse(checker.is_listed_in_spec("ears.shape", "EARS shape:"))
+        self.assertFalse(
+            checker.is_listed_in_spec("revision.check", "revision check codes")
+        )
+        self.assertFalse(checker.is_listed_in_spec("layout.codes", "layout codes"))
 
 
 class RawStringDuplicateTests(unittest.TestCase):
@@ -265,6 +304,28 @@ func g() { other := "unrelated.token" }
                 source, "check.go", {"sample.error": "CodeSampleError"}
             ),
         )
+
+    def test_fixture_and_escaped_strings_are_not_duplicates(self) -> None:
+        """A code mentioned inside a JSON fixture or escaped string is not a duplicate."""
+        source = """package p
+var fixture = `{"code": "sample.error"}`
+var escaped = "{\\"code\\": \\"sample.error\\"}"
+var prose = "prefix sample.error suffix"
+"""
+        duplicates = checker.find_raw_string_duplicates(
+            source, "check.go", {"sample.error": "CodeSampleError"}
+        )
+        self.assertEqual([], duplicates)
+
+    def test_duplicate_backtick_literal_is_reported(self) -> None:
+        """Flag a raw backtick string that copies an exported diagnostic code."""
+        source = "func f() { code := `sample.error` }\n"
+        duplicates = checker.find_raw_string_duplicates(
+            source, "check.go", {"sample.error": "CodeSampleError"}
+        )
+        self.assertEqual(1, len(duplicates))
+        self.assertEqual("sample.error", duplicates[0].value)
+        self.assertEqual(1, duplicates[0].line)
 
 
 class RelativePosixTests(unittest.TestCase):
@@ -589,6 +650,20 @@ class EvaluateAndCheckTests(unittest.TestCase):
         self.assertTrue(any("README.md" in item for item in report.errors))
         self.assertTrue(any("ProtoBotV2.md" in item for item in report.errors))
 
+    def test_zero_constants_fails_evaluate(self) -> None:
+        """Fail when validator/internal contains no diagnostic constants."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            go_path, readme, spec = _layout(root)
+            _write(go_path, "package sample\nconst Other = 123\n")
+            _write(readme, _SAMPLE_README)
+            _write(spec, _SAMPLE_SPEC)
+            report = checker.evaluate(root)
+        self.assertFalse(report.ok)
+        self.assertTrue(
+            any("no diagnostic constants found" in err for err in report.errors)
+        )
+
     def test_raw_string_duplicate_fails_check(self) -> None:
         """Fail when specvalidation uses a raw string of an exported code."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -718,6 +793,10 @@ class MainTests(unittest.TestCase):
 
 
 class UnreadableFileTests(unittest.TestCase):
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0,
+        "root ignores file mode 000 permissions",
+    )
     def test_chmod_zero_go_file_is_a_read_error(self) -> None:
         """Treat a permission-denied Go file as a documented read error."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -729,13 +808,11 @@ class UnreadableFileTests(unittest.TestCase):
             mode = go_path.stat().st_mode
             os.chmod(go_path, 0)
             try:
-                readable = os.access(go_path, os.R_OK)
                 constants, errors = checker.collect_constants(root)
             finally:
                 os.chmod(go_path, mode | stat.S_IRUSR)
-            if not readable:
-                self.assertTrue(errors)
-                self.assertEqual([], constants)
+            self.assertTrue(errors)
+            self.assertEqual([], constants)
 
 
 if __name__ == "__main__":
