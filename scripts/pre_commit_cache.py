@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+"""Seed the offline ``pre-commit`` hook cache for Fullsend agent sandboxes.
+
+Fullsend agent sandboxes have no network egress, so ``scripts/lint.py``
+(the validation entrypoint ``AGENTS.md`` prescribes) needs a pre-seeded
+``PRE_COMMIT_HOME``. This script runs on the trusted runner, which has
+network access, in two steps:
+
+1. Run the pinned upstream Fullsend pre-script unchanged, so its input
+   validation and exit-78 skip semantics survive. A local harness
+   ``pre_script`` replaces the base harness value instead of chaining,
+   so the wrapper must delegate itself.
+2. Warm the hook cache and write it to a tarball. ``host_files`` copies
+   the tarball into the sandbox, where ``scripts/lint.py`` restores it
+   on the first offline run.
+
+Path contract: hook virtualenvs embed absolute paths, so the cache must
+be built at the exact path the sandbox will unpack it to. The default
+cache home ``/sandbox/.cache/pre-commit`` matches ``PRE_COMMIT_HOME`` in
+``.fullsend/harness/code.yaml`` and ``fix.yaml``, and the default
+tarball path ``/tmp/workspace/pre-commit-cache.tar.gz`` matches the
+``host_files`` entry that copies it to
+``/tmp/protobot-pre-commit-cache.tar.gz`` in the sandbox.
+
+Version pins: ``AGENTS_REF`` must equal the ``vX.Y.Z`` in every
+``.fullsend/harness/*.yaml`` ``base:`` URL (checked offline by
+``scripts/test_pre_commit_cache.py``), and ``PRECOMMIT_VERSION`` must
+equal ``PRECOMMIT_VERSION`` in fullsend's ``images/sandbox/Containerfile``
+— the version the sandbox installs. A mismatch on either pin breaks the
+cache, because hook environments and ``db.db`` record exact versions.
+``UPSTREAM_SCRIPT_SHA256`` pins the exact bytes of each upstream
+pre-script at ``AGENTS_REF``; a moved tag or a changed file is a hard
+failure, never unverified script content.
+
+Step 2 is fail-soft: a bootstrap failure prints a GitHub Actions warning
+and exits 0, so it never blocks the agent run. ``scripts/lint.py``
+still reports its actionable cache-miss error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Pin of the fullsend-ai/agents repository. Keep in sync with the
+# ``base:`` URLs in .fullsend/harness/*.yaml.
+AGENTS_REF = "v0.56.1"
+AGENTS_RAW_BASE = f"https://raw.githubusercontent.com/fullsend-ai/agents/{AGENTS_REF}"
+UPSTREAM_SCRIPTS = {
+    "code": "scripts/pre-code.sh",
+    "fix": "scripts/pre-fix.sh",
+}
+
+# SHA-256 of each pinned upstream pre-script at AGENTS_REF. When a value
+# stops matching, the tag moved or the file changed; re-verify the new
+# content before updating the pin.
+UPSTREAM_SCRIPT_SHA256 = {
+    "code": "cb9fcec5ca9b3c7e2004aaeb24b4453e2435e094da4c801c851ef29604495278",  # pragma: allowlist secret
+    "fix": "8457b72882bad5b79392d16d72e67e2215e8a040d7e6e875e441272d858a931f",  # pragma: allowlist secret
+}
+
+# Must equal PRECOMMIT_VERSION in fullsend's images/sandbox/Containerfile.
+PRECOMMIT_VERSION = "4.5.1"
+
+DEFAULT_CACHE_HOME = "/sandbox/.cache/pre-commit"
+DEFAULT_TARBALL = "/tmp/workspace/pre-commit-cache.tar.gz"
+
+DOWNLOAD_TIMEOUT_SECONDS = 60
+VERSION_TIMEOUT_SECONDS = 60
+PIP_TIMEOUT_SECONDS = 10 * 60
+INSTALL_HOOKS_TIMEOUT_SECONDS = 15 * 60
+SUDO_TIMEOUT_SECONDS = 60
+MAX_SCRIPT_BYTES = 2 * 1024 * 1024
+
+
+class UpstreamScriptError(OSError):
+    """The pinned upstream pre-script could not be fetched or verified."""
+
+
+class _UnexpectedRedirectError(ValueError):
+    """A redirect was rejected while fetching a pinned URL."""
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so a moved pin cannot change the fetch target."""
+
+    def redirect_request(
+        self,
+        request: object,
+        response: object,
+        code: int,
+        message: str,
+        headers: object,
+        new_url: str,
+    ) -> urllib.request.Request | None:
+        raise _UnexpectedRedirectError("redirect rejected while fetching a pinned URL")
+
+
+def _run(
+    argv: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    timeout: int | None = None,
+    capture: bool = False,
+    cwd: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one external command. Module-level so tests can intercept it."""
+    return subprocess.run(
+        argv,
+        env=env,
+        timeout=timeout,
+        capture_output=capture,
+        text=capture,
+        cwd=cwd,
+        check=False,
+    )
+
+
+def _tail(text: str, lines: int = 10) -> str:
+    """Return the last non-empty *lines* of *text*, for error messages."""
+    return "\n".join(text.strip().splitlines()[-lines:])
+
+
+def _run_or_raise(
+    argv: list[str],
+    *,
+    description: str,
+    env: dict[str, str] | None = None,
+    timeout: int | None = None,
+    cwd: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one external command and raise ``RuntimeError`` on failure.
+
+    Output is captured so the raised message can quote the command's own
+    stderr, which is usually the real reason for the failure.
+    """
+    result = _run(argv, env=env, timeout=timeout, cwd=cwd, capture=True)
+    if result.returncode != 0:
+        message = f"{description} (exit {result.returncode})"
+        detail = _tail(result.stderr)
+        if detail:
+            message = f"{message}\n{detail}"
+        raise RuntimeError(message)
+    return result
+
+
+# ── Step 1: upstream delegation ─────────────────────────────────
+
+
+def _upstream_url(upstream: str) -> str:
+    return f"{AGENTS_RAW_BASE}/{UPSTREAM_SCRIPTS[upstream]}"
+
+
+def _response_url(response: object) -> str | None:
+    """Return the final URL when *response* exposes one."""
+    geturl = getattr(response, "geturl", None)
+    if callable(geturl):
+        url = geturl()
+        return url if isinstance(url, str) else None
+    return None
+
+
+def _download_upstream_script(
+    url: str, destination: Path, expected_sha256: str
+) -> None:
+    """Download the pinned upstream pre-script and verify its bytes.
+
+    Requires https, rejects redirects, and caps the response size, so a
+    moved tag or a hostile response cannot smuggle script content past
+    the SHA-256 pin.
+    """
+    if not url.startswith("https://"):
+        raise UpstreamScriptError(f"refusing to fetch a non-https URL: {url}")
+    try:
+        opener = urllib.request.build_opener(_NoRedirectHandler())
+        response = opener.open(url, timeout=DOWNLOAD_TIMEOUT_SECONDS)
+    except _UnexpectedRedirectError:
+        raise UpstreamScriptError(f"redirect rejected while fetching {url}") from None
+    with response:
+        final_url = _response_url(response)
+        if final_url is not None and final_url != url:
+            raise UpstreamScriptError(
+                f"redirect rejected: {url} resolved to {final_url}"
+            )
+        data = response.read(MAX_SCRIPT_BYTES + 1)
+    if len(data) > MAX_SCRIPT_BYTES:
+        raise UpstreamScriptError(
+            f"the upstream pre-script exceeds {MAX_SCRIPT_BYTES} bytes: {url}"
+        )
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != expected_sha256:
+        raise UpstreamScriptError(
+            f"sha256 mismatch for {url}: expected {expected_sha256}, got {digest}"
+        )
+    destination.write_bytes(data)
+
+
+def _run_upstream_script(upstream: str) -> int:
+    """Download, verify, and run the pinned upstream pre-script.
+
+    Returns its exit code verbatim (0, 78 for a neutral skip, or a hard
+    failure), so fullsend sees exactly the decision the upstream script
+    made. A script that cannot be fetched or verified is a hard failure:
+    it must not silently disable the agent's input validation.
+    """
+    url = _upstream_url(upstream)
+    with tempfile.TemporaryDirectory() as temporary:
+        script = Path(temporary) / "upstream-pre-script.sh"
+        try:
+            _download_upstream_script(url, script, UPSTREAM_SCRIPT_SHA256[upstream])
+        except OSError as error:
+            print(
+                f"ERROR: cannot run the pinned upstream pre-script {url}: {error}\n"
+                "       The agent's input validation needs it. Check network\n"
+                "       access and the AGENTS_REF and UPSTREAM_SCRIPT_SHA256 pins\n"
+                "       in scripts/pre_commit_cache.py (the tag may have moved\n"
+                "       or the file changed).",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            # bash <path>, not exec: the download is not executable.
+            # The inherited environment and working directory carry
+            # FULLSEND_PRESCRIPT_OUTPUT and the env.runner variables to
+            # the upstream script unchanged.
+            return _run(["bash", str(script)]).returncode
+        except OSError as error:
+            print(
+                f"ERROR: cannot run the upstream pre-script: {error}", file=sys.stderr
+            )
+            return 1
+
+
+# ── Step 2: warm the cache (fail-soft) ───────────────────────────
+
+
+def _target_repo() -> Path:
+    """Return the repository whose hook cache should be warmed.
+
+    Fullsend exports ``TARGET_REPO_DIR`` for the repository the agent
+    will edit. Fall back to this checkout for local runs.
+    """
+    candidate = os.environ.get("TARGET_REPO_DIR", "")
+    if candidate and (Path(candidate) / ".pre-commit-config.yaml").is_file():
+        return Path(candidate)
+    return REPO_ROOT
+
+
+def _pre_commit_version(binary: str) -> str | None:
+    """Return the version *binary* reports, or None when it cannot run."""
+    try:
+        result = _run(
+            [binary, "--version"], timeout=VERSION_TIMEOUT_SECONDS, capture=True
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    words = result.stdout.split()
+    return words[-1] if words else None
+
+
+def _install_pre_commit() -> None:
+    """Install ``pre-commit==PRECOMMIT_VERSION`` into the user site.
+
+    Ubuntu marks the system Python as externally managed, so the install
+    needs ``--break-system-packages``. Older pip versions reject that
+    flag, so retry without it.
+    """
+    pinned = f"pre-commit=={PRECOMMIT_VERSION}"
+    attempts = (
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--user",
+            "--break-system-packages",
+            pinned,
+        ],
+        [sys.executable, "-m", "pip", "install", "--user", pinned],
+    )
+    for attempt in attempts:
+        result = _run(attempt, timeout=PIP_TIMEOUT_SECONDS, capture=True)
+        if result.returncode == 0:
+            return
+    message = f"could not install {pinned} with pip"
+    detail = _tail(result.stderr)
+    if detail:
+        message = f"{message}: {detail}"
+    raise RuntimeError(
+        f"{message}; run manually: "
+        f"python3 -m pip install --user --break-system-packages {pinned}"
+    )
+
+
+def _pre_commit_candidates() -> list[str]:
+    """Return pre-commit binaries to try, most specific first."""
+    candidates = []
+    override = os.environ.get("PRE_COMMIT_BIN")
+    if override:
+        candidates.append(override)
+    candidates.append("pre-commit")
+    # pip --user installs into ~/.local/bin, which may not be on PATH.
+    candidates.append(str(Path.home() / ".local" / "bin" / "pre-commit"))
+    return candidates
+
+
+def _resolve_pre_commit() -> str:
+    """Return a pre-commit binary whose version matches the pin.
+
+    Uses an existing binary when its ``--version`` matches. Otherwise
+    installs the pinned version and looks again.
+    """
+    for binary in _pre_commit_candidates():
+        if _pre_commit_version(binary) == PRECOMMIT_VERSION:
+            return binary
+    _install_pre_commit()
+    for binary in _pre_commit_candidates():
+        if _pre_commit_version(binary) == PRECOMMIT_VERSION:
+            return binary
+    raise RuntimeError(
+        f"no pre-commit {PRECOMMIT_VERSION} binary is available; run manually: "
+        f"python3 -m pip install --user pre-commit=={PRECOMMIT_VERSION}"
+    )
+
+
+def _ensure_cache_home(cache_home: Path) -> None:
+    """Ensure the cache home exists and is writable by the current user.
+
+    The cache must live at the sandbox's exact path, which on the runner
+    may not exist yet or sit under a root-owned directory. One
+    ``sudo -n -- install -d`` then creates it owned by the runner user,
+    so pre-commit itself never runs under ``sudo``. The writability
+    check makes a failed ``sudo`` (for example no passwordless sudo)
+    surface as an actionable error instead of a later crash.
+    """
+    try:
+        cache_home.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        sudo = os.environ.get("SUDO", "sudo")
+        _run_or_raise(
+            [
+                sudo,
+                "-n",
+                "--",
+                "install",
+                "-d",
+                "-o",
+                str(os.getuid()),
+                "-g",
+                str(os.getgid()),
+                str(cache_home),
+            ],
+            description=f"cannot create the cache home {cache_home} with sudo",
+            timeout=SUDO_TIMEOUT_SECONDS,
+        )
+    if not os.access(cache_home, os.W_OK):
+        raise RuntimeError(
+            f"the cache home {cache_home} is not writable by uid {os.getuid()}; "
+            f"create it with: sudo install -d -o {os.getuid()} -g {os.getgid()} "
+            f"{cache_home}"
+        )
+
+
+def _warm_cache(cache_home: Path, tarball: Path) -> None:
+    """Warm the hook cache and write the transport tarball.
+
+    Raises on any failure; ``main`` makes this phase fail-soft.
+    """
+    repo = _target_repo()
+    config = repo / ".pre-commit-config.yaml"
+    if not config.is_file():
+        raise RuntimeError(f"no .pre-commit-config.yaml in {repo}")
+    binary = _resolve_pre_commit()
+    _ensure_cache_home(cache_home)
+    env = dict(os.environ)
+    env["PRE_COMMIT_HOME"] = str(cache_home)
+    _run_or_raise(
+        [binary, "install-hooks", "--config", str(config)],
+        description="pre-commit install-hooks failed",
+        env=env,
+        timeout=INSTALL_HOOKS_TIMEOUT_SECONDS,
+        cwd=str(repo),
+    )
+    _run_or_raise(
+        ["chmod", "-R", "a+rX", str(cache_home)],
+        description=f"cannot make {cache_home} world-readable",
+    )
+    tarball.parent.mkdir(parents=True, exist_ok=True)
+    tar = os.environ.get("TAR", "tar")
+    _run_or_raise(
+        [tar, "-czf", str(tarball), "-C", str(cache_home), "."],
+        description=f"cannot write the cache tarball {tarball}",
+    )
+    _run_or_raise(
+        ["chmod", "0644", str(tarball)],
+        description=f"cannot make {tarball} readable",
+    )
+
+
+# ── Entrypoint ───────────────────────────────────────────────────
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--upstream",
+        required=True,
+        choices=("code", "fix"),
+        help="pinned upstream pre-script to delegate to",
+    )
+    parser.add_argument(
+        "--skip-upstream",
+        action="store_true",
+        help="skip the upstream pre-script (for local use and tests)",
+    )
+    parser.add_argument(
+        "--cache-home",
+        default=os.environ.get("PROTOBOT_CACHE_HOME", DEFAULT_CACHE_HOME),
+        help=f"cache home to warm (default: {DEFAULT_CACHE_HOME})",
+    )
+    parser.add_argument(
+        "--tarball",
+        default=os.environ.get("PROTOBOT_CACHE_TARBALL", DEFAULT_TARBALL),
+        help=f"tarball to write (default: {DEFAULT_TARBALL})",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    if not args.skip_upstream:
+        upstream_rc = _run_upstream_script(args.upstream)
+        if upstream_rc != 0:
+            # The upstream script skipped (78) or failed the run. No
+            # sandbox is created, so warming the cache would be wasted.
+            return upstream_rc
+    try:
+        _warm_cache(Path(args.cache_home), Path(args.tarball))
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        # Fail-soft: a bootstrap failure must not block the agent run.
+        # scripts/lint.py still reports its actionable cache-miss error.
+        manual = (
+            f"PRE_COMMIT_HOME={args.cache_home} "
+            f"pre-commit install-hooks --config {_target_repo() / '.pre-commit-config.yaml'}"
+        )
+        print(
+            f"::warning::pre-commit cache bootstrap failed: {error}. "
+            f"Warm it manually: {manual}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

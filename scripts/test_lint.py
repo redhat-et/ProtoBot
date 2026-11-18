@@ -6,6 +6,8 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -235,6 +237,288 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("https://example.invalid/bar @ bbbb", message)
 
 
+class PreflightRestoreTests(unittest.TestCase):
+    """The pre-flight restores a cold cache from the bootstrap tarball."""
+
+    def setUp(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.root = Path(temporary_directory.name)
+        self.home = self.root / "cache"
+        self.tarball = self.root / "pre-commit-cache.tar.gz"
+        env_patcher = patch.dict(
+            os.environ,
+            {"PROTOBOT_PRE_COMMIT_CACHE_TARBALL": str(self.tarball)},
+            clear=False,
+        )
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+
+    def _current_interpreter(self) -> str:
+        return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+    def _build_tarball(
+        self,
+        rows: list[tuple[str, str]],
+        *,
+        other_interpreters: tuple[str, ...] = (),
+    ) -> None:
+        """Write a bootstrap tarball holding a cache with *rows* cached.
+
+        The fixture mirrors the real layout: a ``db.db`` at the archive
+        root and per-repo ``py_env-python<X.Y>`` virtualenvs whose
+        ``bin/python`` is an absolute symlink.
+        """
+        packed = self.root / "packed"
+        _make_db(packed / "db.db", rows)
+        versions = (self._current_interpreter(), *other_interpreters)
+        for version in versions:
+            bin_directory = packed / "repodir" / f"py_env-python{version}" / "bin"
+            bin_directory.mkdir(parents=True, exist_ok=True)
+            os.symlink("/usr/bin/python3", bin_directory / "python")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                # recursive=False: rglob already lists every entry, and
+                # tar.add's own recursion would write duplicate members.
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+
+    def _config_rows(self) -> list[tuple[str, str]]:
+        return [
+            ("https://example.invalid/foo", "aaaa"),
+            ("https://example.invalid/bar", "bbbb"),
+        ]
+
+    def test_cold_cache_with_valid_tarball_restores_and_passes(self) -> None:
+        self._build_tarball(self._config_rows())
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        message = stdout.getvalue()
+        self.assertIn("Restored the offline pre-commit cache", message)
+        self.assertIn(str(self.tarball), message)
+        self.assertIn(str(self.home), message)
+        # The tarball is deleted after a successful restore.
+        self.assertFalse(self.tarball.exists())
+        # The restored db.db satisfies the pre-flight.
+        self.assertTrue((self.home / "db.db").is_file())
+        # The cache's absolute symlink survives the restore.
+        link = (
+            self.home
+            / "repodir"
+            / f"py_env-python{self._current_interpreter()}"
+            / "bin"
+            / "python"
+        )
+        self.assertTrue(link.is_symlink())
+        self.assertEqual("/usr/bin/python3", os.readlink(link))
+        # No interpreter warning for a matching cache.
+        self.assertEqual("", stderr.getvalue())
+
+    def test_no_tarball_keeps_the_existing_error(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("missing 2 hook repository revisions", message)
+        self.assertIn("pre-commit install-hooks", message)
+
+    def test_corrupt_tarball_warns_and_returns_missing_repositories(self) -> None:
+        for content in (b"this is not a tarball", b"\x1f\x8btruncated-gzip"):
+            with self.subTest(content=content):
+                self.tarball.write_bytes(content)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    rc = checker._preflight_with_restore(
+                        False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                    )
+                self.assertEqual(1, rc)
+                message = stderr.getvalue()
+                self.assertIn("cannot restore the pre-commit cache", message)
+                self.assertIn("missing 2 hook repository revisions", message)
+                # A failed restore keeps the tarball and prints no restore line.
+                self.assertTrue(self.tarball.exists())
+                self.assertEqual("", stdout.getvalue())
+
+    def test_online_never_restores(self) -> None:
+        self._build_tarball(self._config_rows())
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            rc = checker._preflight_with_restore(
+                True, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        # The tarball is untouched and no restore is reported.
+        self.assertTrue(self.tarball.exists())
+        self.assertNotIn("Restored", stdout.getvalue())
+
+    def test_other_interpreter_py_env_warns(self) -> None:
+        self._build_tarball(self._config_rows(), other_interpreters=("1.2",))
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("built for another interpreter", message)
+        self.assertIn("py_env-python1.2", message)
+
+    def test_members_that_escape_the_destination_are_skipped(self) -> None:
+        payload = io.BytesIO(b"data")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            link = tarfile.TarInfo("repodir/escape")
+            link.type = tarfile.SYMTYPE
+            link.linkname = str(self.root / "outside")
+            tar.addfile(link)
+            member = tarfile.TarInfo("repodir/escape/payload.txt")
+            member.size = len(payload.getbuffer())
+            tar.addfile(member, payload)
+            escape = tarfile.TarInfo("../escape.txt")
+            escape.size = 0
+            tar.addfile(escape)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        # No file landed outside the cache home, the skips are counted and
+        # warned about, and the tarball is kept.
+        self.assertFalse((self.root / "outside" / "payload.txt").exists())
+        self.assertFalse((self.root / "escape.txt").exists())
+        self.assertEqual(1, rc)
+        self.assertIn("skipped 2 tarball member(s)", stderr.getvalue())
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+
+    def test_restore_that_does_not_fix_the_cache_keeps_the_tarball(self) -> None:
+        # The tarball restores but holds none of the configured rows, so
+        # the pre-flight still fails and the tarball must be kept.
+        self._build_tarball([("https://example.invalid/other", "zzzz")])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertIn("missing 2 hook repository revisions", stderr.getvalue())
+        self.assertTrue(self.tarball.exists())
+
+    def test_extraction_over_the_size_cap_stops_and_keeps_the_tarball(self) -> None:
+        self._build_tarball(self._config_rows())
+        with patch.object(checker, "_MAX_EXTRACTED_BYTES", 10):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(1, rc)
+        self.assertIn("extraction stopped early", stderr.getvalue())
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        # The very first member already exceeded the cap: nothing extracted.
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_tarball_outside_the_delete_root_is_never_deleted(self) -> None:
+        self._build_tarball(self._config_rows())
+        with patch.object(checker, "_TARBALL_DELETE_ROOT", self.root / "nowhere"):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertIn("only tarballs under", stderr.getvalue())
+        self.assertTrue(self.tarball.exists())
+
+    def test_fallback_extraction_when_filter_kwarg_is_rejected(self) -> None:
+        self._build_tarball(self._config_rows())
+        original_extractall = tarfile.TarFile.extractall
+
+        def extractall_without_filter(
+            tar,
+            path=".",
+            members=None,
+            *,
+            numeric_owner=False,
+            filter=None,
+        ):
+            if filter is not None:
+                raise TypeError(
+                    "extractall() got an unexpected keyword argument 'filter'"
+                )
+            return original_extractall(
+                tar, path, members=members, numeric_owner=numeric_owner
+            )
+
+        stdout = io.StringIO()
+        with (
+            patch.object(tarfile.TarFile, "extractall", extractall_without_filter),
+            contextlib.redirect_stdout(stdout),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertFalse(self.tarball.exists())
+
+    def test_run_path_flushes_the_restore_line_before_exec(self) -> None:
+        # os.execvp replaces the process without flushing Python's
+        # buffers. A block-buffered stdout, as under a shell redirect,
+        # would lose the restore line without an explicit flush.
+        self._build_tarball(self._config_rows())
+        raw = io.BytesIO()
+        buffered = io.TextIOWrapper(raw, encoding="utf-8")
+        with (
+            patch.dict(os.environ, {"PRE_COMMIT_HOME": str(self.home)}, clear=False),
+            patch.object(
+                checker,
+                "_load_config",
+                return_value=_CONFIG_TWO_REMOTE_ONE_LOCAL,
+            ),
+            patch.object(checker, "_changed_files", return_value=["README.md"]),
+            patch("os.execvp") as mock_execvp,
+            patch("sys.stdout", buffered),
+        ):
+            checker.main(["--files", "README.md"])
+        mock_execvp.assert_called_once_with(
+            "pre-commit", ["pre-commit", "run", "--files", "README.md"]
+        )
+        self.assertIn(
+            "Restored the offline pre-commit cache",
+            raw.getvalue().decode("utf-8"),
+        )
+
+
 class ChangedFilesTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
@@ -435,10 +719,16 @@ class MainCheckParityTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
-        self.home = Path(temporary_directory.name) / "cache"
+        self.root = Path(temporary_directory.name)
+        self.home = self.root / "cache"
+        # Pin the bootstrap tarball to a path that does not exist, so a
+        # tarball left on the host cannot change these cases.
         env_patcher = patch.dict(
             os.environ,
-            {"PRE_COMMIT_HOME": str(self.home)},
+            {
+                "PRE_COMMIT_HOME": str(self.home),
+                "PROTOBOT_PRE_COMMIT_CACHE_TARBALL": str(self.root / "absent.tar.gz"),
+            },
             clear=False,
         )
         env_patcher.start()
@@ -464,6 +754,40 @@ class MainCheckParityTests(unittest.TestCase):
         mock_run.assert_not_called()
         self.assertEqual(1, rc)
         self.assertIn("pre-commit install-hooks", buf.getvalue())
+
+    def test_cold_cache_with_tarball_restores_then_validates(self) -> None:
+        rows = [
+            ("https://example.invalid/foo", "aaaa"),
+            ("https://example.invalid/bar", "bbbb"),
+        ]
+        tarball = self.root / "pre-commit-cache.tar.gz"
+        packed = self.root / "packed"
+        _make_db(packed / "db.db", rows)
+        with tarfile.open(tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        with (
+            patch.dict(
+                os.environ,
+                {"PROTOBOT_PRE_COMMIT_CACHE_TARBALL": str(tarball)},
+                clear=False,
+            ),
+            patch.object(
+                checker,
+                "_load_config",
+                return_value=_CONFIG_TWO_REMOTE_ONE_LOCAL,
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = checker.main(["--check-parity"])
+        self.assertEqual(0, rc)
+        mock_run.assert_called_once()
+        self.assertIn("Restored the offline pre-commit cache", buf.getvalue())
+        self.assertIn("PARITY CHECK PASSED", buf.getvalue())
+        self.assertFalse(tarball.exists())
 
     def test_cache_hit_runs_validate_config(self) -> None:
         _make_db(self.home / "db.db", [])

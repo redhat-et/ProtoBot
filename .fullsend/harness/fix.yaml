@@ -6,6 +6,16 @@ base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.56.1/harness/fix.
 # timeout_minutes * 60.
 timeout_minutes: 45
 
+# Seed the offline pre-commit hook cache on the trusted runner before the
+# sandbox drops network access. See .fullsend/README.md.
+pre_script: scripts/pre-fix-cache.sh
+
+host_files:
+    - src: /tmp/workspace/pre-commit-cache.tar.gz
+      dest: /tmp/protobot-pre-commit-cache.tar.gz
+      optional: true
+
 env:
     sandbox:
         TIMEOUT_SECONDS: "2700"
+        PRE_COMMIT_HOME: /sandbox/.cache/pre-commit

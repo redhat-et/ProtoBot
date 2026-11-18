@@ -10,6 +10,12 @@ sandboxed coding agents that lack network access:
   cache and fails with an actionable message (naming the missing
   repository, revision, and bootstrap command) instead of letting
   ``pre-commit`` crash with an opaque traceback.
+* When the cache is cold and a bootstrap tarball was copied into the
+  sandbox (by the Fullsend pre-script, see ``.fullsend/README.md``),
+  it restores the cache from that tarball first and re-runs the
+  pre-flight. The restore never runs with ``--online``, and the
+  tarball is deleted only after a complete restore passes the
+  pre-flight.
 * It exports ``ZIZMOR_NO_ONLINE_AUDITS=true`` while offline, so the
   ``zizmor`` hook skips audits that require network access.
 * It replicates the previous script's default file-selection
@@ -41,11 +47,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sqlite3
 import subprocess
 import sys
+import tarfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
@@ -53,6 +62,22 @@ CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
 # The pre-commit version this wrapper requires. CI installs exactly
 # this version; it reads the value through --print-pre-commit-version.
 PRE_COMMIT_VERSION = "4.6.2"
+
+# Bootstrap tarball copied into the sandbox by the Fullsend pre-script
+# (see .fullsend/README.md).
+_DEFAULT_CACHE_TARBALL = Path("/tmp/protobot-pre-commit-cache.tar.gz")
+
+# Only tarballs under this directory are deleted after a restore; a
+# configured path elsewhere may be a file the operator wants to keep.
+_TARBALL_DELETE_ROOT = Path("/tmp")
+
+# The warm cache is about 1 GB; 4 GiB bounds a corrupt or hostile
+# tarball's extraction.
+_MAX_EXTRACTED_BYTES = 4 * 1024 * 1024 * 1024
+
+# ``repo*/py_env-python3.X`` directories hold per-hook virtualenvs for one
+# interpreter; a cache built for another interpreter cannot run them.
+_PY_ENV_NAME = re.compile(r"^py_env-python(?P<version>[0-9]+\.[0-9]+)$")
 
 # ``repo:`` values pre-commit never clones over the network.
 _NON_CLONED_REPOS = {"local", "meta"}
@@ -84,6 +109,14 @@ def _pre_commit_home() -> Path:
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
     return (base / "pre-commit").resolve()
+
+
+def _cache_tarball() -> Path:
+    """Return the bootstrap tarball path copied in by the pre-script."""
+    configured = os.environ.get("PROTOBOT_PRE_COMMIT_CACHE_TARBALL")
+    if configured:
+        return Path(configured).expanduser()
+    return _DEFAULT_CACHE_TARBALL
 
 
 # ── Config helpers ──────────────────────────────────────────────
@@ -210,6 +243,199 @@ def _preflight(online: bool, pre_commit_home: Path, config: dict[str, Any]) -> i
     return 0
 
 
+# ── Cold-cache restore from the bootstrap tarball ────────────────
+
+
+class _MemberFilter:
+    """Tar member iterator that yields only members safe to extract.
+
+    Skips members whose path would escape the destination and members
+    that are not files, directories, symlinks, or hard links, counting
+    every rejection in ``skipped_members``. Stops yielding once the
+    extracted bytes would exceed ``_MAX_EXTRACTED_BYTES`` and records
+    that in ``size_capped``. The check runs lazily, one member at a
+    time, so it also sees symlinks that earlier members of the same
+    archive created. It is the safety net for Python versions whose
+    ``extractall`` takes no ``filter`` argument; with ``filter="tar"``
+    it is defence in depth. Symlink targets are not restricted: the
+    cache legitimately contains absolute links such as
+    ``py_env-*/bin/python`` -> ``/usr/bin/python3``.
+    """
+
+    def __init__(self, tar: tarfile.TarFile, destination: Path) -> None:
+        self._tar = tar
+        self._destination = destination
+        self.skipped_members = 0
+        self.extracted_bytes = 0
+        self.size_capped = False
+
+    def __iter__(self) -> Iterator[tarfile.TarInfo]:
+        resolved_destination = self._destination.resolve()
+        for member in self._tar:
+            if not (
+                member.isfile() or member.isdir() or member.issym() or member.islnk()
+            ):
+                self.skipped_members += 1
+                continue
+            candidate = (self._destination / member.name).resolve()
+            inside = (
+                candidate == resolved_destination
+                or resolved_destination in candidate.parents
+            )
+            if not inside:
+                self.skipped_members += 1
+                continue
+            if self.extracted_bytes + member.size > _MAX_EXTRACTED_BYTES:
+                self.size_capped = True
+                return
+            self.extracted_bytes += member.size
+            yield member
+
+
+def _extract_tarball(tar: tarfile.TarFile, destination: Path) -> _MemberFilter:
+    """Extract *tar* into *destination*; return the member filter used.
+
+    Uses the ``tar`` filter, which keeps the cache's absolute symlinks
+    (the ``data`` filter would reject them). Falls back for Python
+    versions whose ``extractall`` takes no ``filter`` argument; there
+    ``fully_trusted_filter`` is pinned where it exists, so the fallback
+    keeps the same semantics instead of the newer default ``data``
+    filter. ``_MemberFilter`` rejects escaping members on every version.
+    """
+    members = _MemberFilter(tar, destination)
+    try:
+        tar.extractall(destination, members=members, filter="tar")
+    except TypeError:
+        trusted = getattr(tarfile, "fully_trusted_filter", None)
+        if trusted is not None:
+            tar.extraction_filter = trusted
+        tar.extractall(destination, members=members)
+    return members
+
+
+def _warn_on_interpreter_mismatch(pre_commit_home: Path) -> None:
+    """Warn when the restored cache was built for another interpreter."""
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    others = sorted(
+        {
+            match.group("version")
+            for entry in pre_commit_home.glob("*/py_env-python*")
+            if (match := _PY_ENV_NAME.match(entry.name))
+            and match.group("version") != current
+        }
+    )
+    if others:
+        found = ", ".join(f"py_env-python{version}" for version in others)
+        print(
+            f"WARNING: the restored pre-commit cache was built for another "
+            f"interpreter: found {found}, this interpreter is Python "
+            f"{current}. Hooks that use the python language will fail "
+            f"until the cache is rebuilt on this interpreter.",
+            file=sys.stderr,
+        )
+
+
+class _RestoreResult(NamedTuple):
+    """Outcome of one bootstrap-tarball restore attempt."""
+
+    restored: bool
+    skipped_members: int = 0
+    size_capped: bool = False
+
+
+def _restore_cache(pre_commit_home: Path) -> _RestoreResult:
+    """Restore ``PRE_COMMIT_HOME`` from the bootstrap tarball, if present.
+
+    Reports whether a restore happened and whether it was complete. The
+    tarball itself is left in place; ``_preflight_with_restore`` deletes
+    it only after a complete restore passes the pre-flight. A corrupt or
+    unreadable tarball only warns; the pre-flight then reports its usual
+    missing-revision error.
+    """
+    tarball = _cache_tarball()
+    if not tarball.is_file():
+        return _RestoreResult(False)
+    try:
+        with tarfile.open(tarball) as tar:
+            members = _extract_tarball(tar, pre_commit_home)
+    except (tarfile.TarError, EOFError, OSError) as error:
+        print(
+            f"WARNING: cannot restore the pre-commit cache from {tarball}: {error}",
+            file=sys.stderr,
+        )
+        return _RestoreResult(False)
+    if members.skipped_members:
+        print(
+            f"WARNING: skipped {members.skipped_members} tarball member(s) "
+            f"that would escape {pre_commit_home} or are not files, "
+            f"directories, or links; keeping {tarball}.",
+            file=sys.stderr,
+        )
+    if members.size_capped:
+        print(
+            f"WARNING: the tarball holds more than {_MAX_EXTRACTED_BYTES} "
+            f"bytes; extraction stopped early and {tarball} was kept.",
+            file=sys.stderr,
+        )
+    if not members.skipped_members and not members.size_capped:
+        print(
+            f"Restored the offline pre-commit cache from {tarball} into "
+            f"{pre_commit_home}."
+        )
+    _warn_on_interpreter_mismatch(pre_commit_home)
+    return _RestoreResult(True, members.skipped_members, members.size_capped)
+
+
+def _delete_tarball() -> None:
+    """Delete the bootstrap tarball after a complete, passing restore.
+
+    Only paths under ``_TARBALL_DELETE_ROOT`` (``/tmp``) are deleted; a
+    configured path elsewhere may be a file the operator wants to keep.
+    """
+    tarball = _cache_tarball()
+    if not tarball.is_file():
+        return
+    if _TARBALL_DELETE_ROOT not in tarball.resolve().parents:
+        print(
+            f"WARNING: keeping {tarball}: only tarballs under "
+            f"{_TARBALL_DELETE_ROOT} are deleted after a restore.",
+            file=sys.stderr,
+        )
+        return
+    try:
+        # The sandbox should not carry both the cache and its tarball.
+        tarball.unlink()
+    except OSError as error:
+        print(f"WARNING: cannot remove {tarball}: {error}", file=sys.stderr)
+
+
+def _preflight_with_restore(
+    online: bool,
+    pre_commit_home: Path,
+    config: dict[str, Any],
+) -> int:
+    """Run the cache pre-flight, restoring from the tarball once when cold.
+
+    Offline only: with ``--online`` the pre-flight passes without the
+    cache and the tarball is never unpacked. The missing-revision error
+    is reported only when no restore fixed the cache, so a successful
+    restore prints no spurious error. The tarball is deleted only after
+    a complete restore passes the pre-flight.
+    """
+    if not online:
+        missing = _missing_repos(
+            _configured_repos(config), _cached_repos(pre_commit_home)
+        )
+        if missing:
+            result = _restore_cache(pre_commit_home)
+            if result.restored:
+                rc = _preflight(online, pre_commit_home, config)
+                if rc == 0 and not result.skipped_members and not result.size_capped:
+                    _delete_tarball()
+                return rc
+    return _preflight(online, pre_commit_home, config)
+
+
 # ── File selection ──────────────────────────────────────────────
 
 
@@ -321,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
     config: dict[str, Any] | None = None
     if not online:
         config = _load_config()
-        rc = _preflight(online, pre_commit_home, config)
+        rc = _preflight_with_restore(online, pre_commit_home, config)
         if rc != 0:
             return rc
 
@@ -356,6 +582,10 @@ def main(argv: list[str] | None = None) -> int:
         cmd.append("--files")
         cmd.extend(changed)
 
+    # os.execvp replaces this process without flushing Python's buffers,
+    # so the restore and warning lines must be flushed first.
+    sys.stdout.flush()
+    sys.stderr.flush()
     os.execvp(cmd[0], cmd)  # intentional process replacement
 
 
