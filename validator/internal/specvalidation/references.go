@@ -3,6 +3,7 @@ package specvalidation
 import (
 	"fmt"
 	"path"
+	"strings"
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
@@ -58,11 +59,29 @@ func declaredInterfaceNames(interfaces []layout.Document[records.InterfaceRecord
 	return names
 }
 
+// targetFailedToLoad reports whether the store-local file for target failed
+// to load. Suppression is keyed on dir/target.yaml in the same store, so
+// interface attachments assume the file stem matches the declared name
+// (enforced by interface.name_basename_mismatch). Targets that contain
+// "/" or "\" are not eligible: path.Join would otherwise clean
+// separators out of the store directory and suppress a diagnostic for a file
+// in another store.
 func targetFailedToLoad(dir, target string, failedPaths map[string]bool) bool {
-	if len(failedPaths) == 0 || target == "" {
+	if len(failedPaths) == 0 || !storeLocalTarget(target) {
 		return false
 	}
-	return failedPaths[path.Join(dir, target+".yaml")]
+	candidate := path.Join(dir, target+".yaml")
+	if path.Dir(candidate) != dir {
+		return false
+	}
+	return failedPaths[candidate]
+}
+
+func storeLocalTarget(target string) bool {
+	if target == "" || target == "." || target == ".." {
+		return false
+	}
+	return !strings.ContainsAny(target, `/\`)
 }
 
 func validateInterfaceAttachments(
@@ -114,24 +133,12 @@ func validateRelationshipTargets(
 ) []Diagnostic {
 	var diagnostics []Diagnostic
 	for index, relationship := range document.Record.Relationships {
-		paths := declarations[relationship.Target]
-		if len(paths) == 1 {
+		// Duplicate requirement IDs are reported by requirement.duplicate_id.
+		// A present ID, unique or not, is not a dangling reference.
+		if len(declarations[relationship.Target]) > 0 {
 			continue
 		}
 		field := fmt.Sprintf("relationships[%d].target", index)
-		if len(paths) > 1 {
-			diagnostics = append(diagnostics, Diagnostic{
-				Code:  CodeReferenceAmbiguous,
-				Path:  document.Path,
-				Field: field,
-				Message: fmt.Sprintf(
-					"Requirement %q at %s is ambiguous; declared in multiple requirement records.",
-					relationship.Target,
-					field,
-				),
-			})
-			continue
-		}
 		if targetFailedToLoad(layout.RequirementsDir, relationship.Target, failedPaths) {
 			continue
 		}

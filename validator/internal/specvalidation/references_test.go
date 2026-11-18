@@ -498,7 +498,7 @@ func TestValidateRejectsAmbiguousInterfaceReference(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsAmbiguousRelationshipTarget(t *testing.T) {
+func TestValidateDuplicateRequirementIDDoesNotEmitReferenceAmbiguous(t *testing.T) {
 	snapshot := layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
 			{
@@ -522,25 +522,157 @@ func TestValidateRejectsAmbiguousRelationshipTarget(t *testing.T) {
 	}
 
 	diagnostics := Validate(snapshot)
-	var got Diagnostic
-	var found bool
+	var sawDuplicate bool
 	for _, d := range diagnostics {
 		if d.Code == CodeReferenceAmbiguous {
-			got = d
-			found = true
-			break
+			t.Fatalf("diagnostics=%v, did not want %s for a duplicate requirement ID", diagnostics, CodeReferenceAmbiguous)
+		}
+		if d.Code == CodeDuplicateID {
+			sawDuplicate = true
 		}
 	}
-	if !found {
-		t.Fatalf("diagnostics=%v, want CodeReferenceAmbiguous", diagnostics)
+	if !sawDuplicate {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeDuplicateID)
 	}
-	if got.Code != CodeReferenceAmbiguous {
-		t.Errorf("code=%q, want %q", got.Code, CodeReferenceAmbiguous)
+}
+
+func TestValidatePathTraversalDoesNotSuppressReferenceNotFound(t *testing.T) {
+	const reqPath = "spec/requirements/REQ-API-00002.yaml"
+	const traversal = "../../spec/requirements/REQ-BROKEN"
+	const backslash = `..\..\spec\requirements\REQ-BROKEN`
+	layoutDiagnostics := []layout.Diagnostic{{
+		Code:    layout.CodeParseFailed,
+		Path:    "spec/requirements/REQ-BROKEN.yaml",
+		Message: "parse YAML: failed",
+	}}
+
+	cases := []struct {
+		name  string
+		req   records.Requirement
+		field string
+		ident string
+	}{
+		{
+			name: "interface slash traversal",
+			req: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{traversal},
+				},
+			},
+			field: "applies_to.interfaces[0]",
+			ident: traversal,
+		},
+		{
+			name: "interface backslash traversal",
+			req: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{backslash},
+				},
+			},
+			field: "applies_to.interfaces[0]",
+			ident: "REQ-BROKEN",
+		},
+		{
+			name: "relationship slash traversal",
+			req: records.Requirement{
+				ID: "REQ-API-00002",
+				Relationships: []records.Relationship{
+					{Type: records.RelDependsOn, Target: traversal},
+				},
+			},
+			field: "relationships[0].target",
+			ident: traversal,
+		},
 	}
-	if got.Field != "relationships[0].target" {
-		t.Errorf("field=%q, want relationships[0].target", got.Field)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := layout.Snapshot{
+				Requirements: []layout.Document[records.Requirement]{{
+					Path:   reqPath,
+					Record: tc.req,
+				}},
+			}
+			diagnostics := Validate(snapshot, layoutDiagnostics...)
+			if len(diagnostics) != 1 || diagnostics[0].Code != CodeReferenceNotFound {
+				t.Fatalf("expected reference.not_found diagnostic, got %+v", diagnostics)
+			}
+			got := diagnostics[0]
+			if got.Path != reqPath {
+				t.Errorf("path=%q, want %q", got.Path, reqPath)
+			}
+			if got.Field != tc.field {
+				t.Errorf("field=%q, want %q", got.Field, tc.field)
+			}
+			if !identifiesType(got.Message, tc.ident) {
+				t.Errorf("message %q does not identify %q", got.Message, tc.ident)
+			}
+		})
 	}
-	if !identifiesType(got.Message, "REQ-API-00001") || !identifiesType(got.Message, "ambiguous") {
-		t.Errorf("message %q does not identify ambiguous REQ-API-00001", got.Message)
+}
+
+func TestValidateInterfaceNameMismatchParseFailureSuppression(t *testing.T) {
+	const path = "spec/requirements/REQ-API-00002.yaml"
+	// Option B: suppression keys off <stem>.yaml, so a parse failure of
+	// spec/interfaces/api.yaml does not suppress a reference to health-api.
+	// Basename matching (#463) enforces stem == name on successfully parsed
+	// interface records.
+	snapshot := layout.Snapshot{
+		Requirements: []layout.Document[records.Requirement]{{
+			Path: path,
+			Record: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{"health-api"},
+				},
+			},
+		}},
+	}
+	layoutDiagnostics := []layout.Diagnostic{{
+		Code:    layout.CodeParseFailed,
+		Path:    "spec/interfaces/api.yaml",
+		Message: "parse YAML: failed",
+	}}
+
+	diagnostics := Validate(snapshot, layoutDiagnostics...)
+	if len(diagnostics) != 1 || diagnostics[0].Code != CodeReferenceNotFound {
+		t.Fatalf("expected reference.not_found when interface stem differs from name, got %+v", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Path != path {
+		t.Errorf("path=%q, want %q", got.Path, path)
+	}
+	if got.Field != "applies_to.interfaces[0]" {
+		t.Errorf("field=%q, want applies_to.interfaces[0]", got.Field)
+	}
+	if !identifiesType(got.Message, "health-api") {
+		t.Errorf("message %q does not identify health-api", got.Message)
+	}
+}
+
+func TestValidateInterfaceWithDotDotSuppressesReferenceNotFound(t *testing.T) {
+	const path = "spec/requirements/REQ-API-00002.yaml"
+	snapshot := layout.Snapshot{
+		Requirements: []layout.Document[records.Requirement]{{
+			Path: path,
+			Record: records.Requirement{
+				ID: "REQ-API-00002",
+				AppliesTo: records.Applicability{
+					Interfaces: []string{"service..api"},
+				},
+			},
+		}},
+	}
+	layoutDiagnostics := []layout.Diagnostic{{
+		Code:    layout.CodeParseFailed,
+		Path:    "spec/interfaces/service..api.yaml",
+		Message: "parse YAML: failed",
+	}}
+
+	diagnostics := Validate(snapshot, layoutDiagnostics...)
+	if len(diagnostics) != 0 {
+		t.Fatalf("expected reference.not_found to be suppressed for service..api, got %+v", diagnostics)
 	}
 }
