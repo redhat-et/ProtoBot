@@ -162,31 +162,49 @@ class HistoricalMutationTests(unittest.TestCase):
         ]
         self.assertEqual([], checker.historical_mutations(old, new))
 
-    def test_superseded_status_with_arbitrary_trailing_text_is_not_authorized(
+    def test_authorized_status_supersession_with_additional_annotation_is_allowed(
         self,
     ) -> None:
-        """A superseded status line with arbitrary trailing content is not authorized."""
+        """An authorized status supersession with additional annotation is allowed."""
         old = [
             "# ADR-0001: Example",
             "",
-            "> Status: **Accepted** \u2014 September 2026",
+            "> Status: **Accepted** (supersedes ADR-0000)",
             "",
             "Body.",
         ]
         new = [
             "# ADR-0001: Example",
             "",
-            "> Status: **Superseded by ADR-0004** <arbitrary trailing text>",
+            "> Status: **Superseded by ADR-0004** (see issue #406)",
             "",
             "Body.",
             "",
             "**[Amended November 2026]** Superseded by ADR-0004.",
         ]
-        mutations = checker.historical_mutations(old, new)
-        self.assertEqual(
-            [(3, 3, "> Status: **Accepted** \u2014 September 2026")],
-            mutations,
-        )
+        self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_authorized_status_supersession_from_annotated_accepted_status_is_allowed(
+        self,
+    ) -> None:
+        """An accepted ADR with an annotated status line can be superseded."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** (supersedes ADR-0000)",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Body.",
+            "",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
 
     def test_status_supersession_outside_header_is_not_authorized(self) -> None:
         """A status-line-shaped replace outside the header window still fails."""
@@ -446,13 +464,13 @@ class GitRepoCheckTests(unittest.TestCase):
         self.assertIn("rewritten or replaced in place", output)
         self.assertIn("Use one file per record.", output)
 
-    def test_superseded_status_with_trailing_garbage_fails(self) -> None:
-        """A superseded status line with arbitrary trailing content fails."""
+    def test_superseded_status_transition_with_annotation_passes(self) -> None:
+        """A superseded status line with additional annotation passes check."""
         path = self.root / self.adr_rel
         path.write_text(
             _ACCEPTED_ADR.replace(
                 "> Status: **Accepted** \u2014 September 2026",
-                "> Status: **Superseded by ADR-0004** trailing text",
+                "> Status: **Superseded by ADR-0004** (see issue #406)",
             )
             + (
                 "\n**[Amended November 2026]** Superseded by ADR-0004; see "
@@ -461,9 +479,39 @@ class GitRepoCheckTests(unittest.TestCase):
             encoding="utf-8",
         )
         rc, output = self._check(self.adr_rel.as_posix())
-        self.assertEqual(1, rc)
-        self.assertIn("rewritten or replaced in place", output)
-        self.assertIn("> Status: **Accepted** \u2014 September 2026", output)
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_annotated_accepted_adr_supersession_passes(self) -> None:
+        """An accepted ADR with an annotated status line can be superseded."""
+        path = self.root / self.adr_rel
+        annotated_adr = _ACCEPTED_ADR.replace(
+            "> Status: **Accepted** \u2014 September 2026",
+            "> Status: **Accepted** (supersedes ADR-0000)",
+        )
+        path.write_text(annotated_adr, encoding="utf-8")
+        _git(
+            self.root,
+            "commit",
+            "-a",
+            "--no-gpg-sign",
+            "-m",
+            "add annotated accepted ADR",
+        )
+        path.write_text(
+            annotated_adr.replace(
+                "> Status: **Accepted** (supersedes ADR-0000)",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            )
+            + (
+                "\n**[Amended November 2026]** Superseded by ADR-0004; see "
+                "docs/decisions/0004-adopt-protobot-v2.md.\n"
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
 
     def test_rewritten_decision_text_fails(self) -> None:
         """In-place rewriting of accepted decision prose fails."""

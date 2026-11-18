@@ -38,12 +38,6 @@ _SUPERSEDED_STATUS = re.compile(
     r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*",
     re.MULTILINE,
 )
-_AUTHORIZED_ACCEPTED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Accepted\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
-)
-_AUTHORIZED_SUPERSEDED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*(?:\s*(?:—|--)\s*\w+ \d{4})?$",
-)
 _HEADER_LINE_LIMIT = 30
 _MAX_REPORTED_LINES = 10
 
@@ -90,8 +84,8 @@ def _is_authorized_status_supersession(
         return False
     old_line = old_segment[0].rstrip()
     new_line = new_segment[0].rstrip()
-    return bool(_AUTHORIZED_ACCEPTED_STATUS.match(old_line)) and bool(
-        _AUTHORIZED_SUPERSEDED_STATUS.match(new_line)
+    return bool(_ACCEPTED_STATUS.match(old_line)) and bool(
+        _SUPERSEDED_STATUS.match(new_line)
     )
 
 
