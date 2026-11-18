@@ -32,7 +32,9 @@ models:
 agents:
     - name: code
       runtime: pi
-      model: xai/grok-4.6
+      # Temporary mitigation: https://github.com/fullsend-ai/fullsend/issues/7263
+      # Re-evaluate this sonnet override once the upstream timeout is resolved.
+      model: sonnet
     - name: fix
       runtime: pi
       model: google-vertex/gemini-3.8-flash
@@ -44,14 +46,16 @@ agents:
       runtime: pi
       model: google-vertex/gemini-3.8-flash
       source: harness/review.yaml
+      # Temporary mitigation: https://github.com/fullsend-ai/fullsend/issues/7263
+      # Re-evaluate these sonnet overrides once the upstream timeout is resolved.
       subagents:
-          challenger: xai/grok-4.6
-          correctness: xai/grok-4.6
+          challenger: sonnet
+          correctness: sonnet
           cross-repo-contracts: google-vertex/gemini-3.8-flash
           docs-currency: google-vertex/gemini-3.8-flash
           intent-coherence: google-vertex/gemini-3.8-flash
           risk-assessment: google-vertex/gemini-3.8-flash
-          security: xai/grok-4.6
+          security: sonnet
           style-conventions: google-vertex/gemini-3.8-flash
     - name: retro
       runtime: pi
