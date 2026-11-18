@@ -1,12 +1,11 @@
 # AGENTS
 
 - All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py` as a
-  network-independent alternative to `pre-commit run`.
+  environments without network access, use `python scripts/lint.py`
+  (tools must be pre-installed) as an alternative to `pre-commit run`.
   Key flags: `--all-files` (check every tracked file),
   `--files FILE [FILE ...]` (check specific files),
   `--check-parity` (verify registry covers all configured hooks).
-  Tools must be pre-installed when running without network access.
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure that pull requests
@@ -30,11 +29,28 @@ Agents must follow these rules:
    that introduces a new Go module, package, or tool, implement the
    code, local test suites, and module-local configs (`go.mod`,
    `.golangci.yml`), but do not create or modify
-   [`.github/workflows/ci-workflow.yaml`][ci-workflow]. Creating
-   or modifying [`.github/workflows/ci-workflow.yaml`][ci-workflow]
-   is reserved for manual human pull requests.
+   [`.github/workflows/ci-workflow.yaml`][ci-workflow] — that is
+   reserved for manual human pull requests.
 
 [ci-workflow]: .github/workflows/ci-workflow.yaml
+
+## Context budget and prompt efficiency
+
+`AGENTS.md` is injected into every dispatched agent's prompt and is
+budget-capped by the `context-budget` rule's `agents-md` warn limit in
+`.skillsaw.yaml`, enforced downward by
+[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
+
+1. **Respect the prompt context budget.** Do not raise a
+   `.skillsaw-baseline.json` ceiling value to fit new prose; the
+   `baseline-ratchet` pre-commit and CI gate rejects ceiling increases.
+2. **Consolidate or extract when adding prose.** Offset a new rule or
+   explanation with equivalent consolidation of existing prose, or
+   extract detail into an on-demand skill under `.agents/skills/`.
+3. **Review agents must recognize budget consolidation.** Treat prose
+   consolidation that offsets a new `AGENTS.md` addition as required
+   budget compliance, not scope creep, provided no governance
+   requirement, defined keyword, or diagnostic name is omitted.
 
 ## Rules for creating or modifying sibling entries
 
@@ -72,14 +88,10 @@ follow these rules:
    intra-entry terminology drift, not only sibling-entry
    terminology matching.
 
-Examples of sibling entries:
-
-- **Numbered rules in `AGENTS.md`:** the other numbered
-  rules in the same list.
-- **Specification documents under `docs/`:** every other
-  governed Markdown document.
-- **Skill files under `.agents/skills/`:** every other
-  skill file.
+Examples of sibling entries: numbered rules in `AGENTS.md` (the
+other numbered rules in the same list); specification documents
+under `docs/` (every other governed Markdown document); skill
+files under `.agents/skills/` (every other skill file).
 
 ## Specification document hierarchy
 
@@ -135,19 +147,16 @@ must follow these rules:
    New or revised specification documents must account for
    every component, interface, and constraint enumerated in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md`. If a component or
-   interface from those documents is relevant to the new
-   document's scope, it must be addressed — not silently
-   omitted.
+   `docs/architecture/overview.md` relevant to the document's
+   scope — not silently omitted.
 
 2. **Verify deployment topology, security posture, and
-   persistent state coverage.** Cross-check the document
-   against `docs/architecture/overview.md` and
-   `docs/architecture.md` to confirm that deployment topology
-   (single-player, multi-player, web), security posture
-   (credential isolation, sandbox constraints), and persistent
-   state (all stores enumerated in the Architecture) are
-   covered where relevant.
+   persistent state coverage.** Cross-check against
+   `docs/architecture/overview.md` and `docs/architecture.md`:
+   deployment topology (single-player, multi-player, web),
+   security posture (credential isolation, sandbox
+   constraints), and persistent state (all stores enumerated
+   in the Architecture) must be covered where relevant.
 
 3. **Review agents must check cross-document coverage.** When
    reviewing a PR that creates or modifies a specification
@@ -186,38 +195,29 @@ must follow these rules:
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
-   registered specification artifact, or when Rule 4 identifies staleness
-   in a registered specification artifact, inspect each such registered
-   specification artifact for hand edits under Rule 5 and run
-   `ears-manager check` on a checkout or worktree of the recorded PR head; a
-   check on the base branch is not evidence. Require it to pass without
+   registered specification artifact, when Rule 4 identifies staleness
+   in one, or when a PR modifies
+   [.protobot/project.yaml](.protobot/project.yaml), inspect the
+   affected registered specification artifact or project configuration
+   for hand edits under Rule 5. Run `ears-manager check` on a checkout
+   or worktree of the recorded PR head — a check on the base branch is
+   not evidence — and require it to pass without
    `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. The check requires each registered artifact path
-   or canonical-content delta to have a matching `artifact_id` in an
-   `artifact_operations[]` entry in any proposed change set, and rejects
-   unregistration of an artifact-registry entry present on the default
-   branch. It confirms manifest association only, not that
-   `ears-manager artifact put` was invoked. Reviewers must flag hand edits
-   they can identify, not claim CLI provenance from an operation record.
-   Separately, whenever a PR modifies
-   [.protobot/project.yaml](.protobot/project.yaml), inspect the project
-   configuration under Rule 5 and flag any hand edit, even if no
-   registered specification artifact is changed. Run the same
-   `ears-manager check` on the recorded PR head; a check on the base
-   branch is not evidence. Require it to pass without
-   `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. Metadata-only changes to an artifact-registry
-   entry do not by themselves require an artifact operation. Findings
-   should include, when a PR creates or modifies a registered
-   specification artifact or Rule 4 identifies staleness in a registered
-   specification artifact: each listed diagnostic; and any hand edit
-   identified while inspecting a registered specification artifact; each
-   listed diagnostic and any hand edit identified in
-   [.protobot/project.yaml](.protobot/project.yaml) whenever a PR modifies
-   [.protobot/project.yaml](.protobot/project.yaml), even if no registered
-   specification artifact is changed; and, when Rule 4 identifies
-   staleness in a registered specification artifact, a staleness finding
-   that prescribes `ears-manager artifact put`, not a hand edit.
+   `artifact.unregistered`. The check requires each registered artifact
+   path or canonical-content delta to have a matching `artifact_id` in
+   an `artifact_operations[]` entry in any proposed change set, and
+   rejects unregistration of an artifact-registry entry present on the
+   default branch. It confirms manifest association only, not that
+   `ears-manager artifact put` was invoked; metadata-only changes to an
+   artifact-registry entry do not by themselves require an artifact
+   operation. Reviewers must flag hand edits they can identify, not
+   claim CLI provenance from an operation record. Findings should
+   include each listed diagnostic and any hand edit identified in the
+   inspected registered specification artifact or
+   [.protobot/project.yaml](.protobot/project.yaml); and, when Rule 4
+   identifies staleness in a registered specification artifact, a
+   staleness finding that prescribes `ears-manager artifact put`, not a
+   hand edit.
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
