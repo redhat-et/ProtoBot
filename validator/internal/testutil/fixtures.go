@@ -261,9 +261,6 @@ func copyStrings(in []string) []string {
 }
 
 func copyRelationships(in []records.Relationship) []records.Relationship {
-	if in == nil {
-		return nil
-	}
 	out := make([]records.Relationship, len(in))
 	copy(out, in)
 	return out
