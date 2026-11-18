@@ -24,8 +24,8 @@ reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
 (issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
-#459, #462, #463, and #468). The command line accepts the checkout path and
-comparison base.
+and #459, #462, #463, and #468). The command line accepts the checkout path
+and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
 empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
@@ -166,7 +166,7 @@ boundary, line breaks in diagnostic paths and messages are replaced with
 spaces to ensure single-line output. Informational notes regarding historical
 comparison base parse warnings (which do not cause a non-zero exit when the
 working tree repairs the file) and a comparison base that contains no
-`spec/requirements` tree are prefixed with
+requirement records are prefixed with
 `validator: note: comparison base <ref>: ...` and are not diagnostics.
 Check the exit status first. A line without a `<code>` field is not a
 diagnostic.
@@ -198,7 +198,7 @@ Build and test it from this directory:
 
 ```sh
 go build -o validator ./cmd/validator
-./validator --target /path/to/checkout --base main
+./validator --target /path/to/checkout --base origin/main
 go test ./...
 go vet ./...
 ```

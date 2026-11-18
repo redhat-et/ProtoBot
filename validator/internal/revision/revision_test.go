@@ -328,6 +328,38 @@ func TestReadEmptyBaseEmitsNote(t *testing.T) {
 	}
 }
 
+func TestReadEmptyRequirementsTreeWithGitkeepEmitsNote(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "spec/requirements/.gitkeep", "")
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "empty requirements tree")
+	empty := gitOutputSHA(t, root, "HEAD")
+
+	writeFile(t, root, "spec/requirements/REQ-TEST-00001.yaml", "id: REQ-TEST-00001\n")
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "with spec")
+
+	snapshot, diagnostics, err := Read(root, empty, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snapshot.Requirements) != 0 {
+		t.Fatalf("requirements=%+v", snapshot.Requirements)
+	}
+	if !hasCode(diagnostics, CodeEmptyBase) {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeEmptyBase)
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want exactly one empty-base note", diagnostics)
+	}
+	if !strings.Contains(diagnostics[0].Message, "immutability checks skipped") {
+		t.Fatalf("message %q omitted skip notice", diagnostics[0].Message)
+	}
+	if !strings.Contains(diagnostics[0].Message, "contains no requirement records") {
+		t.Fatalf("message %q omitted accurate description", diagnostics[0].Message)
+	}
+}
+
 func gitOutputSHA(t *testing.T, root string, ref string) string {
 	t.Helper()
 	command := gitcmd.Command("-C", root, "rev-parse", ref)

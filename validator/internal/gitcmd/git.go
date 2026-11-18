@@ -34,7 +34,7 @@ var fixedEnv = []string{
 	"GIT_TERMINAL_PROMPT=0",
 	"SSH_ASKPASS_REQUIRE=never",
 	"GIT_CONFIG_NOSYSTEM=1",
-	"GIT_CONFIG_GLOBAL=/dev/null",
+	"GIT_CONFIG_GLOBAL=" + os.DevNull,
 }
 
 func isolationArgs() []string {

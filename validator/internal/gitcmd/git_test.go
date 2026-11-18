@@ -70,7 +70,7 @@ func TestGitEnvironScrubsRedirectsAndDisablesReplaceRefs(t *testing.T) {
 		"GIT_TERMINAL_PROMPT=0",
 		"SSH_ASKPASS_REQUIRE=never",
 		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_GLOBAL=" + os.DevNull,
 	} {
 		if !slices.Contains(env, fixed) {
 			t.Fatalf("env missing %s: %q", fixed, env)
@@ -98,8 +98,8 @@ func TestEnvironStripsGitConfigAndSetsNoSystem(t *testing.T) {
 	if !slices.Contains(env, "GIT_CONFIG_NOSYSTEM=1") {
 		t.Errorf("expected GIT_CONFIG_NOSYSTEM=1 to be present in environment")
 	}
-	if !slices.Contains(env, "GIT_CONFIG_GLOBAL=/dev/null") {
-		t.Errorf("expected GIT_CONFIG_GLOBAL=/dev/null to be present in environment")
+	if !slices.Contains(env, "GIT_CONFIG_GLOBAL="+os.DevNull) {
+		t.Errorf("expected GIT_CONFIG_GLOBAL=%s to be present in environment", os.DevNull)
 	}
 }
 

@@ -59,7 +59,7 @@ const (
 )
 
 // Read loads requirement records from the Git tree of ref as resolved in
-// the checkout at target. The working tree is not read. Missing
+// the checkout at target. The working tree is not read. Missing or empty
 // spec/requirements in that revision is treated as empty and reported as
 // CodeEmptyBase. A ref that resolves to the checkout HEAD commit is
 // rejected as CodeSelfComparison so comparison cannot run against itself.
@@ -80,15 +80,8 @@ func Read(target, ref string, opts Options) (layout.Snapshot, []layout.Diagnosti
 	if err != nil {
 		return layout.Snapshot{}, nil, &Error{Code: CodeNotFound, Message: fmt.Sprintf("comparison base %q is not a commit in the checkout", ref)}
 	}
-	headCommit, err := resolveCommit(absolute, "HEAD")
-	if err != nil {
-		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot resolve target checkout HEAD: %s", err)}
-	}
-	if commit == headCommit && !opts.AllowSelfComparison {
-		return layout.Snapshot{}, nil, &Error{
-			Code:    CodeSelfComparison,
-			Message: fmt.Sprintf("comparison base %q resolves to target checkout HEAD commit %s; distinct revision required", ref, headCommit),
-		}
+	if err := checkSelfComparison(absolute, commit, ref, opts); err != nil {
+		return layout.Snapshot{}, nil, err
 	}
 
 	exists, diags := checkTreeContainer(absolute, commit, ref, "spec")
@@ -110,6 +103,9 @@ func Read(target, ref string, opts Options) (layout.Snapshot, []layout.Diagnosti
 	entries, listDiags, err := listRequirements(absolute, commit, ref)
 	if err != nil {
 		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q", ref)}
+	}
+	if len(entries) == 0 && len(listDiags) == 0 {
+		return layout.Snapshot{Root: absolute}, emptyBaseNote(ref), nil
 	}
 
 	tmp, err := os.MkdirTemp("", "validator-base-")
@@ -145,8 +141,22 @@ func Read(target, ref string, opts Options) (layout.Snapshot, []layout.Diagnosti
 func emptyBaseNote(ref string) []layout.Diagnostic {
 	return []layout.Diagnostic{{
 		Code:    CodeEmptyBase,
-		Message: fmt.Sprintf("comparison base %q contains no spec/requirements tree; immutability checks skipped", ref),
+		Message: "contains no requirement records; immutability checks skipped",
 	}}
+}
+
+func checkSelfComparison(target, commit, ref string, opts Options) *Error {
+	headCommit, err := resolveCommit(target, "HEAD")
+	if err != nil {
+		return &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot resolve target checkout HEAD: %s", err)}
+	}
+	if commit == headCommit && !opts.AllowSelfComparison {
+		return &Error{
+			Code:    CodeSelfComparison,
+			Message: fmt.Sprintf("comparison base %q resolves to target checkout HEAD commit %s; distinct revision required", ref, headCommit),
+		}
+	}
+	return nil
 }
 
 func requireCheckoutRoot(target string) error {

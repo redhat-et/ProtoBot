@@ -1689,6 +1689,36 @@ func TestRunEmptyBaseTreeEmitsNote(t *testing.T) {
 	}
 }
 
+func TestRunRequirementsTreeWithOnlyGitkeepEmitsNote(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/.gitkeep", "")
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "scaffolded with gitkeep")
+	base := gitRevParse(t, target, "HEAD")
+
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", ".gitkeep")); err != nil {
+		t.Fatal(err)
+	}
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", base)
+	if code != exitOK {
+		t.Fatalf("expected exit 0 for valid tree with gitkeep base, got %d; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+	if !strings.Contains(stderr, "validator: note: comparison base") ||
+		!strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("expected note diagnostic on stderr, got: %s", stderr)
+	}
+	if !strings.Contains(stderr, "contains no requirement records") {
+		t.Fatalf("expected accurate empty base note on stderr, got: %s", stderr)
+	}
+}
+
 func gitRevParse(t *testing.T, root, ref string) string {
 	t.Helper()
 	command := gitcmd.Command("-C", root, "rev-parse", ref)
