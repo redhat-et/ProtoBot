@@ -14,11 +14,12 @@ func TestValidateRecordSchema(t *testing.T) {
 	ifacePath := "spec/interfaces/health-api.yaml"
 
 	cases := []struct {
-		name       string
-		snapshot   layout.Snapshot
-		wantCodes  []string
-		wantFields []string
-		wantPath   string
+		name         string
+		snapshot     layout.Snapshot
+		wantCodes    []string
+		wantFields   []string
+		wantMessages []string
+		wantPath     string
 	}{
 		{
 			name:     "valid records",
@@ -165,25 +166,28 @@ func TestValidateRecordSchema(t *testing.T) {
 			wantPath:   reqPath,
 		},
 		{
-			name:       "blank requirement id",
-			snapshot:   schemaSnapshot(requirementBlankString("id"), validInterfaceDocument()),
-			wantCodes:  []string{CodeRequirementMissingField},
-			wantFields: []string{"id"},
-			wantPath:   reqPath,
+			name:         "blank requirement id",
+			snapshot:     schemaSnapshot(requirementBlankString("id"), validInterfaceDocument()),
+			wantCodes:    []string{CodeRequirementMissingField},
+			wantFields:   []string{"id"},
+			wantMessages: []string{`Required field "id" is missing.`},
+			wantPath:     reqPath,
 		},
 		{
-			name:       "blank requirement type",
-			snapshot:   schemaSnapshot(requirementBlankString("type"), validInterfaceDocument()),
-			wantCodes:  []string{CodeRequirementMissingField},
-			wantFields: []string{"type"},
-			wantPath:   reqPath,
+			name:         "blank requirement type",
+			snapshot:     schemaSnapshot(requirementBlankString("type"), validInterfaceDocument()),
+			wantCodes:    []string{CodeRequirementMissingField},
+			wantFields:   []string{"type"},
+			wantMessages: []string{`Required field "type" is missing.`},
+			wantPath:     reqPath,
 		},
 		{
-			name:       "blank requirement text",
-			snapshot:   schemaSnapshot(requirementBlankString("text"), validInterfaceDocument()),
-			wantCodes:  []string{CodeRequirementMissingField},
-			wantFields: []string{"text"},
-			wantPath:   reqPath,
+			name:         "blank requirement text",
+			snapshot:     schemaSnapshot(requirementBlankString("text"), validInterfaceDocument()),
+			wantCodes:    []string{CodeRequirementMissingField},
+			wantFields:   []string{"text"},
+			wantMessages: []string{`Required field "text" is missing.`},
+			wantPath:     reqPath,
 		},
 		{
 			name:       "blank requirement status",
@@ -339,6 +343,9 @@ func TestValidateRecordSchema(t *testing.T) {
 				if !strings.Contains(got.Message, tc.wantFields[i]) {
 					t.Errorf("message %q does not identify field %q", got.Message, tc.wantFields[i])
 				}
+				if i < len(tc.wantMessages) && got.Message != tc.wantMessages[i] {
+					t.Errorf("message=%q, want %q", got.Message, tc.wantMessages[i])
+				}
 			}
 		})
 	}
@@ -482,7 +489,7 @@ status: active
 	wantMessages := []string{
 		"applies_to.interfaces[1] must not be blank.",
 		"applies_to.scopes[1] must not be blank.",
-		`Required field "relationships[0].target" is missing.`,
+		"relationships[0].target must not be blank.",
 	}
 	if len(diagnostics) != len(wantFields) {
 		t.Fatalf("diagnostics=%v, want fields %v", diagnostics, wantFields)
@@ -501,6 +508,88 @@ status: active
 		if got.Message != wantMessages[i] {
 			t.Errorf("message=%q, want %q", got.Message, wantMessages[i])
 		}
+	}
+}
+
+func TestValidateRecordSchemaRelationshipTargetBlankVsOmitted(t *testing.T) {
+	cases := []struct {
+		name        string
+		requirement string
+		wantMessage string
+	}{
+		{
+			name: "blank relationship target",
+			requirement: `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships:
+  - type: depends-on
+    target: ""
+status: active
+`,
+			wantMessage: "relationships[0].target must not be blank.",
+		},
+		{
+			name: "whitespace-only relationship target",
+			requirement: `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships:
+  - type: depends-on
+    target: "   "
+status: active
+`,
+			wantMessage: "relationships[0].target must not be blank.",
+		},
+		{
+			name: "omitted relationship target",
+			requirement: `id: REQ-API-00002
+type: event-driven
+text: When a client sends GET /health, the service shall return HTTP 200.
+applies_to:
+  scopes:
+    - api
+relationships:
+  - type: depends-on
+status: active
+`,
+			wantMessage: `Required field "relationships[0].target" is missing.`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := t.TempDir()
+			writeFile(t, target, "spec/interfaces/health-api.yaml", `name: health-api
+kind: http
+description: Health check HTTP API.
+`)
+			writeFile(t, target, "spec/requirements/REQ-API-00002.yaml", tc.requirement)
+
+			snapshot, layoutDiagnostics := layout.Read(target)
+			if len(layoutDiagnostics) != 0 {
+				t.Fatalf("layout diagnostics=%v", layoutDiagnostics)
+			}
+
+			diagnostics := Validate(snapshot)
+			if !hasSchemaDiagnostic(diagnostics, CodeRequirementMissingField, "spec/requirements/REQ-API-00002.yaml", "relationships[0].target") {
+				t.Fatalf("missing relationships[0].target diagnostic: %v", diagnostics)
+			}
+			for _, diagnostic := range schemaDiagnostics(diagnostics) {
+				if diagnostic.Field != "relationships[0].target" {
+					continue
+				}
+				if diagnostic.Message != tc.wantMessage {
+					t.Errorf("message=%q, want %q", diagnostic.Message, tc.wantMessage)
+				}
+			}
+		})
 	}
 }
 

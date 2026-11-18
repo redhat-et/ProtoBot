@@ -85,11 +85,17 @@ func validateRequirementSchema(document layout.Document[records.Requirement]) []
 			if strings.TrimSpace(relationship.Target) != "" {
 				continue
 			}
-			diagnostics = append(diagnostics, missingFieldDiagnostic(
-				CodeRequirementMissingField,
-				document.Path,
-				fmt.Sprintf("relationships[%d].target", index),
-			))
+			field := fmt.Sprintf("relationships[%d].target", index)
+			if !fieldPresent(document.Fields, field) {
+				diagnostics = append(diagnostics, missingFieldDiagnostic(CodeRequirementMissingField, document.Path, field))
+				continue
+			}
+			diagnostics = append(diagnostics, Diagnostic{
+				Code:    CodeRequirementMissingField,
+				Path:    document.Path,
+				Field:   field,
+				Message: fmt.Sprintf("%s must not be blank.", field),
+			})
 		}
 	}
 	if fieldPresent(document.Fields, "status") && strings.TrimSpace(record.Status) != "" && !allowedStatuses[record.Status] {
