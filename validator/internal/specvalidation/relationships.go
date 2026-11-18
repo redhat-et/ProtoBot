@@ -45,13 +45,7 @@ func validateRelationshipTypes(requirements []layout.Document[records.Requiremen
 }
 
 func validateRelationshipAcyclicity(requirements []layout.Document[records.Requirement]) []Diagnostic {
-	ordered := append([]layout.Document[records.Requirement](nil), requirements...)
-	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].Path != ordered[j].Path {
-			return ordered[i].Path < ordered[j].Path
-		}
-		return ordered[i].Record.ID < ordered[j].Record.ID
-	})
+	ordered := orderedRequirements(requirements)
 
 	paths := make(map[string]string, len(ordered))
 	graphs := map[string]map[string][]string{

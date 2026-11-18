@@ -44,7 +44,7 @@ func TestValidateReplacement(t *testing.T) {
 			wantCount: 1,
 			wantCode:  CodeSupersededRequirementActive,
 			wantPath:  "spec/requirements/REQ-API-00002.yaml",
-			wantField: "relationships[0]",
+			wantField: "relationships[0].target",
 			wantIDs:   []string{"REQ-API-00001"},
 		},
 		{
@@ -60,7 +60,7 @@ func TestValidateReplacement(t *testing.T) {
 			wantCount: 1,
 			wantCode:  CodeSupersededRequirementActive,
 			wantPath:  "spec/requirements/REQ-API-00003.yaml",
-			wantField: "relationships[1]",
+			wantField: "relationships[1].target",
 			wantIDs:   []string{"REQ-API-00002"},
 		},
 		{
@@ -167,6 +167,40 @@ func TestValidateReplacementIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestValidateReplacementSelfSupersedes(t *testing.T) {
+	snapshot := snapshotFromDocs(
+		requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+			{Type: records.RelSupersedes, Target: "REQ-API-00001"},
+		}),
+	)
+	diagnostics := Validate(snapshot)
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics=%v, want 2", diagnostics)
+	}
+	if diagnostics[0].Code != CodeCycle {
+		t.Errorf("first code=%q, want %q", diagnostics[0].Code, CodeCycle)
+	}
+	if diagnostics[0].Field != "relationships" {
+		t.Errorf("first field=%q, want relationships", diagnostics[0].Field)
+	}
+	if !identifiesIDs(diagnostics[0].Message, "REQ-API-00001") {
+		t.Errorf("cycle message %q omitted ID", diagnostics[0].Message)
+	}
+	if diagnostics[1].Code != CodeSupersededRequirementActive {
+		t.Errorf("second code=%q, want %q", diagnostics[1].Code, CodeSupersededRequirementActive)
+	}
+	if diagnostics[1].Field != "relationships[0].target" {
+		t.Errorf("second field=%q, want relationships[0].target", diagnostics[1].Field)
+	}
+	if !identifiesIDs(diagnostics[1].Message, "REQ-API-00001") {
+		t.Errorf("replacement message %q omitted ID", diagnostics[1].Message)
+	}
+	const path = "spec/requirements/REQ-API-00001.yaml"
+	if diagnostics[0].Path != path || diagnostics[1].Path != path {
+		t.Errorf("paths=%q %q, want %q", diagnostics[0].Path, diagnostics[1].Path, path)
+	}
+}
+
 func TestValidateReplacementAfterLayoutRead(t *testing.T) {
 	target := t.TempDir()
 	writeFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
@@ -206,8 +240,8 @@ status: active
 	if got.Path != "spec/requirements/REQ-API-00002.yaml" {
 		t.Errorf("path=%q", got.Path)
 	}
-	if got.Field != "relationships[0]" {
-		t.Errorf("field=%q, want relationships[0]", got.Field)
+	if got.Field != "relationships[0].target" {
+		t.Errorf("field=%q, want relationships[0].target", got.Field)
 	}
 	if !identifiesIDs(got.Message, "REQ-API-00001") {
 		t.Errorf("message %q omitted predecessor id", got.Message)
@@ -258,7 +292,7 @@ func TestCompareReplacement(t *testing.T) {
 			target:    snapshotFromDocs(replacement, retiredPredecessor),
 			base:      snapshotFromDocs(retiredPredecessor),
 			wantCount: 1,
-			wantCode:  CodeSupersededRequirementNotInChange,
+			wantCode:  CodeSupersededRequirementNotRetiredInChange,
 			wantPath:  "spec/requirements/REQ-API-00002.yaml",
 			wantIDs:   []string{"REQ-API-00001"},
 		},
@@ -323,8 +357,8 @@ func TestCompareReplacement(t *testing.T) {
 			if got.Path != tc.wantPath {
 				t.Errorf("path=%q, want %q", got.Path, tc.wantPath)
 			}
-			if got.Field != "relationships[0]" {
-				t.Errorf("field=%q, want relationships[0]", got.Field)
+			if got.Field != "relationships[0].target" {
+				t.Errorf("field=%q, want relationships[0].target", got.Field)
 			}
 			if !identifiesIDs(got.Message, tc.wantIDs...) {
 				t.Errorf("message %q omitted IDs %v", got.Message, tc.wantIDs)
@@ -375,8 +409,8 @@ func TestCompareReplacementReportsEveryNewEdge(t *testing.T) {
 	if len(diagnostics) != 2 {
 		t.Fatalf("diagnostics=%v, want 2", diagnostics)
 	}
-	if diagnostics[0].Field != "relationships[0]" || diagnostics[1].Field != "relationships[1]" {
-		t.Fatalf("fields=%q %q, want relationships[0] then relationships[1]", diagnostics[0].Field, diagnostics[1].Field)
+	if diagnostics[0].Field != "relationships[0].target" || diagnostics[1].Field != "relationships[1].target" {
+		t.Fatalf("fields=%q %q, want relationships[0].target then relationships[1].target", diagnostics[0].Field, diagnostics[1].Field)
 	}
 	if !identifiesIDs(diagnostics[0].Message, "REQ-API-00001") {
 		t.Errorf("first message %q omitted REQ-API-00001", diagnostics[0].Message)
@@ -390,7 +424,7 @@ func replacementDiagnostics(diagnostics []Diagnostic) []Diagnostic {
 	var filtered []Diagnostic
 	for _, diagnostic := range diagnostics {
 		switch diagnostic.Code {
-		case CodeSupersededRequirementActive, CodeSupersededRequirementNotInChange:
+		case CodeSupersededRequirementActive, CodeSupersededRequirementNotRetiredInChange:
 			filtered = append(filtered, diagnostic)
 		}
 	}
