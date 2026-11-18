@@ -201,9 +201,22 @@ func TestWithRelationshipsZeroArgumentsYieldsEmptySlice(t *testing.T) {
 	}
 }
 
-func TestWithIDOnInterfaceDocumentDoesNotRewritePath(t *testing.T) {
-	document := ValidInterfaceDocument(WithID("REQ-API-00001"))
-	if document.Path != "spec/interfaces/health-api.yaml" {
-		t.Errorf("path=%q, want interface path preserved", document.Path)
-	}
+func TestRequirementOptionOnInterfaceDocumentPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic when passing requirement option to ValidInterfaceDocument")
+		}
+	}()
+	ValidInterfaceDocument(WithStatus(records.StatusRetired))
+}
+
+func TestInterfaceOptionOnRequirementDocumentPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic when passing interface option to ValidRequirementDocument")
+		}
+	}()
+	ValidRequirementDocument(WithName("cli"))
 }
