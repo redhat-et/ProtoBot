@@ -34,9 +34,28 @@ func TestValidRequirementDocumentDefaults(t *testing.T) {
 	if document.Fields == nil {
 		t.Fatal("Fields is nil, want presence map")
 	}
-	for _, field := range []string{"id", "type", "text", "applies_to", "relationships", "status"} {
+	for _, field := range []string{
+		"id",
+		"type",
+		"text",
+		"applies_to",
+		"applies_to.interfaces",
+		"applies_to.scopes",
+		"relationships",
+		"status",
+	} {
 		if !document.Fields[field] {
 			t.Errorf("Fields[%q] missing", field)
+		}
+	}
+
+	ifaceDoc := ValidInterfaceDocument()
+	if ifaceDoc.Fields == nil {
+		t.Fatal("ifaceDoc.Fields is nil, want presence map")
+	}
+	for _, field := range []string{"name", "kind", "description"} {
+		if !ifaceDoc.Fields[field] {
+			t.Errorf("ifaceDoc.Fields[%q] missing", field)
 		}
 	}
 }
@@ -179,5 +198,12 @@ func TestWithRelationshipsZeroArgumentsYieldsEmptySlice(t *testing.T) {
 	}
 	if len(document.Record.Relationships) != 0 {
 		t.Fatalf("relationships len=%d, want 0", len(document.Record.Relationships))
+	}
+}
+
+func TestWithIDOnInterfaceDocumentDoesNotRewritePath(t *testing.T) {
+	document := ValidInterfaceDocument(WithID("REQ-API-00001"))
+	if document.Path != "spec/interfaces/health-api.yaml" {
+		t.Errorf("path=%q, want interface path preserved", document.Path)
 	}
 }

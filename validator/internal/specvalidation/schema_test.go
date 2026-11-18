@@ -7,6 +7,7 @@ import (
 
 	"github.com/redhat-et/protobot/validator/internal/layout"
 	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/testutil"
 )
 
 func TestValidateRecordSchema(t *testing.T) {
@@ -23,7 +24,7 @@ func TestValidateRecordSchema(t *testing.T) {
 	}{
 		{
 			name:     "valid records",
-			snapshot: schemaSnapshot(validRequirementDocument(), validInterfaceDocument()),
+			snapshot: schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), testutil.ValidInterfaceDocument()),
 		},
 		{
 			name: "synthetic requirement and interface with nil fields produce no missing field diagnostics",
@@ -46,29 +47,29 @@ func TestValidateRecordSchema(t *testing.T) {
 		},
 		{
 			name:     "retired status is allowed",
-			snapshot: schemaSnapshot(requirementWithStatus(records.StatusRetired), validInterfaceDocument()),
+			snapshot: schemaSnapshot(requirementWithStatus(records.StatusRetired), testutil.ValidInterfaceDocument()),
 		},
 		{
 			name:     "empty relationships list",
-			snapshot: schemaSnapshot(requirementWithRelationships(nil), validInterfaceDocument()),
+			snapshot: schemaSnapshot(requirementWithRelationships(nil), testutil.ValidInterfaceDocument()),
 		},
 		{
 			name:       "empty applies_to mapping",
-			snapshot:   schemaSnapshot(requirementWithEmptyAppliesTo(), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithEmptyAppliesTo(), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "empty applies_to lists",
-			snapshot:   schemaSnapshot(requirementWithEmptyAppliesToLists(), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithEmptyAppliesToLists(), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to"},
 			wantPath:   reqPath,
 		},
 		{
 			name:     "blank applies_to selectors",
-			snapshot: schemaSnapshot(requirementWithBlankAppliesToSelectors(), validInterfaceDocument()),
+			snapshot: schemaSnapshot(requirementWithBlankAppliesToSelectors(), testutil.ValidInterfaceDocument()),
 			wantCodes: []string{
 				CodeRequirementMissingField,
 				CodeRequirementMissingField,
@@ -85,89 +86,90 @@ func TestValidateRecordSchema(t *testing.T) {
 		},
 		{
 			name:       "mixed blank applies_to scope selector",
-			snapshot:   schemaSnapshot(requirementWithMixedBlankScopeSelectors(), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithMixedBlankScopeSelectors(), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to.scopes[1]"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "mixed blank applies_to interface selector",
-			snapshot:   schemaSnapshot(requirementWithMixedBlankInterfaceSelectors(), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithMixedBlankInterfaceSelectors(), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to.interfaces[1]"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "blank relationship target",
-			snapshot:   schemaSnapshot(requirementWithBlankRelationshipTarget(""), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithBlankRelationshipTarget(""), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"relationships[0].target"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "whitespace-only relationship target",
-			snapshot:   schemaSnapshot(requirementWithBlankRelationshipTarget("   "), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithBlankRelationshipTarget("   "), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"relationships[0].target"},
 			wantPath:   reqPath,
 		},
 		{
 			name:     "blank relationship type is not a missing field",
-			snapshot: schemaSnapshot(requirementWithBlankRelationshipType(), validInterfaceDocument()),
+			snapshot: schemaSnapshot(requirementWithBlankRelationshipType(), testutil.ValidInterfaceDocument()),
 		},
 		{
 			name:     "applies_to with only interfaces",
-			snapshot: schemaSnapshot(requirementWithOnlyInterfaces(), validInterfaceDocument()),
+			snapshot: schemaSnapshot(requirementWithOnlyInterfaces(), testutil.ValidInterfaceDocument()),
 		},
 		{
 			name:     "applies_to with only scopes",
-			snapshot: schemaSnapshot(requirementWithOnlyScopes(), validInterfaceDocument()),
+			snapshot: schemaSnapshot(requirementWithOnlyScopes(), testutil.ValidInterfaceDocument()),
 		},
 		{
 			name:       "missing requirement id",
-			snapshot:   schemaSnapshot(requirementOmitting("id"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementOmitting("id"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"id"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "missing requirement type",
-			snapshot:   schemaSnapshot(requirementOmitting("type"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementOmitting("type"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"type"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "missing requirement text",
-			snapshot:   schemaSnapshot(requirementOmitting("text"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementOmitting("text"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"text"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "missing applies_to",
-			snapshot:   schemaSnapshot(requirementOmitting("applies_to"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementOmitting("applies_to"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"applies_to"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "missing relationships",
-			snapshot:   schemaSnapshot(requirementOmitting("relationships"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementOmitting("relationships"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"relationships"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "missing requirement status",
-			snapshot:   schemaSnapshot(requirementOmitting("status"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementOmitting("status"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"status"},
 			wantPath:   reqPath,
 		},
 		{
+		{
 			name:         "blank requirement id",
-			snapshot:     schemaSnapshot(requirementBlankString("id"), validInterfaceDocument()),
+			snapshot:     schemaSnapshot(requirementBlankString("id"), testutil.ValidInterfaceDocument()),
 			wantCodes:    []string{CodeRequirementMissingField},
 			wantFields:   []string{"id"},
 			wantMessages: []string{`Required field "id" is missing.`},
@@ -175,7 +177,7 @@ func TestValidateRecordSchema(t *testing.T) {
 		},
 		{
 			name:         "blank requirement type",
-			snapshot:     schemaSnapshot(requirementBlankString("type"), validInterfaceDocument()),
+			snapshot:     schemaSnapshot(requirementBlankString("type"), testutil.ValidInterfaceDocument()),
 			wantCodes:    []string{CodeRequirementMissingField},
 			wantFields:   []string{"type"},
 			wantMessages: []string{`Required field "type" is missing.`},
@@ -183,7 +185,7 @@ func TestValidateRecordSchema(t *testing.T) {
 		},
 		{
 			name:         "blank requirement text",
-			snapshot:     schemaSnapshot(requirementBlankString("text"), validInterfaceDocument()),
+			snapshot:     schemaSnapshot(requirementBlankString("text"), testutil.ValidInterfaceDocument()),
 			wantCodes:    []string{CodeRequirementMissingField},
 			wantFields:   []string{"text"},
 			wantMessages: []string{`Required field "text" is missing.`},
@@ -191,126 +193,126 @@ func TestValidateRecordSchema(t *testing.T) {
 		},
 		{
 			name:       "blank requirement status",
-			snapshot:   schemaSnapshot(requirementBlankString("status"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementBlankString("status"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementMissingField},
 			wantFields: []string{"status"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "missing interface name",
-			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceOmitting("name")),
+			snapshot:   schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), interfaceOmitting("name")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"name"},
 			wantPath:   ifacePath,
 		},
 		{
 			name:       "blank interface name",
-			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceBlankString("name")),
+			snapshot:   schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), interfaceBlankString("name")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"name"},
 			wantPath:   ifacePath,
 		},
 		{
 			name:       "missing interface kind",
-			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceOmitting("kind")),
+			snapshot:   schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), interfaceOmitting("kind")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"kind"},
 			wantPath:   ifacePath,
 		},
 		{
 			name:       "blank interface kind",
-			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceBlankString("kind")),
+			snapshot:   schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), interfaceBlankString("kind")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"kind"},
 			wantPath:   ifacePath,
 		},
 		{
 			name:       "missing interface description",
-			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceOmitting("description")),
+			snapshot:   schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), interfaceOmitting("description")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"description"},
 			wantPath:   ifacePath,
 		},
 		{
 			name:       "blank interface description",
-			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceBlankString("description")),
+			snapshot:   schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), interfaceBlankString("description")),
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"description"},
 			wantPath:   ifacePath,
 		},
 		{
 			name:       "invalid status draft",
-			snapshot:   schemaSnapshot(requirementWithStatus("draft"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithStatus("draft"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "invalid status implemented",
-			snapshot:   schemaSnapshot(requirementWithStatus("implemented"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithStatus("implemented"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "invalid status pending",
-			snapshot:   schemaSnapshot(requirementWithStatus("pending"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithStatus("pending"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "status case mismatch",
-			snapshot:   schemaSnapshot(requirementWithStatus("Active"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithStatus("Active"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementInvalidStatus},
 			wantFields: []string{"status"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy verification field",
-			snapshot:   schemaSnapshot(requirementWithExtra("verification", "verification.mode"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithExtra("verification", "verification.mode"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"verification"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy provenance field",
-			snapshot:   schemaSnapshot(requirementWithExtra("provenance"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithExtra("provenance"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"provenance"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy created field",
-			snapshot:   schemaSnapshot(requirementWithExtra("created"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithExtra("created"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"created"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "unknown requirement key",
-			snapshot:   schemaSnapshot(requirementWithExtra("owner"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithExtra("owner"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"owner"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "unknown applies_to key",
-			snapshot:   schemaSnapshot(requirementWithExtra("applies_to.owner"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithExtra("applies_to.owner"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"applies_to.owner"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "unknown relationship key",
-			snapshot:   schemaSnapshot(requirementWithExtra("relationships[0].rationale"), validInterfaceDocument()),
+			snapshot:   schemaSnapshot(requirementWithExtra("relationships[0].rationale"), testutil.ValidInterfaceDocument()),
 			wantCodes:  []string{CodeRequirementUnexpectedField},
 			wantFields: []string{"relationships[0].rationale"},
 			wantPath:   reqPath,
 		},
 		{
 			name:       "legacy interface fields",
-			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceWithExtra("id", "type", "created", "status")),
+			snapshot:   schemaSnapshot(testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"})), interfaceWithExtra("id", "type", "created", "status")),
 			wantCodes:  []string{CodeInterfaceUnexpectedField, CodeInterfaceUnexpectedField, CodeInterfaceUnexpectedField, CodeInterfaceUnexpectedField},
 			wantFields: []string{"created", "id", "status", "type"},
 			wantPath:   ifacePath,
@@ -362,7 +364,7 @@ func TestValidateRecordSchemaEmptyAppliesToMessage(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			diagnostics := schemaDiagnostics(Validate(schemaSnapshot(tc.document, validInterfaceDocument())))
+			diagnostics := schemaDiagnostics(Validate(schemaSnapshot(tc.document, testutil.ValidInterfaceDocument())))
 			var got Diagnostic
 			found := false
 			for _, diagnostic := range diagnostics {
@@ -384,7 +386,7 @@ func TestValidateRecordSchemaEmptyAppliesToMessage(t *testing.T) {
 }
 
 func TestValidateRecordSchemaReportsEveryMissingField(t *testing.T) {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.ID = ""
 	document.Record.Type = ""
 	document.Record.Text = ""
@@ -614,58 +616,8 @@ func schemaSnapshot(requirement layout.Document[records.Requirement], iface layo
 	}
 }
 
-func validRequirementDocument() layout.Document[records.Requirement] {
-	return layout.Document[records.Requirement]{
-		Path: "spec/requirements/REQ-API-00002.yaml",
-		Record: records.Requirement{
-			ID:   "REQ-API-00002",
-			Type: records.TypeEventDriven,
-			Text: "When a client sends GET /health, the service shall return HTTP 200.",
-			AppliesTo: records.Applicability{
-				Interfaces: []string{"health-api"},
-				Scopes:     []string{"api"},
-			},
-			Relationships: []records.Relationship{
-				{Type: records.RelRelatedTo, Target: "REQ-API-00001"},
-			},
-			Status: records.StatusActive,
-		},
-		Fields: map[string]bool{
-			"id":                       true,
-			"type":                     true,
-			"text":                     true,
-			"applies_to":               true,
-			"applies_to.interfaces":    true,
-			"applies_to.interfaces[0]": true,
-			"applies_to.scopes":        true,
-			"applies_to.scopes[0]":     true,
-			"relationships":            true,
-			"relationships[0]":         true,
-			"relationships[0].type":    true,
-			"relationships[0].target":  true,
-			"status":                   true,
-		},
-	}
-}
-
-func validInterfaceDocument() layout.Document[records.InterfaceRecord] {
-	return layout.Document[records.InterfaceRecord]{
-		Path: "spec/interfaces/health-api.yaml",
-		Record: records.InterfaceRecord{
-			Name:        "health-api",
-			Kind:        "http",
-			Description: "Health check HTTP API used by unauthenticated clients.",
-		},
-		Fields: map[string]bool{
-			"name":        true,
-			"kind":        true,
-			"description": true,
-		},
-	}
-}
-
 func requirementOmitting(field string) layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Fields = omitField(document.Fields, field)
 	switch field {
 	case "id":
@@ -685,7 +637,7 @@ func requirementOmitting(field string) layout.Document[records.Requirement] {
 }
 
 func requirementBlankString(field string) layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	switch field {
 	case "id":
 		document.Record.ID = "   "
@@ -700,13 +652,13 @@ func requirementBlankString(field string) layout.Document[records.Requirement] {
 }
 
 func requirementWithStatus(status string) layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.Status = status
 	return document
 }
 
 func requirementWithRelationships(relationships []records.Relationship) layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.Relationships = relationships
 	document.Fields = omitField(document.Fields, "relationships")
 	document.Fields["relationships"] = true
@@ -719,7 +671,7 @@ func requirementWithRelationships(relationships []records.Relationship) layout.D
 }
 
 func requirementWithEmptyAppliesTo() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.AppliesTo = records.Applicability{}
 	document.Fields = omitField(document.Fields, "applies_to")
 	document.Fields["applies_to"] = true
@@ -727,7 +679,7 @@ func requirementWithEmptyAppliesTo() layout.Document[records.Requirement] {
 }
 
 func requirementWithEmptyAppliesToLists() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.AppliesTo = records.Applicability{
 		Interfaces: []string{},
 		Scopes:     []string{},
@@ -740,7 +692,7 @@ func requirementWithEmptyAppliesToLists() layout.Document[records.Requirement] {
 }
 
 func requirementWithBlankAppliesToSelectors() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.AppliesTo = records.Applicability{
 		Interfaces: []string{"   "},
 		Scopes:     []string{"\t", ""},
@@ -756,7 +708,7 @@ func requirementWithBlankAppliesToSelectors() layout.Document[records.Requiremen
 }
 
 func requirementWithMixedBlankScopeSelectors() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.AppliesTo = records.Applicability{
 		Interfaces: []string{"health-api"},
 		Scopes:     []string{"api", ""},
@@ -772,7 +724,7 @@ func requirementWithMixedBlankScopeSelectors() layout.Document[records.Requireme
 }
 
 func requirementWithMixedBlankInterfaceSelectors() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.AppliesTo = records.Applicability{
 		Interfaces: []string{"health-api", "  "},
 		Scopes:     []string{"api"},
@@ -788,7 +740,7 @@ func requirementWithMixedBlankInterfaceSelectors() layout.Document[records.Requi
 }
 
 func requirementWithBlankRelationshipTarget(target string) layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.Relationships = []records.Relationship{
 		{Type: records.RelDependsOn, Target: target},
 	}
@@ -796,7 +748,7 @@ func requirementWithBlankRelationshipTarget(target string) layout.Document[recor
 }
 
 func requirementWithBlankRelationshipType() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.Relationships = []records.Relationship{
 		{Type: "", Target: document.Record.ID},
 	}
@@ -804,7 +756,7 @@ func requirementWithBlankRelationshipType() layout.Document[records.Requirement]
 }
 
 func requirementWithOnlyInterfaces() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.AppliesTo = records.Applicability{
 		Interfaces: []string{"health-api"},
 	}
@@ -816,7 +768,7 @@ func requirementWithOnlyInterfaces() layout.Document[records.Requirement] {
 }
 
 func requirementWithOnlyScopes() layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Record.AppliesTo = records.Applicability{
 		Scopes: []string{"api"},
 	}
@@ -828,7 +780,7 @@ func requirementWithOnlyScopes() layout.Document[records.Requirement] {
 }
 
 func requirementWithExtra(fields ...string) layout.Document[records.Requirement] {
-	document := validRequirementDocument()
+	document := testutil.ValidRequirementDocument(testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}, Scopes: []string{"api"}}), testutil.WithRelationships(records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00001"}))
 	document.Fields = copyFields(document.Fields)
 	for _, field := range fields {
 		document.Fields[field] = true
@@ -837,7 +789,7 @@ func requirementWithExtra(fields ...string) layout.Document[records.Requirement]
 }
 
 func interfaceOmitting(field string) layout.Document[records.InterfaceRecord] {
-	document := validInterfaceDocument()
+	document := testutil.ValidInterfaceDocument()
 	document.Fields = omitField(document.Fields, field)
 	switch field {
 	case "name":
@@ -851,7 +803,7 @@ func interfaceOmitting(field string) layout.Document[records.InterfaceRecord] {
 }
 
 func interfaceBlankString(field string) layout.Document[records.InterfaceRecord] {
-	document := validInterfaceDocument()
+	document := testutil.ValidInterfaceDocument()
 	switch field {
 	case "name":
 		document.Record.Name = "   "
@@ -864,7 +816,7 @@ func interfaceBlankString(field string) layout.Document[records.InterfaceRecord]
 }
 
 func interfaceWithExtra(fields ...string) layout.Document[records.InterfaceRecord] {
-	document := validInterfaceDocument()
+	document := testutil.ValidInterfaceDocument()
 	document.Fields = copyFields(document.Fields)
 	for _, field := range fields {
 		document.Fields[field] = true

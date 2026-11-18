@@ -4,6 +4,12 @@
 // Baseline fixtures satisfy every check registered in
 // specvalidation.Validate. Tests should diverge from that baseline
 // only on the property under test.
+//
+// Requirement options (such as WithID, WithType, WithText, WithStatus,
+// WithAppliesTo, and WithRelationships) must not be passed to
+// ValidInterfaceDocument or ValidInterfaceYAML. Interface options (such as
+// WithName, WithKind, and WithDescription) must not be passed to
+// ValidRequirementDocument or ValidRequirementYAML.
 package testutil
 
 import (
@@ -29,15 +35,17 @@ const (
 type Option func(*fixture)
 
 type fixture struct {
-	path      string
-	pathSet   bool
-	req       records.Requirement
-	iface     records.InterfaceRecord
-	nilFields bool
+	path        string
+	pathSet     bool
+	req         records.Requirement
+	iface       records.InterfaceRecord
+	nilFields   bool
+	isInterface bool
 }
 
 // ValidRequirementDocument returns a requirement document that satisfies
 // every currently registered specification check when validated alone.
+// Interface options must not be passed to this builder.
 func ValidRequirementDocument(opts ...Option) layout.Document[records.Requirement] {
 	f := newRequirementFixture()
 	for _, opt := range opts {
@@ -55,6 +63,7 @@ func ValidRequirementDocument(opts ...Option) layout.Document[records.Requiremen
 
 // ValidInterfaceDocument returns an interface document that satisfies
 // every currently registered specification check when validated alone.
+// Requirement options must not be passed to this builder.
 func ValidInterfaceDocument(opts ...Option) layout.Document[records.InterfaceRecord] {
 	f := newInterfaceFixture()
 	for _, opt := range opts {
@@ -71,6 +80,7 @@ func ValidInterfaceDocument(opts ...Option) layout.Document[records.InterfaceRec
 }
 
 // ValidRequirementYAML returns YAML for a baseline-valid requirement.
+// Interface options must not be passed to this builder.
 func ValidRequirementYAML(opts ...Option) string {
 	f := newRequirementFixture()
 	for _, opt := range opts {
@@ -80,6 +90,7 @@ func ValidRequirementYAML(opts ...Option) string {
 }
 
 // ValidInterfaceYAML returns YAML for a baseline-valid interface.
+// Requirement options must not be passed to this builder.
 func ValidInterfaceYAML(opts ...Option) string {
 	f := newInterfaceFixture()
 	for _, opt := range opts {
@@ -90,10 +101,11 @@ func ValidInterfaceYAML(opts ...Option) string {
 
 // WithID sets the requirement id and, unless WithPath was already
 // applied, the canonical spec/requirements/<id>.yaml path.
+// When applied to an interface fixture, WithID does not rewrite the path.
 func WithID(id string) Option {
 	return func(f *fixture) {
 		f.req.ID = id
-		if !f.pathSet {
+		if !f.pathSet && !f.isInterface {
 			f.path = path.Join(layout.RequirementsDir, id+".yaml")
 		}
 	}
@@ -139,7 +151,7 @@ func WithAppliesTo(applies records.Applicability) Option {
 }
 
 // WithRelationships replaces relationships. Passing no arguments yields
-// an empty list, which remains schema-valid.
+// a non-nil empty slice, which remains schema-valid.
 func WithRelationships(rels ...records.Relationship) Option {
 	return func(f *fixture) {
 		f.req.Relationships = copyRelationships(rels)
@@ -155,10 +167,11 @@ func WithoutFields() Option {
 
 // WithName sets the interface name and, unless WithPath was already
 // applied, the canonical spec/interfaces/<name>.yaml path.
+// When applied to a requirement fixture, WithName does not rewrite the path.
 func WithName(name string) Option {
 	return func(f *fixture) {
 		f.iface.Name = name
-		if !f.pathSet {
+		if !f.pathSet && f.isInterface {
 			f.path = path.Join(layout.InterfacesDir, name+".yaml")
 		}
 	}
@@ -202,6 +215,7 @@ func newInterfaceFixture() *fixture {
 			Kind:        defaultInterfaceKind,
 			Description: defaultInterfaceDescription,
 		},
+		isInterface: true,
 	}
 }
 
