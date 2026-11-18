@@ -106,9 +106,13 @@ class CompareCeilingsTests(unittest.TestCase):
                 repo_root=repo_root,
             )
 
-        self.assertTrue(
-            any("was removed while the file still exists" in d for d in diagnostics)
+        expected = (
+            "ERROR: .skillsaw-baseline.json ceiling for AGENTS.md "
+            "(context-budget) was removed while the file still exists. "
+            "Baseline ceilings may only ratchet downwards or remain "
+            "unchanged, not be deleted."
         )
+        self.assertEqual([expected], diagnostics)
 
     def test_dropped_ceiling_for_deleted_file_is_accepted(self) -> None:
         """Permit dropping a baseline ceiling entry if the file was removed from the repo."""
@@ -132,6 +136,32 @@ class CompareCeilingsTests(unittest.TestCase):
         )
 
         self.assertEqual([], diagnostics)
+
+    def test_dropped_ceiling_for_non_context_budget_rule_is_rejected(self) -> None:
+        """Reject dropping a ceiling for any rule, not just context-budget."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / "docs/vision.md").parent.mkdir(parents=True, exist_ok=True)
+            (repo_root / "docs/vision.md").write_text("dummy", encoding="utf-8")
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(
+                    _ceiling(
+                        file_path="docs/vision.md",
+                        rule_id="content-section-length",
+                        value=500,
+                    )
+                ),
+                repo_root=repo_root,
+            )
+
+        expected = (
+            "ERROR: .skillsaw-baseline.json ceiling for docs/vision.md "
+            "(content-section-length) was removed while the file still exists. "
+            "Baseline ceilings may only ratchet downwards or remain "
+            "unchanged, not be deleted."
+        )
+        self.assertEqual([expected], diagnostics)
 
     def test_non_ceiling_entries_are_ignored(self) -> None:
         """Ignore baseline rows that are not ceiling mode."""

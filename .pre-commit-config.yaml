@@ -161,7 +161,7 @@ repos:
         entry: python3 scripts/check_baseline_ratchet.py
         language: system
         pass_filenames: false
-        files: ^\.skillsaw-baseline\.json$
+        files: ^(\.skillsaw-baseline\.json|\.skillsaw\.yaml)$
       - id: test-baseline-ratchet
         name: test-baseline-ratchet
         entry: python3 scripts/test_check_baseline_ratchet.py
