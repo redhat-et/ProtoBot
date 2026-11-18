@@ -149,7 +149,7 @@ repos:
         entry: python3 scripts/check_harness_integrity.py --online-if-ci
         language: system
         pass_filenames: false
-        files: ^\.fullsend/harness/[^/]+\.yaml$
+        files: ^\.fullsend/harness/[^/]+\.ya?ml$
       - id: baseline-ratchet
         name: baseline-ratchet
         entry: python3 scripts/check_baseline_ratchet.py
