@@ -97,7 +97,7 @@ type graphValidator struct {
 }
 
 func (v *graphValidator) run() {
-	for _, component := range stronglyConnectedComponents(v.graph, v.collectVertices()) {
+	for _, component := range stronglyConnectedComponents(v.graph, v.prepareVertices()) {
 		if !v.componentHasCycle(component) {
 			continue
 		}
@@ -105,10 +105,11 @@ func (v *graphValidator) run() {
 	}
 }
 
-func (v *graphValidator) collectVertices() []string {
-	for source, targets := range v.graph {
+// prepareVertices sorts adjacency slices, registers missing leaf targets as
+// nil entries in v.graph, and returns sorted vertex keys.
+func (v *graphValidator) prepareVertices() []string {
+	for _, targets := range v.graph {
 		sort.Strings(targets)
-		v.graph[source] = targets
 	}
 
 	missingTargets := make(map[string]bool)

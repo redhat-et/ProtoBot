@@ -540,6 +540,11 @@ func TestGraphValidatorDeterministicLeafHandling(t *testing.T) {
 		"REQ-API-00098",
 		"REQ-API-00099",
 	}
+	wantAdjacency := map[string][]string{
+		"REQ-API-00001": {"REQ-API-00097", "REQ-API-00099"},
+		"REQ-API-00002": {"REQ-API-00097", "REQ-API-00098"},
+		"REQ-API-00003": {"REQ-API-00098", "REQ-API-00099"},
+	}
 	const iterations = 100
 	for i := range iterations {
 		v := graphValidator{
@@ -549,22 +554,30 @@ func TestGraphValidatorDeterministicLeafHandling(t *testing.T) {
 				"REQ-API-00002": {"REQ-API-00098", "REQ-API-00097"},
 			},
 		}
-		vertices := v.collectVertices()
+		vertices := v.prepareVertices()
 		if dup := firstDuplicate(vertices); dup != "" {
 			t.Fatalf("iteration %d: duplicate vertex %q in %v", i, dup, vertices)
 		}
-		if len(vertices) != len(wantVertices) {
+		if !slices.Equal(vertices, wantVertices) {
 			t.Fatalf("iteration %d: vertices=%v, want %v", i, vertices, wantVertices)
 		}
-		for j, want := range wantVertices {
-			if vertices[j] != want {
-				t.Fatalf("iteration %d: vertices=%v, want %v", i, vertices, wantVertices)
+		for source, want := range wantAdjacency {
+			if !slices.Equal(v.graph[source], want) {
+				t.Fatalf("iteration %d: graph[%q]=%v, want %v", i, source, v.graph[source], want)
 			}
 		}
 		for _, leaf := range []string{"REQ-API-00097", "REQ-API-00098", "REQ-API-00099"} {
-			if _, exists := v.graph[leaf]; !exists {
+			got, exists := v.graph[leaf]
+			if !exists {
 				t.Fatalf("iteration %d: missing leaf %q was not merged into the graph", i, leaf)
 			}
+			if got != nil {
+				t.Fatalf("iteration %d: graph[%q]=%v, want nil", i, leaf, got)
+			}
+		}
+		repeated := v.prepareVertices()
+		if !slices.Equal(repeated, vertices) {
+			t.Fatalf("iteration %d: repeated vertices=%v, want %v", i, repeated, vertices)
 		}
 	}
 }
