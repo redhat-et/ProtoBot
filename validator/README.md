@@ -73,16 +73,21 @@ include `name`, `kind`, and `description`. Status values are `active` or
 `retired`. Legacy metadata (`verification`, `provenance`, `created`) and
 other unparsed fields are rejected.
 Requirement text is checked for exactly one `shall` and for a match
-against the declared EARS type (`ubiquitous`, `event-driven`,
+against the declared EARS `type` (`ubiquitous`, `event-driven`,
 `state-driven`, `unwanted-behavior`, `optional-feature`, or `complex`).
-Statement pattern matching and the `shall` count use
-case-insensitive regex matching per [ADR-0002][adr-0002]
-(`(?is)` for patterns and `(?i)\bshall\b` for the obligation
-keyword). State-driven statements require the keyword `While`
-rather than an undeclared alias such as `During`; case variations
-such as `while` and `While` match. Complex statements require at
-least two distinct trigger keywords from `When`, `While`, `Where`,
-and the pair `If`...`then`; each keyword counts once. Parsed
+The declared `type` value is matched exactly (case-sensitive) against
+those constants; a variation such as `type: State-Driven` fails with
+`ears.invalid_type`. Statement pattern matching and the `shall` count
+use case-insensitive regex matching per [ADR-0002][adr-0002]: the
+five simple EARS patterns and the `If`...`then` complex trigger use
+`(?is)` (case-insensitive, dot matches newline), the individual
+complex trigger keywords `When`, `While`, and `Where` use `(?i)`
+(case-insensitive only, no dot-matches-newline), and the obligation
+keyword uses `(?i)\bshall\b`. State-driven statements require the
+keyword `While` rather than an undeclared alias such as `During`;
+case variations such as `while` and `While` match. Complex statements
+require at least two distinct trigger keywords from `When`, `While`,
+`Where`, and the pair `If`...`then`; each keyword counts once. Parsed
 requirement `text` is compared against `--base` for every existing ID;
 YAML scalar reformatting that preserves the parsed string passes, and
 metadata-only edits such as status transitions pass. A wording change
