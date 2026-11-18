@@ -6,6 +6,7 @@
 package records
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -78,6 +79,10 @@ func ValidateRequirementID(id string) error {
 	return nil
 }
 
+// ErrInvalidInterfaceName indicates that an interface name is not a well-formed
+// single path segment.
+var ErrInvalidInterfaceName = errors.New("invalid interface name")
+
 // ValidateInterfaceName returns an error if name is not a well-formed
 // single path segment: non-empty, free of path separators ("/" or
 // "\"), and without a leading or trailing dot. This rejects the
@@ -85,14 +90,8 @@ func ValidateRequirementID(id string) error {
 // hidden-file-style and trailing-dot names, while still permitting
 // interior dots such as "service..api" or "api.v1".
 func ValidateInterfaceName(name string) error {
-	if name == "" {
-		return fmt.Errorf("invalid interface name %q", name)
-	}
-	if strings.ContainsAny(name, `/\`) {
-		return fmt.Errorf("invalid interface name %q", name)
-	}
-	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") {
-		return fmt.Errorf("invalid interface name %q", name)
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") {
+		return ErrInvalidInterfaceName
 	}
 	return nil
 }

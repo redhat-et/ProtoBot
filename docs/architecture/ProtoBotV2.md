@@ -324,9 +324,10 @@ Omitting a relationship does not make conflicting text acceptable.
 ### Interface record
 
 An interface record has a stable name, a kind such as `http`, and a
-description explaining the boundary. Interfaces are named so that
-`applies_to.interfaces` resolves. The description does not add conditions or
-outcomes absent from requirement text.
+description explaining the boundary. The name is a single path segment:
+non-empty, without `/` or `\`, and without a leading or trailing dot.
+Interfaces are named so that `applies_to.interfaces` resolves. The
+description does not add conditions or outcomes absent from requirement text.
 
 ### Replacement, retirement, and test tags
 
@@ -663,7 +664,7 @@ The validator reads the plain `spec/` layout and reduced records in
   `optional-feature`, `complex`) and contains exactly one `shall`; a
   statement that does not match its declared pattern fails validation;
 - identifier format, uniqueness, no deletion, and no reuse;
-- basename-to-id and basename-to-name matching;
+- interface name syntax, and basename-to-id and basename-to-name matching;
 - referential integrity: `applies_to.interfaces`, relationship targets, and
   test `@req:<ID>` tags all resolve;
 - relationship types restricted to `depends-on`, `supersedes`, and `related-to`;
