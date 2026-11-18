@@ -150,6 +150,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^\.fullsend/harness/[^/]+\.ya?ml$
+      - id: test-harness-integrity
+        name: test-harness-integrity
+        entry: python3 scripts/test_check_harness_integrity.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_harness_integrity|test_check_harness_integrity)\.py$
       - id: baseline-ratchet
         name: baseline-ratchet
         entry: python3 scripts/check_baseline_ratchet.py
