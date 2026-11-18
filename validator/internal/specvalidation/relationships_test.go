@@ -1,6 +1,7 @@
 package specvalidation
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
