@@ -469,13 +469,50 @@ func TestSelfReferentialCycleMessageFormatting(t *testing.T) {
 	}
 
 	got := diagnostics[0]
+	const wantPath = "spec/requirements/REQ-API-00001.yaml"
+	const wantField = "relationships"
+	const wantMessage = "The depends-on relationship graph contains a cycle: REQ-API-00001->REQ-API-00001."
 	if got.Code != CodeCycle {
 		t.Errorf("code=%q, want %q", got.Code, CodeCycle)
 	}
+	if got.Path != wantPath {
+		t.Errorf("path=%q, want %q", got.Path, wantPath)
+	}
+	if got.Field != wantField {
+		t.Errorf("field=%q, want %q", got.Field, wantField)
+	}
+	if got.Message != wantMessage {
+		t.Errorf("message=%q, want %q", got.Message, wantMessage)
+	}
+}
 
-	const wantLoop = "REQ-API-00001->REQ-API-00001"
-	if !strings.Contains(got.Message, wantLoop) {
-		t.Errorf("message %q does not contain self-loop %q", got.Message, wantLoop)
+func TestSelfReferentialSupersedesCycleMessageFormatting(t *testing.T) {
+	snapshot := snapshotFromDocs(
+		withStatus(requirementDocument("spec/requirements/REQ-API-00001.yaml", "REQ-API-00001", []records.Relationship{
+			{Type: records.RelSupersedes, Target: "REQ-API-00001"},
+		}), records.StatusRetired),
+	)
+
+	diagnostics := cycleDiagnostics(Validate(snapshot))
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want 1", diagnostics)
+	}
+
+	got := diagnostics[0]
+	const wantPath = "spec/requirements/REQ-API-00001.yaml"
+	const wantField = "relationships"
+	const wantMessage = "The supersedes relationship graph contains a cycle: REQ-API-00001->REQ-API-00001."
+	if got.Code != CodeCycle {
+		t.Errorf("code=%q, want %q", got.Code, CodeCycle)
+	}
+	if got.Path != wantPath {
+		t.Errorf("path=%q, want %q", got.Path, wantPath)
+	}
+	if got.Field != wantField {
+		t.Errorf("field=%q, want %q", got.Field, wantField)
+	}
+	if got.Message != wantMessage {
+		t.Errorf("message=%q, want %q", got.Message, wantMessage)
 	}
 }
 
@@ -733,7 +770,11 @@ func idsInMessage(message string) []string {
 	ids := strings.Split(body, ", ")
 	for i, id := range ids {
 		if arrow := strings.Index(id, "->"); arrow >= 0 {
-			ids[i] = id[:arrow]
+			source, target := id[:arrow], id[arrow+2:]
+			if source != target {
+				panic(fmt.Sprintf("malformed self-loop edge: %s", id))
+			}
+			ids[i] = source
 		}
 	}
 	slices.Sort(ids)
