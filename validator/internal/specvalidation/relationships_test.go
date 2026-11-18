@@ -558,11 +558,11 @@ func TestGraphValidatorDeterministicLeafHandling(t *testing.T) {
 		if dup := firstDuplicate(vertices); dup != "" {
 			t.Fatalf("iteration %d: duplicate vertex %q in %v", i, dup, vertices)
 		}
-		if !sameStrings(vertices, wantVertices) {
+		if !slices.Equal(vertices, wantVertices) {
 			t.Fatalf("iteration %d: vertices=%v, want %v", i, vertices, wantVertices)
 		}
 		for source, want := range wantAdjacency {
-			if !sameStrings(v.graph[source], want) {
+			if !slices.Equal(v.graph[source], want) {
 				t.Fatalf("iteration %d: graph[%q]=%v, want %v", i, source, v.graph[source], want)
 			}
 		}
@@ -576,7 +576,7 @@ func TestGraphValidatorDeterministicLeafHandling(t *testing.T) {
 			}
 		}
 		repeated := v.prepareVertices()
-		if !sameStrings(repeated, vertices) {
+		if !slices.Equal(repeated, vertices) {
 			t.Fatalf("iteration %d: repeated vertices=%v, want %v", i, repeated, vertices)
 		}
 	}
