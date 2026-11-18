@@ -6,6 +6,20 @@ stay the same or decrease, but it must not increase relative to the base
 branch. skillsaw itself only compares the working tree against the committed
 baseline, so bumping the ceiling in the same change would otherwise pass.
 
+A ceiling entry may also not be dropped from ``.skillsaw-baseline.json``
+while its file still exists in the repository. If a tracked file shrinks
+below its ``.skillsaw.yaml`` warn threshold, skillsaw stops emitting a
+finding for it, and regenerating the baseline then omits the ceiling
+entirely — silently deleting the ratchet and allowing the file to grow back
+up to the warn threshold unchecked. Dropping a ceiling is only accepted when
+the file itself was removed from the repository.
+
+Separately, for every ``context-budget`` ceiling tracked in the working-tree
+baseline, the corresponding ``rules.context-budget.limits.<key>.warn`` value
+in ``.skillsaw.yaml`` must stay ``<=`` the recorded ceiling. A warn limit
+above the ceiling creates the same blind spot described above as soon as the
+file grows back up to the warn threshold.
+
 Used as the ``baseline-ratchet`` local pre-commit hook (and via
 ``scripts/lint.py``). Base content is loaded from the first existing git ref
 in this order: ``--base-ref``, ``BASELINE_RATCHET_BASE_REF``,
@@ -31,8 +45,18 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+try:
+    import yaml
+except ImportError:
+    sys.exit(
+        "ERROR: PyYAML is required but not installed.\n"
+        "       Install with:  pip install pyyaml"
+    )
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_RELATIVE_PATH = ".skillsaw-baseline.json"
+SKILLSAW_CONFIG_RELATIVE_PATH = ".skillsaw.yaml"
+_LIMIT_KEY_UNSAFE = re.compile(r"[^a-z0-9]+")
 DEFAULT_BASE_REF_CANDIDATES = (
     "upstream/main",
     "origin/main",
@@ -345,13 +369,25 @@ def ceiling_values(
     return index
 
 
-def compare_ceilings(head: dict[str, Any], base: dict[str, Any]) -> list[str]:
-    """Return diagnostics for any head ceiling that exceeds its base value.
+def compare_ceilings(
+    head: dict[str, Any], base: dict[str, Any], repo_root: Path | None = None
+) -> list[str]:
+    """Return diagnostics for ceiling regressions between *head* and *base*.
 
-    New ``(file_path, rule_id)`` ceiling keys that are absent from *base*
-    are allowed (a newly introduced skillsaw finding). Only existing keys
-    are ratcheted: the highest head value must be ``<=`` the lowest base
-    value for that key.
+    Two regressions are checked:
+
+    * An existing ``(file_path, rule_id)`` ceiling whose head value exceeds
+      its base value (the ratchet moving the wrong way). The highest head
+      value must be ``<=`` the lowest base value for that key.
+    * A ``(file_path, rule_id)`` ceiling present in *base* but absent from
+      *head*. This is only rejected when *repo_root* is given and the file
+      still exists on disk — dropping the ceiling for a file that was
+      itself removed from the repository is allowed.
+
+    New ``(file_path, rule_id)`` ceiling keys present only in *head* are
+    allowed (a newly introduced skillsaw finding). When *repo_root* is
+    ``None``, dropped-ceiling detection is skipped because file existence
+    cannot be verified.
     """
     diagnostics: list[str] = []
     head_index = ceiling_values(head, "working tree")
@@ -370,6 +406,93 @@ def compare_ceilings(head: dict[str, Any], base: dict[str, Any]) -> list[str]:
                 f"{clean_path} increased from {base_val} to {head_val}. "
                 "Baseline ceilings may only ratchet downwards or remain "
                 "unchanged."
+            )
+    if repo_root is not None:
+        for key in sorted(base_index):
+            if key in head_index:
+                continue
+            file_path, rule_id = key
+            if not (repo_root / file_path).exists():
+                continue
+            clean_path = sanitize_log_string(file_path)
+            clean_rule = sanitize_log_string(rule_id)
+            diagnostics.append(
+                f"ERROR: .skillsaw-baseline.json ceiling for {clean_path} "
+                f"({clean_rule}) was removed while the file still exists. "
+                "Baseline ceilings may only ratchet downwards or remain "
+                "unchanged, not be deleted."
+            )
+    return diagnostics
+
+
+def context_budget_limit_key(file_path: str) -> str:
+    """Return the ``.skillsaw.yaml`` ``limits`` key for *file_path*.
+
+    The file path is lower-cased and every run of non-alphanumeric
+    characters becomes a single hyphen, e.g. ``AGENTS.md`` -> ``agents-md``.
+    """
+    return _LIMIT_KEY_UNSAFE.sub("-", file_path.lower()).strip("-")
+
+
+def load_skillsaw_config(repo_root: Path) -> dict[str, Any] | None:
+    """Return the parsed ``.skillsaw.yaml`` config, or ``None`` if unusable.
+
+    Any read or parse failure, or a non-mapping document, is treated as
+    "no config to check against" rather than a hard error — the warn-parity
+    check is a defense in depth on top of the ceiling-retention check above,
+    not the sole enforcement mechanism.
+    """
+    path = repo_root / SKILLSAW_CONFIG_RELATIVE_PATH
+    if not path.is_file():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def compare_warn_limits(
+    head_index: dict[tuple[str, str], list[int]], config: dict[str, Any] | None
+) -> list[str]:
+    """Return diagnostics for ``.skillsaw.yaml`` warn limits above their ceiling.
+
+    For every ``context-budget`` ceiling key in *head_index*, look up the
+    matching ``rules.context-budget.limits.<key>.warn`` entry in *config*
+    (the parsed ``.skillsaw.yaml``). A warn limit greater than the recorded
+    ceiling stops skillsaw from emitting a context-budget finding once the
+    file grows back up to the warn limit, which drops the ceiling on the
+    next baseline regeneration (see the module docstring). A missing config,
+    rule, or per-file entry means the pair is not tracked here and is
+    skipped.
+    """
+    if not isinstance(config, dict):
+        return []
+    limits = config.get("rules", {}).get("context-budget", {}).get("limits", {})
+    if not isinstance(limits, dict):
+        return []
+    diagnostics: list[str] = []
+    for file_path, rule_id in sorted(head_index):
+        if rule_id != "context-budget":
+            continue
+        entry = limits.get(context_budget_limit_key(file_path))
+        if not isinstance(entry, dict):
+            continue
+        warn = entry.get("warn")
+        if isinstance(warn, bool) or not isinstance(warn, (int, float)):
+            continue
+        ceiling = min(head_index[(file_path, rule_id)])
+        if warn > ceiling:
+            clean_path = sanitize_log_string(file_path)
+            diagnostics.append(
+                "ERROR: .skillsaw.yaml context-budget warn limit for "
+                f"{clean_path} ({warn}) exceeds baseline ceiling "
+                f"({ceiling}). Lower the warn limit in .skillsaw.yaml to "
+                "match or precede the ceiling."
             )
     return diagnostics
 
@@ -440,8 +563,10 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
     Returns ``(exit_code, messages)``. Exit 0 with a skip warning when no
     base source can be resolved outside CI. In CI, exit 1 if no base
     source can be resolved. Exit 0 with a validation message when every
-    existing ceiling is less than or equal to its base value. Exit 1 on
-    increases or unreadable input.
+    existing ceiling is less than or equal to its base value, no ceiling for
+    an existing file was dropped, and every tracked ``.skillsaw.yaml``
+    context-budget warn limit is at or below its baseline ceiling. Exit 1 on
+    any of those regressions or on unreadable input.
     """
     try:
         head = load_working_tree_baseline(repo_root)
@@ -471,10 +596,10 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
 
     source, base = loaded
     try:
-        diagnostics = compare_ceilings(head, base)
-        n_ceilings = sum(
-            len(values) for values in ceiling_values(head, "working tree").values()
-        )
+        head_index = ceiling_values(head, "working tree")
+        diagnostics = compare_ceilings(head, base, repo_root=repo_root)
+        diagnostics += compare_warn_limits(head_index, load_skillsaw_config(repo_root))
+        n_ceilings = sum(len(values) for values in head_index.values())
     except BaselineRatchetError as error:
         return 1, [str(error)]
 

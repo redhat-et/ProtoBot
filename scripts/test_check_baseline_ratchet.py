@@ -95,6 +95,39 @@ class CompareCeilingsTests(unittest.TestCase):
 
         self.assertEqual([], diagnostics)
 
+    def test_dropped_ceiling_for_existing_file_is_rejected(self) -> None:
+        """Reject dropping a baseline ceiling entry if the file still exists on disk."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(),
+            _baseline(_ceiling(file_path="AGENTS.md", value=4000)),
+            repo_root=checker.REPO_ROOT,
+        )
+
+        self.assertTrue(
+            any("was removed while the file still exists" in d for d in diagnostics)
+        )
+
+    def test_dropped_ceiling_for_deleted_file_is_accepted(self) -> None:
+        """Permit dropping a baseline ceiling entry if the file was removed from the repo."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(),
+            _baseline(
+                _ceiling(file_path="docs/nonexistent_deleted_file.md", value=100)
+            ),
+            repo_root=checker.REPO_ROOT,
+        )
+
+        self.assertEqual([], diagnostics)
+
+    def test_dropped_ceiling_without_repo_root_is_not_checked(self) -> None:
+        """Skip dropped-ceiling detection entirely when repo_root is not given."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(),
+            _baseline(_ceiling(file_path="AGENTS.md", value=4000)),
+        )
+
+        self.assertEqual([], diagnostics)
+
     def test_non_ceiling_entries_are_ignored(self) -> None:
         """Ignore baseline rows that are not ceiling mode."""
         head = _baseline(
@@ -948,6 +981,51 @@ class CheckRepoTests(unittest.TestCase):
             exit_code, messages = checker.check_repo(self.root)
             self.assertEqual(0, exit_code)
             self.assertIn("shallow push checkout lacks base history", messages[0])
+
+    def test_warn_limit_exceeding_ceiling_is_rejected(self) -> None:
+        """Reject .skillsaw.yaml warn limits that exceed .skillsaw-baseline.json ceilings."""
+        skillsaw_config = (
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            "        warn: 4100\n"
+        )
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            skillsaw_config, encoding="utf-8"
+        )
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertTrue(
+            any("exceeds baseline ceiling" in message for message in messages)
+        )
+
+    def test_warn_limit_at_or_below_ceiling_is_accepted(self) -> None:
+        """Allow a .skillsaw.yaml warn limit at or below the baseline ceiling."""
+        skillsaw_config = (
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            "        warn: 4000\n"
+        )
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            skillsaw_config, encoding="utf-8"
+        )
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
+
+    def test_missing_skillsaw_config_skips_warn_parity(self) -> None:
+        """Skip the warn-parity check when .skillsaw.yaml is absent."""
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
 
 
 if __name__ == "__main__":
