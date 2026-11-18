@@ -640,6 +640,82 @@ class CandidateRefTests(unittest.TestCase):
             self.assertEqual("origin/main", resolved)
 
 
+class CompareWarnLimitsTests(unittest.TestCase):
+    def test_missing_limits_entry_is_rejected(self) -> None:
+        """Reject context-budget ceiling with no corresponding .skillsaw.yaml limits entry."""
+        head_index = {("AGENTS.md", "context-budget"): [4000]}
+        config = {"rules": {"context-budget": {"limits": {}}}}
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("is missing a rules.context-budget.limits.agents-md entry", diagnostics[0])
+
+    def test_miskeyed_or_renamed_limits_entry_is_rejected(self) -> None:
+        """Reject mis-keyed or renamed .skillsaw.yaml limits entry for context-budget ceiling."""
+        head_index = {("AGENTS.md", "context-budget"): [4000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "agents_md": {"warn": 4000},
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("is missing a rules.context-budget.limits.agents-md entry", diagnostics[0])
+
+    def test_missing_or_non_numeric_warn_field_is_rejected(self) -> None:
+        """Reject .skillsaw.yaml limits entry with missing or non-numeric warn value."""
+        head_index = {("AGENTS.md", "context-budget"): [4000]}
+        for invalid_warn in ({}, {"warn": None}, {"warn": "4000"}, {"warn": True}):
+            with self.subTest(entry=invalid_warn):
+                config = {
+                    "rules": {
+                        "context-budget": {
+                            "limits": {
+                                "agents-md": invalid_warn,
+                            }
+                        }
+                    }
+                }
+                diagnostics = checker.compare_warn_limits(head_index, config)
+                self.assertEqual(1, len(diagnostics))
+                self.assertIn("is missing a numeric 'warn' limit", diagnostics[0])
+
+    def test_limit_key_collision_is_rejected(self) -> None:
+        """Reject multiple context-budget files that collide on the same limits key."""
+        head_index = {
+            ("docs/foo.md", "context-budget"): [500],
+            ("docs-foo.md", "context-budget"): [500],
+        }
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "docs-foo-md": {"warn": 400},
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("share the .skillsaw.yaml limits key 'docs-foo-md'", diagnostics[0])
+
+    def test_none_config_skips_checking(self) -> None:
+        """Skip checking when config is None (file absent)."""
+        head_index = {("AGENTS.md", "context-budget"): [4000]}
+        diagnostics = checker.compare_warn_limits(head_index, None)
+        self.assertEqual([], diagnostics)
+
+    def test_non_context_budget_ceilings_are_ignored(self) -> None:
+        """Ignore ceiling entries that do not belong to context-budget."""
+        head_index = {("docs/architecture.md", "content-section-length"): [500]}
+        config = {"rules": {"context-budget": {"limits": {}}}}
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+
 class CheckRepoTests(unittest.TestCase):
     def setUp(self) -> None:
         """Create an isolated git repository with a committed baseline."""
@@ -1027,8 +1103,86 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("none increased", messages[0])
 
-    def test_skillsaw_config_with_none_intermediates_skips_warn_parity(self) -> None:
-        """Skip warn-parity check without error when intermediate config keys map to None."""
+    def test_corrupted_skillsaw_config_fails_closed(self) -> None:
+        """Reject unparseable or corrupted .skillsaw.yaml rather than silently skipping."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules: [invalid: yaml: :\n", encoding="utf-8"
+        )
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+        self.assertEqual(1, exit_code)
+        self.assertTrue(any("invalid YAML in .skillsaw.yaml" in msg for msg in messages))
+
+    def test_non_mapping_skillsaw_config_fails_closed(self) -> None:
+        """Reject non-mapping .skillsaw.yaml (e.g. list, string, empty)."""
+        for content in ("- list\n- items\n", "just a string\n", ""):
+            with self.subTest(content=content):
+                (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+                    content, encoding="utf-8"
+                )
+                exit_code, messages = checker.check_repo(self.root, base_ref="main")
+                self.assertEqual(1, exit_code)
+                self.assertTrue(any("must be a YAML mapping" in msg for msg in messages))
+
+    def test_skillsaw_config_read_error_fails_closed(self) -> None:
+        """Fail closed when .skillsaw.yaml cannot be read."""
+        path = self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH
+        path.write_text("rules:\n", encoding="utf-8")
+        original_read_text = Path.read_text
+
+        def mock_read_text(self_path: Path, *args: object, **kwargs: object) -> str:
+            if self_path.name == checker.SKILLSAW_CONFIG_RELATIVE_PATH:
+                raise OSError("Disk error")
+            return original_read_text(self_path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", side_effect=mock_read_text, autospec=True):
+            exit_code, messages = checker.check_repo(self.root, base_ref="main")
+            self.assertEqual(1, exit_code)
+            self.assertTrue(any("cannot read .skillsaw.yaml" in msg for msg in messages))
+
+    def test_skillsaw_config_missing_limit_entry_is_rejected(self) -> None:
+        """Reject .skillsaw.yaml missing limits entry for tracked context-budget ceiling."""
+        skillsaw_config = (
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      other-file-md:\n"
+            "        warn: 100\n"
+        )
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            skillsaw_config, encoding="utf-8"
+        )
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+        self.assertEqual(1, exit_code)
+        self.assertTrue(
+            any("is missing a rules.context-budget.limits.agents-md entry" in msg for msg in messages)
+        )
+
+    def test_skillsaw_config_limit_key_collision_is_rejected(self) -> None:
+        """Reject multiple context-budget files colliding on the same limits key in check_repo."""
+        self._write_baseline(
+            _baseline(
+                _ceiling(file_path="docs/foo.md", value=500),
+                _ceiling(file_path="docs-foo.md", value=500),
+            )
+        )
+        skillsaw_config = (
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      docs-foo-md:\n"
+            "        warn: 400\n"
+        )
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            skillsaw_config, encoding="utf-8"
+        )
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+        self.assertEqual(1, exit_code)
+        self.assertTrue(
+            any("share the .skillsaw.yaml limits key 'docs-foo-md'" in msg for msg in messages)
+        )
+
+    def test_skillsaw_config_with_none_intermediates_reports_missing_limit(self) -> None:
+        """Report missing limit without error when intermediate config keys map to None."""
         for malformed in (
             "rules:\n",
             "rules:\n  context-budget:\n",
@@ -1041,8 +1195,24 @@ class CheckRepoTests(unittest.TestCase):
 
                 exit_code, messages = checker.check_repo(self.root, base_ref="main")
 
-                self.assertEqual(0, exit_code)
-                self.assertIn("none increased", messages[0])
+                self.assertEqual(1, exit_code)
+                self.assertTrue(
+                    any("is missing a rules.context-budget.limits.agents-md entry" in msg for msg in messages)
+                )
+
+    def test_skillsaw_config_with_none_intermediates_skips_when_no_context_budget_ceilings(self) -> None:
+        """Skip warn parity when intermediate config keys map to None and no context-budget ceiling exists."""
+        self._write_baseline(
+            _baseline(_ceiling(file_path="foo.md", rule_id="other-rule", value=100))
+        )
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules:\n", encoding="utf-8"
+        )
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
 
 
 if __name__ == "__main__":
