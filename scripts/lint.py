@@ -18,11 +18,18 @@ sandboxed coding agents that lack network access:
 
 Usage::
 
-    python scripts/lint.py --all-files          # every tracked file
-    python scripts/lint.py --files a.py b.yaml  # specific files
-    python scripts/lint.py                      # changed files vs HEAD
-    python scripts/lint.py --check-parity       # validate config + cache
-    python scripts/lint.py --online             # allow network access
+    python scripts/lint.py --all-files                 # every tracked file
+    python scripts/lint.py --files a.py b.yaml         # specific files
+    python scripts/lint.py                             # changed files vs HEAD
+    python scripts/lint.py --check-parity              # validate config/cache
+    python scripts/lint.py --online                    # allow network access
+    python scripts/lint.py --online-if-ci              # --online when CI=true
+    python scripts/lint.py --print-pre-commit-version  # pinned version
+
+CI runs ``python3 scripts/lint.py --all-files --online-if-ci`` and
+installs the pre-commit version that ``--print-pre-commit-version``
+prints. Under ``CI=true``, that invocation reads no configuration and
+needs no PyYAML; ``pre-commit`` validates the config itself.
 
 Because ``.pre-commit-config.yaml`` is the only configuration this
 script reads, adding, removing, or reconfiguring a hook requires no
@@ -40,16 +47,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    import yaml
-except ImportError:
-    sys.exit(
-        "ERROR: PyYAML is required but not installed.\n"
-        "       Install with:  pip install pyyaml"
-    )
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
+
+# The pre-commit version this wrapper requires. CI installs exactly
+# this version; it reads the value through --print-pre-commit-version.
+PRE_COMMIT_VERSION = "4.6.2"
 
 # ``repo:`` values pre-commit never clones over the network.
 _NON_CLONED_REPOS = {"local", "meta"}
@@ -87,6 +90,19 @@ def _pre_commit_home() -> Path:
 
 
 def _load_config() -> dict[str, Any]:
+    """Parse ``.pre-commit-config.yaml``.
+
+    PyYAML is imported here, not at module import time, so paths that
+    read no config (``--print-pre-commit-version``; ``--all-files`` and
+    ``--files`` with network access assumed) run without PyYAML.
+    """
+    try:
+        import yaml
+    except ImportError:
+        sys.exit(
+            "ERROR: PyYAML is required but not installed.\n"
+            "       Install with:  pip install pyyaml"
+        )
     with open(CONFIG_PATH) as fh:
         return yaml.safe_load(fh)
 
@@ -274,7 +290,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="behave as --online only when CI=true",
     )
+    parser.add_argument(
+        "--print-pre-commit-version",
+        action="store_true",
+        help="print the pinned pre-commit version and exit; CI installs it",
+    )
     args = parser.parse_args(argv)
+
+    if args.print_pre_commit_version:
+        if args.check_parity or args.all_files or args.files:
+            parser.error(
+                "--print-pre-commit-version cannot be combined with "
+                "--check-parity, --all-files, or --files"
+            )
+        print(PRE_COMMIT_VERSION)
+        return 0
 
     online = args.online or (args.online_if_ci and _ci_is_enabled())
 
@@ -283,11 +313,17 @@ def main(argv: list[str] | None = None) -> int:
     if not online:
         os.environ.setdefault("ZIZMOR_NO_ONLINE_AUDITS", "true")
 
-    config = _load_config()
-
-    rc = _preflight(online, pre_commit_home, config)
-    if rc != 0:
-        return rc
+    # Read the config at most once, and only where a code path needs
+    # it: the offline cache pre-flight below, and bare mode's
+    # always_run check. The CI invocation (--all-files --online-if-ci
+    # under CI=true) needs neither, so it runs without PyYAML;
+    # pre-commit validates the config itself.
+    config: dict[str, Any] | None = None
+    if not online:
+        config = _load_config()
+        rc = _preflight(online, pre_commit_home, config)
+        if rc != 0:
+            return rc
 
     if args.check_parity:
         validate_rc = subprocess.run(
@@ -311,9 +347,12 @@ def main(argv: list[str] | None = None) -> int:
         cmd.extend(args.files)
     else:
         changed = _changed_files()
-        if not changed and not _any_always_run(config):
-            print("No files to check.")
-            return 0
+        if not changed:
+            if config is None:
+                config = _load_config()
+            if not _any_always_run(config):
+                print("No files to check.")
+                return 0
         cmd.append("--files")
         cmd.extend(changed)
 
