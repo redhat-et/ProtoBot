@@ -479,6 +479,11 @@ status: active
 		"applies_to.scopes[1]",
 		"relationships[0].target",
 	}
+	wantMessages := []string{
+		"applies_to.interfaces[1] must not be blank.",
+		"applies_to.scopes[1] must not be blank.",
+		`Required field "relationships[0].target" is missing.`,
+	}
 	if len(diagnostics) != len(wantFields) {
 		t.Fatalf("diagnostics=%v, want fields %v", diagnostics, wantFields)
 	}
@@ -493,8 +498,8 @@ status: active
 		if got.Path != "spec/requirements/REQ-API-00002.yaml" {
 			t.Errorf("path=%q, want requirement path", got.Path)
 		}
-		if !strings.Contains(got.Message, field) {
-			t.Errorf("message %q does not identify field %q", got.Message, field)
+		if got.Message != wantMessages[i] {
+			t.Errorf("message=%q, want %q", got.Message, wantMessages[i])
 		}
 	}
 }

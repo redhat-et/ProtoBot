@@ -157,17 +157,22 @@ func missingFieldDiagnostic(code, path, field string) Diagnostic {
 	}
 }
 
+// blankIndexedStringDiagnostics emits requirement.missing_field for blank or
+// whitespace-only selector entries, identifying the indexed field and stating
+// that it must not be blank rather than reporting a present selector as missing.
 func blankIndexedStringDiagnostics(path, prefix string, values []string) []Diagnostic {
 	var diagnostics []Diagnostic
 	for index, value := range values {
 		if strings.TrimSpace(value) != "" {
 			continue
 		}
-		diagnostics = append(diagnostics, missingFieldDiagnostic(
-			CodeRequirementMissingField,
-			path,
-			fmt.Sprintf("%s[%d]", prefix, index),
-		))
+		field := fmt.Sprintf("%s[%d]", prefix, index)
+		diagnostics = append(diagnostics, Diagnostic{
+			Code:    CodeRequirementMissingField,
+			Path:    path,
+			Field:   field,
+			Message: fmt.Sprintf("%s must not be blank.", field),
+		})
 	}
 	return diagnostics
 }

@@ -42,19 +42,19 @@ is newly introduced when it is present in the working tree and absent from
 `--base`; historical `supersedes` edges already present in `--base` are
 exempt from same-change retirement enforcement. Retirement without a
 successor is allowed. Retired records must not be deleted. Each
-`applies_to.interfaces` entry must equal an interface record's `name`
-(matching is case-sensitive), and requirement IDs in `relationships[].target`
-must resolve to declared records; retired requirement targets satisfy
-resolution. A missing interface name or requirement target fails with
-`reference.not_found`. An interface name declared by more than one
-interface record fails with `reference.ambiguous` when an
-`applies_to.interfaces` entry names it. Duplicate requirement IDs fail with
-`requirement.duplicate_id` on the declaring records, not with
-`reference.ambiguous`. Requirement IDs must match `REQ-<SCOPE>-<NNNNN>`, be
-unique in the working tree, and must not be deleted or reused relative to
-the comparison base. Requirement file basenames must use that same identifier
-pattern and equal the in-record `id`. Interface file basenames must equal the
-declared
+non-blank `applies_to.interfaces` selector must equal an interface
+record's `name` (matching is case-sensitive), and requirement IDs in
+`relationships[].target` must resolve to declared records; retired
+requirement targets satisfy resolution. A missing interface name or
+requirement target fails with `reference.not_found`. An interface name
+declared by more than one interface record fails with
+`reference.ambiguous` when an `applies_to.interfaces` selector names it.
+Duplicate requirement IDs fail with `requirement.duplicate_id` on the
+declaring records, not with `reference.ambiguous`. Requirement IDs must
+match `REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must
+not be deleted or reused relative to the comparison base. Requirement
+file basenames must use that same identifier pattern and equal the
+in-record `id`. Interface file basenames must equal the declared
 `name`. It also scans Gherkin `.feature` files under `tests/` for `@req:<ID>`
 tags and fails when a tag does not resolve to a known requirement record.
 Active and retired IDs both count as known; unknown or misspelled IDs fail
