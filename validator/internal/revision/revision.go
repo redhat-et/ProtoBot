@@ -23,6 +23,8 @@ const (
 	CodeUnsupportedEntry = "revision.unsupported_entry"
 	CodeUnexpectedFile   = "revision.unexpected_file"
 	CodeParseFailed      = "revision.parse_failed"
+	CodeSelfComparison   = "revision.self_comparison"
+	CodeEmptyBase        = "revision.empty_base"
 )
 
 // Error represents a revision-level failure preventing reading the base tree.
@@ -33,6 +35,14 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return e.Message
+}
+
+// Options control comparison-base reads.
+type Options struct {
+	// AllowSelfComparison permits a --base ref that resolves to the
+	// target checkout HEAD commit. The default rejects that case so a
+	// misconfigured merge base cannot pass by comparing a tree with itself.
+	AllowSelfComparison bool
 }
 
 type treeEntry struct {
@@ -49,13 +59,15 @@ const (
 )
 
 // Read loads requirement records from the Git tree of ref as resolved in
-// the checkout at target. The working tree is not read. Missing
-// spec/requirements in that revision is treated as empty.
+// the checkout at target. The working tree is not read. Missing or empty
+// spec/requirements in that revision is treated as empty and reported as
+// CodeEmptyBase. A ref that resolves to the checkout HEAD commit is
+// rejected as CodeSelfComparison so comparison cannot run against itself.
 //
 // Revision-level failures (such as missing ref or unreadable checkout)
 // are returned as error (with type *Error). Per-file parse problems
 // within the materialized base tree are returned as layout diagnostics.
-func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic, error) {
+func Read(target, ref string, opts Options) (layout.Snapshot, []layout.Diagnostic, error) {
 	absolute, err := filepath.Abs(target)
 	if err != nil {
 		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot resolve checkout path: %s", err)}
@@ -68,13 +80,16 @@ func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic, error) {
 	if err != nil {
 		return layout.Snapshot{}, nil, &Error{Code: CodeNotFound, Message: fmt.Sprintf("comparison base %q is not a commit in the checkout", ref)}
 	}
+	if err := checkSelfComparison(absolute, commit, ref, opts); err != nil {
+		return layout.Snapshot{}, nil, err
+	}
 
 	exists, diags := checkTreeContainer(absolute, commit, ref, "spec")
 	if len(diags) > 0 {
 		return layout.Snapshot{}, diags, nil
 	}
 	if !exists {
-		return layout.Snapshot{Root: absolute}, nil, nil
+		return layout.Snapshot{Root: absolute}, emptyBaseNote(ref), nil
 	}
 
 	exists, diags = checkTreeContainer(absolute, commit, ref, layout.RequirementsDir)
@@ -82,12 +97,15 @@ func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic, error) {
 		return layout.Snapshot{}, diags, nil
 	}
 	if !exists {
-		return layout.Snapshot{Root: absolute}, nil, nil
+		return layout.Snapshot{Root: absolute}, emptyBaseNote(ref), nil
 	}
 
 	entries, listDiags, err := listRequirements(absolute, commit, ref)
 	if err != nil {
 		return layout.Snapshot{}, nil, &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot read comparison base %q", ref)}
+	}
+	if len(entries) == 0 && len(listDiags) == 0 {
+		return layout.Snapshot{Root: absolute}, emptyBaseNote(ref), nil
 	}
 
 	tmp, err := os.MkdirTemp("", "validator-base-")
@@ -118,6 +136,27 @@ func Read(target, ref string) (layout.Snapshot, []layout.Diagnostic, error) {
 		})
 	}
 	return snapshot, parseDiagnostics, nil
+}
+
+func emptyBaseNote(ref string) []layout.Diagnostic {
+	return []layout.Diagnostic{{
+		Code:    CodeEmptyBase,
+		Message: "contains no requirement records; immutability checks skipped",
+	}}
+}
+
+func checkSelfComparison(target, commit, ref string, opts Options) *Error {
+	headCommit, err := resolveCommit(target, "HEAD")
+	if err != nil {
+		return &Error{Code: CodeReadFailed, Message: fmt.Sprintf("cannot resolve target checkout HEAD: %s", err)}
+	}
+	if commit == headCommit && !opts.AllowSelfComparison {
+		return &Error{
+			Code:    CodeSelfComparison,
+			Message: fmt.Sprintf("comparison base %q resolves to target checkout HEAD commit %s; distinct revision required", ref, headCommit),
+		}
+	}
+	return nil
 }
 
 func requireCheckoutRoot(target string) error {

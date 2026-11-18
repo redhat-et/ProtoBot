@@ -16,7 +16,7 @@ func TestReadLoadsCommittedRequirements(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	snapshot, diagnostics, err := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestReadIgnoresWorkingTreeEdits(t *testing.T) {
 	git(t, root, "commit", "-m", "base")
 	writeFile(t, root, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00002"))
 
-	snapshot, diagnostics, err := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,12 +59,12 @@ func TestReadMissingRequirementsIsEmpty(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	snapshot, diagnostics, err := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics=%v", diagnostics)
+	if !hasCode(diagnostics, CodeEmptyBase) {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeEmptyBase)
 	}
 	if len(snapshot.Requirements) != 0 {
 		t.Fatalf("requirements=%+v", snapshot.Requirements)
@@ -73,7 +73,7 @@ func TestReadMissingRequirementsIsEmpty(t *testing.T) {
 
 func TestReadUnknownRef(t *testing.T) {
 	root := gitRepo(t)
-	_, _, err := Read(root, "not-a-ref")
+	_, _, err := Read(root, "not-a-ref", Options{})
 	if err == nil {
 		t.Fatal("expected error for unknown ref")
 	}
@@ -84,7 +84,7 @@ func TestReadUnknownRef(t *testing.T) {
 }
 
 func TestReadNonGitTarget(t *testing.T) {
-	_, _, err := Read(t.TempDir(), "HEAD")
+	_, _, err := Read(t.TempDir(), "HEAD", Options{})
 	if err == nil {
 		t.Fatal("expected error for non-git target")
 	}
@@ -101,7 +101,7 @@ func TestReadSkipsNonYAMLEntriesInBase(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	snapshot, diagnostics, err := Read(root, "HEAD")
+	snapshot, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestReadLayoutDiagnosticsForMalformedBase(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base")
 
-	_, diagnostics, err := Read(root, "HEAD")
+	_, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestReadRejectsUnsupportedEntryInBase(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base with symlink")
 
-	_, diagnostics, err := Read(root, "HEAD")
+	_, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestReadRejectsNestedDirectoryInBase(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base with nested directory")
 
-	_, diagnostics, err := Read(root, "HEAD")
+	_, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestReadBaseSpecSymlinkFailsUnsupportedEntry(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base with spec symlink")
 
-	_, diagnostics, err := Read(root, "HEAD")
+	_, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestReadBaseSpecRequirementsSymlinkFailsUnsupportedEntry(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "base with spec/requirements symlink")
 
-	_, diagnostics, err := Read(root, "HEAD")
+	_, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -257,13 +257,117 @@ func TestReadOversizedBaseFile(t *testing.T) {
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "oversized")
 
-	_, diagnostics, err := Read(root, "HEAD")
+	_, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !hasCode(diagnostics, CodeReadFailed) || !hasPath(diagnostics, "spec/requirements/REQ-BIG-00001.yaml") {
 		t.Fatalf("diagnostics=%v, want CodeReadFailed for oversized file", diagnostics)
 	}
+}
+
+func TestReadRejectsTargetHeadSelfComparison(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "base")
+
+	_, _, err := Read(root, "HEAD", Options{})
+	if err == nil {
+		t.Fatal("expected error comparing checkout against HEAD, got nil")
+	}
+	revErr, ok := err.(*Error)
+	if !ok || revErr.Code != CodeSelfComparison {
+		t.Fatalf("err=%v, want CodeSelfComparison", err)
+	}
+	if !strings.Contains(revErr.Message, "distinct revision required") {
+		t.Fatalf("message %q omitted distinct-revision guidance", revErr.Message)
+	}
+}
+
+func TestReadAllowsSelfComparisonWhenOptedIn(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "base")
+
+	snapshot, diagnostics, err := Read(root, "HEAD", Options{AllowSelfComparison: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v", diagnostics)
+	}
+	if len(snapshot.Requirements) != 1 || snapshot.Requirements[0].Record.ID != "REQ-API-00001" {
+		t.Fatalf("requirements=%+v", snapshot.Requirements)
+	}
+}
+
+func TestReadEmptyBaseEmitsNote(t *testing.T) {
+	root := gitRepo(t)
+	empty := gitOutputSHA(t, root, "HEAD")
+	writeFile(t, root, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "with spec")
+
+	snapshot, diagnostics, err := Read(root, empty, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snapshot.Requirements) != 0 {
+		t.Fatalf("requirements=%+v", snapshot.Requirements)
+	}
+	if !hasCode(diagnostics, CodeEmptyBase) {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeEmptyBase)
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want exactly one empty-base note", diagnostics)
+	}
+	if !strings.Contains(diagnostics[0].Message, "immutability checks skipped") {
+		t.Fatalf("message %q omitted skip notice", diagnostics[0].Message)
+	}
+}
+
+func TestReadEmptyRequirementsTreeWithGitkeepEmitsNote(t *testing.T) {
+	root := gitRepo(t)
+	writeFile(t, root, "spec/requirements/.gitkeep", "")
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "empty requirements tree")
+	empty := gitOutputSHA(t, root, "HEAD")
+
+	writeFile(t, root, "spec/requirements/REQ-TEST-00001.yaml", "id: REQ-TEST-00001\n")
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-m", "with spec")
+
+	snapshot, diagnostics, err := Read(root, empty, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snapshot.Requirements) != 0 {
+		t.Fatalf("requirements=%+v", snapshot.Requirements)
+	}
+	if !hasCode(diagnostics, CodeEmptyBase) {
+		t.Fatalf("diagnostics=%v, want %s", diagnostics, CodeEmptyBase)
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics=%v, want exactly one empty-base note", diagnostics)
+	}
+	if !strings.Contains(diagnostics[0].Message, "immutability checks skipped") {
+		t.Fatalf("message %q omitted skip notice", diagnostics[0].Message)
+	}
+	if !strings.Contains(diagnostics[0].Message, "contains no requirement records") {
+		t.Fatalf("message %q omitted accurate description", diagnostics[0].Message)
+	}
+}
+
+func gitOutputSHA(t *testing.T, root string, ref string) string {
+	t.Helper()
+	command := gitcmd.Command("-C", root, "rev-parse", ref)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("rev-parse %s failed: %v", ref, err)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func gitRepo(t *testing.T) string {

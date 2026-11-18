@@ -10,7 +10,10 @@ an external daemon.
 
 `--target` must be the root of a Git working tree, `git` must be
 available on `PATH`, and `--base` must resolve to a commit already
-present in that checkout. The command operates locally and does not fetch.
+present in that checkout. `--base` must resolve to a distinct commit from
+the target checkout `HEAD`; pass `--allow-self-comparison` only when a
+harness needs to compare a working tree against `HEAD`. The command
+operates locally and does not fetch.
 Git 2.45 or later is required for GIT_NO_LAZY_FETCH. Otherwise a partial clone
 can fetch a missing base object over the network.
 
@@ -21,8 +24,8 @@ reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
 (issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
-and #459, #462, and #463). The command line accepts the checkout path and
-comparison base.
+and #459, #462, #463, and #468). The command line accepts the checkout path
+and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
 empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
@@ -105,7 +108,7 @@ validator cannot read the id of an unreadable base record, so one removed file
 and one unrelated added record also pass.
 
 ```text
-validator --target PATH --base REF
+validator --target PATH --base REF [--allow-self-comparison]
 validator --help
 validator -h
 ```
@@ -125,12 +128,13 @@ the command usage:
 validator: <message>
 
 usage:
-  validator --target PATH --base REF
+  validator --target PATH --base REF [--allow-self-comparison]
   validator --help
   validator -h
 
-  --target PATH   checkout directory to validate
-  --base REF      comparison base for identity and immutability checks
+  --target PATH              checkout directory to validate
+  --base REF                 comparison base for identity and immutability checks
+  --allow-self-comparison    allow --base to resolve to the target checkout HEAD
 ```
 
 Target errors (exit status 1, such as a missing, unstattable, or
@@ -161,7 +165,8 @@ names containing control characters (e.g.,
 boundary, line breaks in diagnostic paths and messages are replaced with
 spaces to ensure single-line output. Informational notes regarding historical
 comparison base parse warnings (which do not cause a non-zero exit when the
-working tree repairs the file) are prefixed with
+working tree repairs the file) and a comparison base that contains no
+requirement records are prefixed with
 `validator: note: comparison base <ref>: ...` and are not diagnostics.
 Check the exit status first. A line without a `<code>` field is not a
 diagnostic.
@@ -170,7 +175,8 @@ This line format is stable for external tool integration. Current codes
 include layout codes (`layout.read_failed`, `layout.unexpected_file`,
 `layout.parse_failed`), revision check codes
 (`revision.not_found`, `revision.read_failed`, `revision.unsupported_entry`,
-`revision.unexpected_file`, `revision.parse_failed`), requirement check codes
+`revision.unexpected_file`, `revision.parse_failed`,
+`revision.self_comparison`, `revision.empty_base`), requirement check codes
 (`requirement.missing_field`, `requirement.invalid_status`,
 `requirement.unexpected_field`, `requirement.invalid_id`,
 `requirement.duplicate_id`, `requirement.deleted`,
@@ -192,7 +198,7 @@ Build and test it from this directory:
 
 ```sh
 go build -o validator ./cmd/validator
-./validator --target /path/to/checkout --base main
+./validator --target /path/to/checkout --base origin/main
 go test ./...
 go vet ./...
 ```
