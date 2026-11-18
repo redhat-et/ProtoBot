@@ -10,8 +10,8 @@
   before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
   target this repository.
-- Agent skills live in `.agents/skills/`. `.claude/skills` is a symlink to
-  that directory so Claude Code finds the same skills; do not add skills
+- Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
+  there so Claude Code finds the same skills; do not add skills
   under `.claude/` directly.
 
 ## Workflow files and CI boundaries
@@ -35,27 +35,28 @@ Agents must follow these rules:
 
 ## Context budget and prompt efficiency
 
-`AGENTS.md` is injected into every dispatched agent's prompt and is
+`AGENTS.md` is injected into every dispatched agent's prompt and
 budget-capped by the `context-budget` rule's `agents-md` warn limit in
 `.skillsaw.yaml`, enforced downward by
 [`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
 
 1. **Respect the prompt context budget.** Do not raise a
-   `.skillsaw-baseline.json` ceiling value to fit new prose; the
-   `baseline-ratchet` pre-commit and CI gate rejects ceiling increases.
-   Lower the `agents-md` warn limit in `.skillsaw.yaml` when
-   `AGENTS.md` shrinks below it.
+   `.skillsaw-baseline.json` ceiling value to fit new prose; after a
+   genuine prose shrink, regenerate the baseline with
+   `skillsaw baseline` so the ceiling ratchets downward — do not edit
+   the `agents-md` warn limit in `.skillsaw.yaml`, which is intentionally
+   kept at or below the current size.
 2. **Consolidate or extract when adding prose.** Offset a new rule or
-   explanation with equivalent consolidation of existing prose, or
-   extract detail into an on-demand skill under `.agents/skills/`.
+   explanation by consolidating existing prose or extracting
+   detail into an on-demand skill under `.agents/skills/`.
 3. **Review agents must recognize budget consolidation.** Treat prose
-   consolidation that offsets a new `AGENTS.md` addition as required
+   consolidation offsetting a new `AGENTS.md` addition as required
    budget compliance, not scope creep, provided no governance
    requirement, defined keyword, or diagnostic name is omitted.
 
 ## Rules for creating or modifying sibling entries
 
-A governed scope defines a domain of applicability, while a list
+A governed scope defines a domain of applicability; a list
 or governed collection defines the sibling set within that domain.
 When creating or modifying any numbered rule in `AGENTS.md`, any
 specification document under `docs/`, any skill file under
@@ -65,9 +66,9 @@ follow these rules:
 1. **Read all sibling entries first.** Before drafting or
    revising an entry, read every other entry in the same list
    or governed collection. Consistency cannot be verified
-   without knowing what the sibling entries say.
+   without knowing what sibling entries say.
 
-2. **Reuse established terminology.** Match the sibling
+2. **Reuse established terminology.** Match sibling
    entries' terms for the same concepts. An undeclared alias
    for a term already used in the same list or governed
    collection is a defect.
@@ -90,7 +91,7 @@ follow these rules:
    terminology matching.
 
 Examples of sibling entries: numbered rules in `AGENTS.md` (the
-other numbered rules in the same list); specification documents
+other numbered rules in the list); specification documents
 under `docs/` (every other governed Markdown document); skill
 files under `.agents/skills/` (every other skill file).
 
@@ -148,16 +149,16 @@ must follow these rules:
    New or revised specification documents must account for every
    component, interface, and constraint enumerated in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md`, and must not silently omit
-   those relevant to the document's scope.
+   `docs/architecture/overview.md`, omitting none
+   relevant to the document's scope.
 
 2. **Verify deployment topology, security posture, and
    persistent state coverage.** Cross-check against
    `docs/architecture/overview.md` and `docs/architecture.md`:
    deployment topology (single-player, multi-player, web),
    security posture (credential isolation, sandbox
-   constraints), and persistent state (all stores enumerated
-   in the Architecture) must be covered where relevant.
+   constraints), and persistent state (all stores in the
+   Architecture) must be covered where relevant.
 
 3. **Review agents must check cross-document coverage.** When
    reviewing a PR that creates or modifies a specification
@@ -169,7 +170,7 @@ must follow these rules:
    Checks must go beyond link freshness and heading alignment:
    register new capabilities where `components.md` enumerates
    them, avoid conflicting with principles in `overview.md`
-   or `components.md` (for example, the harness-agnostic
+   or `components.md` (e.g., the harness-agnostic
    Toolkit principle in `components.md`), and match defined
    ProtoBot keywords and relationship terms; an undeclared
    alias for a defined keyword is a defect.
@@ -191,13 +192,13 @@ must follow these rules:
    or when Rule 4 identifies staleness in a registered specification
    artifact, apply the update exclusively via
    `ears-manager artifact put` within an active change set. Run
-   formatters and linters prior to `ears-manager artifact put`, and
+   formatters and linters before `ears-manager artifact put`, and
    verify with `ears-manager check` before committing.
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
    registered specification artifact, when Rule 4 identifies staleness
-   in one, or when a PR modifies
+   in a registered specification artifact, or when a PR modifies
    [.protobot/project.yaml](.protobot/project.yaml), inspect the
    affected registered specification artifact or project configuration
    for hand edits under Rule 5. Run `ears-manager check` on a checkout
@@ -250,7 +251,7 @@ agents must follow these rules:
 2. **Match structural conventions, not behavioral fields.**
    Structural formatting conventions should match siblings,
    but behavioral fields like dispatch parameters must be determined
-   by the skill's own requirements. Blindly copying behavioral
+   by the skill's own requirements. Copying behavioral
    configuration from a sibling can produce incorrect dispatch
    or workflow behavior.
 
@@ -310,7 +311,7 @@ reviewing such a skill, agents must:
    subset of those fields it names (`Affected interfaces`,
    `Observable at the named boundary alone`) onto ADR-0002
    persistence fields (`applies_to`, `verification.mode`). Do not
-   demand persistence fields from host-independent skills, and
+   demand persistence fields from host-independent skills;
    emit required properties as fields, not only as prose.
 
 5. **Review agents must check skill-to-spec alignment.** When
