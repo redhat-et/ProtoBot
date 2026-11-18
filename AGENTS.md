@@ -59,7 +59,7 @@ A governed scope defines a domain of applicability; a list
 or governed collection defines the sibling set within that domain.
 When creating or modifying any numbered rule in `AGENTS.md`, any
 specification document under `docs/`, any skill file under
-`.agents/skills/`, any module specification document (`*/README.md`),
+`.agents/skills/`, any module specification document (`**/README.md`),
 or an entry in any future governed scope, agents must follow these
 rules:
 
@@ -78,7 +78,7 @@ rules:
    rather than inventing an alias. Findings should
    include terminology drift within the same list or governed
    collection, not only specification-hierarchy keyword checks —
-   for a module specification document (`*/README.md`), drift
+   for a module specification document (`**/README.md`), drift
    between neighboring paragraphs and CLI flag descriptions.
 
 4. **Match intra-entry restatement terminology.** When an
@@ -91,9 +91,11 @@ rules:
 
 Examples of sibling entries: numbered rules in `AGENTS.md`;
 specification documents under `docs/`; skill files under
-`.agents/skills/`; module specification documents (`*/README.md`),
+`.agents/skills/`; module specification documents (`**/README.md`),
 i.e. component READMEs describing a module's contracts, CLI
-interfaces, and validation rules.
+interfaces, and validation rules regardless of nesting depth
+(e.g. `validator/README.md`, `eval/corpus/README.md`,
+`tests/drafting-table/README.md`).
 
 ## Specification document hierarchy
 
