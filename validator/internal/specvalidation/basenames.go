@@ -13,6 +13,7 @@ import (
 const (
 	CodeRequirementInvalidBasename    = "requirement.invalid_basename"
 	CodeRequirementIDBasenameMismatch = "requirement.id_basename_mismatch"
+	CodeInterfaceInvalidBasename      = "interface.invalid_basename"
 	CodeInterfaceNameBasenameMismatch = "interface.name_basename_mismatch"
 )
 
@@ -57,6 +58,18 @@ func validateRequirementBasename(document layout.Document[records.Requirement]) 
 
 func validateInterfaceBasename(document layout.Document[records.InterfaceRecord]) []Diagnostic {
 	base := yamlBasename(document.Path)
+	if err := records.ValidateInterfaceName(base); err != nil {
+		return []Diagnostic{{
+			Code: CodeInterfaceInvalidBasename,
+			Path: document.Path,
+			Message: fmt.Sprintf(
+				"Interface file basename %q is invalid. %s",
+				base,
+				interfaceNameRemediation,
+			),
+		}}
+	}
+
 	name := document.Record.Name
 	if strings.TrimSpace(name) == "" || name == base {
 		return nil

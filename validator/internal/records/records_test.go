@@ -44,3 +44,36 @@ func TestValidateRequirementID(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateInterfaceName(t *testing.T) {
+	valid := []string{
+		"auth-service",
+		"api.v1",
+		"service..api",
+		"health-api",
+		"a..b",
+		"billing-api",
+	}
+	for _, name := range valid {
+		if err := ValidateInterfaceName(name); err != nil {
+			t.Errorf("ValidateInterfaceName(%q) = %v, want nil", name, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		".",
+		"..",
+		"...",
+		"health/api",
+		`health\api`,
+		".hidden",
+		"trailing.",
+		"service.",
+	}
+	for _, name := range invalid {
+		if err := ValidateInterfaceName(name); err == nil {
+			t.Errorf("ValidateInterfaceName(%q) = nil, want error", name)
+		}
+	}
+}

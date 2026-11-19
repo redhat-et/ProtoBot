@@ -86,21 +86,29 @@ func TestValidateRecordSchema(t *testing.T) {
 				"applies_to.scopes[0]",
 				"applies_to.scopes[1]",
 			},
+			wantMessages: []string{
+				"applies_to must name at least one interface or scope.",
+				"applies_to.interfaces[0] must not be blank.",
+				"applies_to.scopes[0] must not be blank.",
+				"applies_to.scopes[1] must not be blank.",
+			},
 			wantPath: reqPath,
 		},
 		{
-			name:       "mixed blank applies_to scope selector",
-			snapshot:   schemaSnapshot(requirementWithMixedBlankScopeSelectors(), validInterfaceDocument()),
-			wantCodes:  []string{CodeRequirementMissingField},
-			wantFields: []string{"applies_to.scopes[1]"},
-			wantPath:   reqPath,
+			name:         "mixed blank applies_to scope selector",
+			snapshot:     schemaSnapshot(requirementWithMixedBlankScopeSelectors(), validInterfaceDocument()),
+			wantCodes:    []string{CodeRequirementMissingField},
+			wantFields:   []string{"applies_to.scopes[1]"},
+			wantMessages: []string{"applies_to.scopes[1] must not be blank."},
+			wantPath:     reqPath,
 		},
 		{
-			name:       "mixed blank applies_to interface selector",
-			snapshot:   schemaSnapshot(requirementWithMixedBlankInterfaceSelectors(), validInterfaceDocument()),
-			wantCodes:  []string{CodeRequirementMissingField},
-			wantFields: []string{"applies_to.interfaces[1]"},
-			wantPath:   reqPath,
+			name:         "mixed blank applies_to interface selector",
+			snapshot:     schemaSnapshot(requirementWithMixedBlankInterfaceSelectors(), validInterfaceDocument()),
+			wantCodes:    []string{CodeRequirementMissingField},
+			wantFields:   []string{"applies_to.interfaces[1]"},
+			wantMessages: []string{"applies_to.interfaces[1] must not be blank."},
+			wantPath:     reqPath,
 		},
 		{
 			name:         "blank relationship target",
@@ -244,6 +252,31 @@ func TestValidateRecordSchema(t *testing.T) {
 			wantCodes:  []string{CodeInterfaceMissingField},
 			wantFields: []string{"description"},
 			wantPath:   ifacePath,
+		},
+		{
+			name:       "interface name is a dot-dot segment",
+			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceWithName("..")),
+			wantCodes:  []string{CodeInterfaceInvalidName},
+			wantFields: []string{"name"},
+			wantPath:   ifacePath,
+		},
+		{
+			name:       "interface name has a leading dot",
+			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceWithName(".hidden")),
+			wantCodes:  []string{CodeInterfaceInvalidName},
+			wantFields: []string{"name"},
+			wantPath:   ifacePath,
+		},
+		{
+			name:       "interface name has a trailing dot",
+			snapshot:   schemaSnapshot(validRequirementDocument(), interfaceWithName("service.")),
+			wantCodes:  []string{CodeInterfaceInvalidName},
+			wantFields: []string{"name"},
+			wantPath:   ifacePath,
+		},
+		{
+			name:     "interface name with interior dots is valid",
+			snapshot: schemaSnapshot(validRequirementDocument(), interfaceWithName("service..api")),
 		},
 		{
 			name:       "invalid status draft",
@@ -824,6 +857,12 @@ func interfaceOmitting(field string) layout.Document[records.InterfaceRecord] {
 	return document
 }
 
+func interfaceWithName(name string) layout.Document[records.InterfaceRecord] {
+	document := validInterfaceDocument()
+	document.Record.Name = name
+	return document
+}
+
 func interfaceBlankString(field string) layout.Document[records.InterfaceRecord] {
 	document := validInterfaceDocument()
 	switch field {
@@ -871,7 +910,7 @@ func schemaDiagnostics(diagnostics []Diagnostic) []Diagnostic {
 	var filtered []Diagnostic
 	for _, diagnostic := range diagnostics {
 		switch diagnostic.Code {
-		case CodeRequirementMissingField, CodeRequirementInvalidStatus, CodeRequirementUnexpectedField, CodeInterfaceMissingField, CodeInterfaceUnexpectedField:
+		case CodeRequirementMissingField, CodeRequirementInvalidStatus, CodeRequirementUnexpectedField, CodeInterfaceMissingField, CodeInterfaceUnexpectedField, CodeInterfaceInvalidName:
 			filtered = append(filtered, diagnostic)
 		}
 	}

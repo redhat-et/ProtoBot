@@ -138,6 +138,17 @@ repos:
         entry: python3 scripts/check_govet.py
         language: system
         files: \.go$
+      - id: check-portable-null-device
+        name: check-portable-null-device
+        entry: python3 scripts/check_portable_null_device.py
+        language: system
+        files: \.go$
+      - id: test-check-portable-null-device
+        name: test-check-portable-null-device
+        entry: python3 scripts/test_check_portable_null_device.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_portable_null_device|test_check_portable_null_device)\.py$
       - id: eval-corpus-schema
         name: eval-corpus-schema
         entry: python3 eval/corpus/validate.py
@@ -187,6 +198,12 @@ repos:
         # are passed either way.
         always_run: true
         files: ^docs/decisions/.*\.md$
+      - id: test-adr-amendments
+        name: test-adr-amendments
+        entry: python3 scripts/test_check_adr_amendments.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_adr_amendments|test_check_adr_amendments)\.py$
       - id: validator-spec-parity
         name: validator-spec-parity
         entry: python3 scripts/check_validator_spec_parity.py
@@ -211,3 +228,21 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_validator_fixtures|test_check_validator_fixtures)\.py$
+      - id: spec-validator
+        name: spec-validator
+        entry: python3 scripts/check_spec_validator.py
+        language: system
+        pass_filenames: false
+        # Pre-commit's staged-file list excludes deletions, and the
+        # validator rejects deleted requirement records, so a
+        # deletion-only commit must still run the hook. always_run: true
+        # makes pre-commit run it anyway; files: stays as scope
+        # documentation.
+        always_run: true
+        files: ^(spec/.+|tests/.+\.feature|validator/.+|scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py)$
+      - id: test-spec-validator
+        name: test-spec-validator
+        entry: python3 scripts/test_check_spec_validator.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py$
