@@ -24,8 +24,8 @@ reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
 (issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
-and #459, #462, #463, #468, #479, and #497). The command line accepts the
-checkout path and comparison base.
+\#459, #462, #463, #468, #479, #497, and #475). The command line accepts
+the checkout path and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
 empty. Unreadable files, non-YAML entries, `.yaml` records larger than 1 MiB,
@@ -44,8 +44,8 @@ A `supersedes` target must have
 predecessor in the same specification change relative to `--base`. An edge
 is newly introduced when it is present in the working tree and absent from
 `--base`; historical `supersedes` edges already present in `--base` are
-exempt from same-change retirement enforcement. Retirement without a
-successor is allowed. Retired records must not be deleted. Each
+exempt from same-specification-change retirement enforcement. Retirement
+without a successor is allowed. Retired records must not be deleted. Each
 non-blank `applies_to.interfaces` selector must equal an interface
 record's `name` (matching is case-sensitive), and requirement IDs in
 `relationships[].target` must resolve to declared records; retired
