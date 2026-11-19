@@ -54,9 +54,7 @@ _NULL_DEVICE_LITERAL = re.compile(_LITERAL_PATTERN)
 _COMPARISON_EXEMPTION = re.compile(
     rf"(?:(==|!=)\s*{_LITERAL_PATTERN}|{_LITERAL_PATTERN}\s*(==|!=))"
 )
-_CASE_EXEMPTION = re.compile(
-    rf"\bcase\s+(?![^:]*<-)[^:]*?({_LITERAL_PATTERN})[^:]*:"
-)
+_CASE_EXEMPTION = re.compile(rf"\bcase\s+(?![^:]*<-)[^:]*?({_LITERAL_PATTERN})[^:]*:")
 _PRAGMA_PATTERN = re.compile(r"(?://|/\*)\s*portability:allow-null-device")
 
 
@@ -65,9 +63,7 @@ def _null_device_at_boundary(text: str, idx: int) -> bool:
     if idx > 0 and text[idx - 1] in _PATH_CHARS_BEFORE:
         return False
     after_idx = idx + len("/dev/null")
-    if after_idx < len(text) and text[after_idx] in _PATH_CHARS_AFTER:
-        return False
-    return True
+    return not (after_idx < len(text) and text[after_idx] in _PATH_CHARS_AFTER)
 
 
 def is_test_file(path: str) -> bool:
