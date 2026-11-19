@@ -605,7 +605,6 @@ func TestValidateInterfaceNameMismatchParseFailureSuppression(t *testing.T) {
 }
 
 func TestValidateInterfaceWithDotDotSuppressesReferenceNotFound(t *testing.T) {
-	const path = "spec/requirements/REQ-API-00002.yaml"
 	snapshot := layout.Snapshot{
 		Requirements: []layout.Document[records.Requirement]{
 			testutil.ValidRequirementDocument(

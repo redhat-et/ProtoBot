@@ -252,5 +252,15 @@ go test ./...
 go vet ./...
 ```
 
+Continuous integration selects the comparison base with
+`scripts/select_comparison_base.py` and then runs the same check through
+`scripts/check_spec_validator.py`. The candidate is compared against the
+approved base: the base branch for a pull request or merge group, the exact
+previous commit for a push to the default branch, and the default branch for a
+push to any other branch or for a manual run. A default-branch push fails when
+the previous commit is unavailable. When the comparison base resolves to the
+checked-out commit, the base-relative checks are skipped. Any diagnostic fails
+the `validator` job.
+
 [design]: ../docs/architecture/ProtoBotV2.md
 [adr-0002]: ../docs/decisions/0002-ears-specification-record-schema.md#ears-template-validation
