@@ -160,6 +160,78 @@ class FindViolationsTests(unittest.TestCase):
         violations = find_violations("validator/internal/example_test.go", code)
         self.assertEqual([], violations)
 
+    def test_slice_element_literal_after_builder_is_flagged(self) -> None:
+        """A bare literal appearing after a builder call in the same slice is flagged."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{
+        testutil.ValidRequirementDocument(),
+        {
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+        self.assertEqual("Requirement", violations[0].type_name)
+
+    def test_slice_element_literal_after_builder_single_line_is_flagged(self) -> None:
+        """A bare literal appearing after a builder call on the same line is flagged."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{ testutil.ValidRequirementDocument(), {Path: "spec/requirements/REQ-00001.yaml", Record: req} }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+        self.assertEqual("Requirement", violations[0].type_name)
+
+    def test_slice_element_annotated_on_inner_line_is_exempt(self) -> None:
+        """A slice element with nolint on its own opening line is exempt."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{
+        { // nolint:fixtures
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual([], violations)
+
+    def test_slice_element_annotated_above_inner_line_is_exempt(self) -> None:
+        """A slice element with nolint directly above its opening line is exempt."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{
+        // nolint:fixtures
+        {
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual([], violations)
+
+    def test_slice_mixed_elements_one_exempt_one_flagged(self) -> None:
+        """A slice with one exempt element and one unexempt bare literal is flagged."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{
+        { // nolint:fixtures
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req1,
+        },
+        {
+            Path: "spec/requirements/REQ-00002.yaml",
+            Record: req2,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+        self.assertEqual("Requirement", violations[0].type_name)
+
     def test_exempts_testutil_package_and_nolint_comments(self) -> None:
         """Verify builder package and explicit nolint annotations are exempted."""
         annotated = """

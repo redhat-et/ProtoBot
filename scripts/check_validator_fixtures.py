@@ -48,9 +48,6 @@ _NOLINT_CURRENT = re.compile(r"(?://|/\*)\s*nolint:fixtures\b")
 _DOCUMENT_LITERAL = re.compile(
     r"(?<!\[\])\blayout\.Document\[records\.(Requirement|InterfaceRecord)\]\{"
 )
-_DOCUMENT_SLICE_LITERAL = re.compile(
-    r"\[\]layout\.Document\[records\.(Requirement|InterfaceRecord)\]\{\s*\{"
-)
 _DOCUMENT_SLICE_START = re.compile(
     r"\[\]layout\.Document\[records\.(Requirement|InterfaceRecord)\]\{"
 )
@@ -144,6 +141,117 @@ def _line_is_exempt(raw_lines: list[str], index: int, comment_part: str = "") ->
     return False
 
 
+def _slice_has_unexempted_bare_element(
+    stripped_lines: list[str],
+    raw_lines: list[str],
+    start_line_idx: int,
+    start_col: int,
+) -> bool:
+    """Return True when the slice starting at *start_line_idx*:*start_col*
+    contains at least one unexempted bare '{'-opening element literal.
+    """
+    depth = 1
+    paren_depth = 0
+    bracket_depth = 0
+    in_string: str | None = None
+    expecting_element = True
+
+    line_idx = start_line_idx
+    col = start_col
+
+    while line_idx < len(stripped_lines):
+        line = stripped_lines[line_idx]
+        if in_string == "`":
+            code_part = line
+        else:
+            code_part, _, _ = line.partition("//")
+        line_len = len(code_part)
+
+        while col < line_len:
+            ch = code_part[col]
+
+            if in_string is not None:
+                if in_string == '"':
+                    if ch == "\\":
+                        col += 2
+                        continue
+                    elif ch == '"':
+                        in_string = None
+                elif in_string == "`":
+                    if ch == "`":
+                        in_string = None
+                elif in_string == "'":
+                    if ch == "\\":
+                        col += 2
+                        continue
+                    elif ch == "'":
+                        in_string = None
+                col += 1
+                continue
+
+            if ch == '"':
+                in_string = '"'
+                expecting_element = False
+                col += 1
+                continue
+            elif ch == "`":
+                in_string = "`"
+                expecting_element = False
+                col += 1
+                continue
+            elif ch == "'":
+                in_string = "'"
+                expecting_element = False
+                col += 1
+                continue
+
+            if ch in " \t\r\n":
+                col += 1
+                continue
+
+            if expecting_element and depth == 1 and paren_depth == 0 and bracket_depth == 0:
+                expecting_element = False
+                if ch == "}":
+                    depth -= 1
+                    col += 1
+                    if depth == 0:
+                        return False
+                    continue
+                if ch == "{":
+                    if not _line_is_exempt(raw_lines, line_idx):
+                        return True
+                    depth += 1
+                    col += 1
+                    continue
+
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return False
+            elif ch == "(":
+                paren_depth += 1
+            elif ch == ")":
+                if paren_depth > 0:
+                    paren_depth -= 1
+            elif ch == "[":
+                bracket_depth += 1
+            elif ch == "]":
+                if bracket_depth > 0:
+                    bracket_depth -= 1
+            elif ch == ",":
+                if depth == 1 and paren_depth == 0 and bracket_depth == 0:
+                    expecting_element = True
+
+            col += 1
+
+        line_idx += 1
+        col = 0
+
+    return False
+
+
 def find_violations(rel_path: str, text: str) -> list[Violation]:
     """Return prohibited literal violations in *text* at *rel_path*.
 
@@ -163,20 +271,11 @@ def find_violations(rel_path: str, text: str) -> list[Violation]:
         matches: list[tuple[str, str]] = []
         for match in _DOCUMENT_LITERAL.finditer(code_part):
             matches.append(("document_literal", match.group(1)))
-        for match in _DOCUMENT_SLICE_LITERAL.finditer(code_part):
-            matches.append(("document_literal", match.group(1)))
         for match in _DOCUMENT_SLICE_START.finditer(code_part):
-            remainder = code_part[match.end() :].strip()
-            if remainder:
-                continue
-            for next_idx in range(index + 1, len(stripped_lines)):
-                next_code, _, _ = stripped_lines[next_idx].partition("//")
-                next_stripped = next_code.strip()
-                if not next_stripped:
-                    continue
-                if next_stripped.startswith("{"):
-                    matches.append(("document_literal", match.group(1)))
-                break
+            if _slice_has_unexempted_bare_element(
+                stripped_lines, raw_lines, index, match.end()
+            ):
+                matches.append(("document_literal", match.group(1)))
         for match in _RECORD_LITERAL.finditer(code_part):
             matches.append(("record_literal", match.group(1)))
         if not matches:
