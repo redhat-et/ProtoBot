@@ -187,6 +187,45 @@ class FindViolationsTests(unittest.TestCase):
         violations = checker.find_violations(text)
         self.assertEqual([3], [line_number for line_number, _ in violations])
 
+    def test_detects_select_send_case(self) -> None:
+        """Flag a select case sending /dev/null to a channel."""
+        text = 'select {\ncase ch <- "/dev/null":\n\treturn\n}\n'
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(2, violations[0][0])
+        self.assertIn("/dev/null", violations[0][1])
+
+    def test_detects_real_path_with_trailing_slash(self) -> None:
+        """Flag a hardcoded Unix path extending /dev/null/."""
+        text = 'path := "/dev/null/x"\n'
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(1, violations[0][0])
+        self.assertIn("/dev/null/x", violations[0][1])
+
+    def test_null_device_at_boundary_helper(self) -> None:
+        """Verify the path boundary helper distinguishes boundaries."""
+        self.assertTrue(checker._null_device_at_boundary('"/dev/null/x"', 1))
+        self.assertFalse(checker._null_device_at_boundary('"/tmp/dev/null"', 5))
+        self.assertTrue(checker._null_device_at_boundary('"/dev/null"', 1))
+
+    def test_detects_text_matching_call_without_pragma(self) -> None:
+        """Flag text-matching calls like strings.HasSuffix unless suppressed."""
+        text = 'if strings.HasSuffix(p, "/dev/null") {\n\treturn true\n}\n'
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(1, violations[0][0])
+        self.assertIn("strings.HasSuffix", violations[0][1])
+
+    def test_exempts_text_matching_call_with_pragma(self) -> None:
+        """Allow text-matching calls when accompanied by suppression pragma."""
+        text = (
+            'if strings.HasSuffix(p, "/dev/null") { // portability:allow-null-device\n'
+            "\treturn true\n"
+            "}\n"
+        )
+        self.assertEqual([], checker.find_violations(text))
+
 
 class CheckTests(unittest.TestCase):
     def setUp(self) -> None:

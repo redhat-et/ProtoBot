@@ -22,6 +22,12 @@ the literal argument text another program received.
 Inline suppression is supported via ``// portability:allow-null-device``
 on the violating line or the line immediately preceding it.
 
+Text-matching calls such as ``strings.HasSuffix``, ``strings.HasPrefix``,
+``strings.Contains``, ``strings.TrimPrefix``, and ``strings.TrimSuffix``
+that pass the literal argument are not syntactically exempt and will trip
+the check; the ``// portability:allow-null-device`` pragma is the escape
+hatch when matching text conventions in such calls.
+
 Comments (line comments ``//`` and block comments ``/* ... */``) and
 test files (``*_test.go``) are exempt entirely: mentions of ``/dev/null``
 in documentation or test fixtures do not affect production portability.
@@ -35,21 +41,33 @@ import string
 import sys
 
 _PATH_CHARS_BEFORE = set(string.ascii_letters + string.digits + "_./-")
-_PATH_CHARS_AFTER = set(string.ascii_letters + string.digits + "_/-")
+_PATH_CHARS_AFTER = set(string.ascii_letters + string.digits + "_-")
 
 _LITERAL_PATTERN = (
     r"(?:"
-    r'"(?:[^"\\]|\\.)*?(?<![a-zA-Z0-9_./-])/dev/null(?![a-zA-Z0-9_/-])(?:[^"\\]|\\.)*"'
+    r'"(?:[^"\\]|\\.)*?/dev/null(?:[^"\\]|\\.)*"'
     r"|"
-    r"`[^`]*?(?<![a-zA-Z0-9_./-])/dev/null(?![a-zA-Z0-9_/-])[^`]*`"
+    r"`[^`]*?/dev/null[^`]*`"
     r")"
 )
 _NULL_DEVICE_LITERAL = re.compile(_LITERAL_PATTERN)
 _COMPARISON_EXEMPTION = re.compile(
     rf"(?:(==|!=)\s*{_LITERAL_PATTERN}|{_LITERAL_PATTERN}\s*(==|!=))"
 )
-_CASE_EXEMPTION = re.compile(rf"\bcase\s+[^:]*?({_LITERAL_PATTERN})[^:]*:")
+_CASE_EXEMPTION = re.compile(
+    rf"\bcase\s+(?![^:]*<-)[^:]*?({_LITERAL_PATTERN})[^:]*:"
+)
 _PRAGMA_PATTERN = re.compile(r"(?://|/\*)\s*portability:allow-null-device")
+
+
+def _null_device_at_boundary(text: str, idx: int) -> bool:
+    """Return True when ``/dev/null`` at *idx* in *text* is at a path boundary."""
+    if idx > 0 and text[idx - 1] in _PATH_CHARS_BEFORE:
+        return False
+    after_idx = idx + len("/dev/null")
+    if after_idx < len(text) and text[after_idx] in _PATH_CHARS_AFTER:
+        return False
+    return True
 
 
 def is_test_file(path: str) -> bool:
@@ -205,17 +223,7 @@ def find_violations(text: str) -> list[tuple[int, str]]:
             null_idx = clean_text.find("/dev/null", pos, m.end())
             if null_idx == -1:
                 break
-            is_boundary = True
-            if null_idx > 0 and clean_text[null_idx - 1] in _PATH_CHARS_BEFORE:
-                is_boundary = False
-            after_idx = null_idx + len("/dev/null")
-            if (
-                after_idx < len(clean_text)
-                and clean_text[after_idx] in _PATH_CHARS_AFTER
-            ):
-                is_boundary = False
-
-            if is_boundary:
+            if _null_device_at_boundary(clean_text, null_idx):
                 line_number = clean_text[:null_idx].count("\n") + 1
                 if (
                     line_number not in suppressed_lines
