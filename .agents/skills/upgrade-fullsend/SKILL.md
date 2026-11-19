@@ -124,7 +124,7 @@ authorizes it.
 
 Continue only when `command -v fullsend`, `fullsend --version`, and
 `fullsend github setup --help` confirm the exact selected release and
-`--dry-run` support. In v0.56.1, the binary updater is `fullsend self-update`,
+`--dry-run` support. In `v0.56.1`, the binary updater is `fullsend self-update`,
 not `fullsend self-upgrade`; it updates only the local CLI binary. Repository
 workflows and configuration are handled by this skill's later steps. The
 reference covers its signed dry-run and the package-manager/archive safeguards.
