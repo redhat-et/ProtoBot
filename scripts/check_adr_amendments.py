@@ -9,7 +9,7 @@ lines from the baseline copy of an accepted or superseded ADR, and must
 never delete or rename an accepted or superseded ADR file (AGENTS.md Rule
 7). The sole exception is a supersession: an accepted record's status
 header line may transition in place to ``> Status: **Superseded by
-ADR-NNNN**``.
+ADR-NNNN** — Month Year`` provided a dated amendment block is appended.
 
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
@@ -30,17 +30,31 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _DECISIONS_DIR = Path("docs") / "decisions"
+_MONTHS = (
+    "January|February|March|April|May|June|July|August|September|October|November|December"
+)
+_DATE_SUFFIX = rf"(?: — (?:{_MONTHS}) \d{{4}})?"
 _ACCEPTED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Accepted\*\*",
+    rf"^> Status:\s*\*\*Accepted\*\*{_DATE_SUFFIX}$",
     re.MULTILINE,
 )
 _SUPERSEDED_STATUS = re.compile(
+    rf"^> Status:\s*\*\*Superseded by ADR-\d+\*\*{_DATE_SUFFIX}$",
+    re.MULTILINE,
+)
+_HEADER_ACCEPTED_STATUS = re.compile(
+    r"^> Status:\s*\*\*Accepted\*\*",
+    re.MULTILINE,
+)
+_HEADER_SUPERSEDED_STATUS = re.compile(
     r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*",
     re.MULTILINE,
 )
+_ANY_STATUS = re.compile(r"^> Status:\s*")
 _HEADER_LINE_LIMIT = 30
 _MAX_REPORTED_LINES = 10
-_AMENDMENT_MARKER = "**[Amended "
+_STATUS_SENTINEL = "\x00__ADR_STATUS_LINE_SENTINEL__\x00"
+_DATED_AMENDMENT_MARKER = re.compile(r"^\*\*\[Amended [A-Z][a-z]+ \d{4}\]\*\*")
 
 
 def is_adr_markdown(rel_path: Path) -> bool:
@@ -56,40 +70,89 @@ def is_adr_markdown(rel_path: Path) -> bool:
 def is_accepted(text: str) -> bool:
     """Return True when *text* declares ADR status Accepted in its header."""
     header = "\n".join(line.rstrip() for line in text.splitlines()[:_HEADER_LINE_LIMIT])
-    return _ACCEPTED_STATUS.search(header) is not None
+    return _HEADER_ACCEPTED_STATUS.search(header) is not None
 
 
 def is_superseded(text: str) -> bool:
     """Return True when *text* declares ADR status Superseded in its header."""
     header = "\n".join(line.rstrip() for line in text.splitlines()[:_HEADER_LINE_LIMIT])
-    return _SUPERSEDED_STATUS.search(header) is not None
+    return _HEADER_SUPERSEDED_STATUS.search(header) is not None
+
+
+def _has_appended_amendment_block(
+    old_lines: list[str],
+    new_lines: list[str],
+) -> bool:
+    """Return True if new_lines contains a dated amendment marker after the last baseline line.
+
+    Fenced code blocks are ignored. The marker must appear at or after the last
+    baseline line from old_lines that is present in new_lines.
+    """
+    in_fence = False
+    fence_char = None
+    amendment_indices: list[int] = []
+
+    for idx, line in enumerate(new_lines):
+        stripped = line.strip()
+        if not in_fence:
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_fence = True
+                fence_char = stripped[:3]
+            elif _DATED_AMENDMENT_MARKER.match(line):
+                amendment_indices.append(idx)
+        else:
+            if stripped.startswith(fence_char):
+                in_fence = False
+                fence_char = None
+
+    if not amendment_indices:
+        return False
+
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    last_baseline_j = -1
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            if any(old_lines[i].strip() for i in range(i1, i2)):
+                last_baseline_j = max(last_baseline_j, j2 - 1)
+
+    return any(idx > last_baseline_j for idx in amendment_indices)
 
 
 def _is_authorized_status_supersession(
-    old_segment: list[str],
-    new_segment: list[str],
-    i1: int,
+    old_segment: list[str] | str,
+    new_segment: list[str] | str,
+    i1: int = 0,
+    has_amendment: bool = True,
 ) -> bool:
-    """Return True when a replace opcode begins with an authorized status supersession.
+    """Return True when an accepted-status line transitions to superseded with an amendment block.
 
     AGENTS.md Rule 7 allows exactly one accepted-decision-text edit: an
     in-place transition of an accepted record's status line to
-    ``> Status: **Superseded by ADR-NNNN**``. This matches when the
-    replace opcode's old segment within the header window contains
-    exactly one line matching the accepted status pattern, that line is
-    the first line of the old segment, and the new segment's first line
-    is a superseded-status replacement.
+    ``> Status: **Superseded by ADR-NNNN** — Month Year`` provided a
+    dated amendment block is appended after the baseline content. This
+    matches when the transition occurs within the header window, the
+    old line matches the accepted status pattern, the new line matches
+    the superseded status pattern, and an appended dated amendment block
+    is present.
     """
     if i1 >= _HEADER_LINE_LIMIT:
         return False
-    if not old_segment or not new_segment:
+    if not has_amendment:
         return False
-    if sum(bool(_ACCEPTED_STATUS.match(line.rstrip())) for line in old_segment) != 1:
-        return False
-    old_line = old_segment[0].rstrip()
-    new_line = new_segment[0].rstrip()
-    return bool(_ACCEPTED_STATUS.match(old_line)) and bool(
-        _SUPERSEDED_STATUS.match(new_line)
+    if isinstance(old_segment, list):
+        if len(old_segment) != 1:
+            return False
+        old_line = old_segment[0]
+    else:
+        old_line = old_segment
+    if isinstance(new_segment, list):
+        if len(new_segment) != 1:
+            return False
+        new_line = new_segment[0]
+    else:
+        new_line = new_segment
+    return bool(_ACCEPTED_STATUS.match(old_line.rstrip())) and bool(
+        _SUPERSEDED_STATUS.match(new_line.rstrip())
     )
 
 
@@ -102,9 +165,9 @@ def historical_mutations(
 
     Insertions are allowed so dated amendment blocks can be added. An
     authorized status supersession (see ``_is_authorized_status_supersession``)
-    is also allowed and is not reported as a mutation. Any other delete or
-    replace opcode means accepted decision text was rewritten or replaced in
-    place.
+    accompanied by an appended dated amendment block is also allowed and is
+    not reported as a mutation. Any other delete or replace opcode means
+    accepted decision text was rewritten or replaced in place.
 
     The HEAD line number is the 1-based line in *new_lines* that a replaced
     baseline line maps to, computed from the opcode's ``j1``/``j2`` indices.
@@ -112,36 +175,62 @@ def historical_mutations(
     HEAD range is shorter than its baseline range — has no corresponding
     HEAD line and is reported as ``None``.
     """
+    old_header = old_lines[:_HEADER_LINE_LIMIT]
+    new_header = new_lines[:_HEADER_LINE_LIMIT]
+
+    accepted_indices = [
+        k for k, line in enumerate(old_header)
+        if _ACCEPTED_STATUS.match(line.rstrip())
+    ]
+    superseded_indices = [
+        m for m, line in enumerate(new_header)
+        if _SUPERSEDED_STATUS.match(line.rstrip())
+    ]
+    head_status_indices = [
+        m for m, line in enumerate(new_header)
+        if _ANY_STATUS.match(line.rstrip())
+    ]
+
+    has_amendment = _has_appended_amendment_block(old_lines, new_lines)
+
+    proc_old = list(old_lines)
+    proc_new = list(new_lines)
+
+    if (
+        len(accepted_indices) == 1
+        and len(superseded_indices) == 1
+        and len(head_status_indices) == 1
+        and has_amendment
+    ):
+        k = accepted_indices[0]
+        m = superseded_indices[0]
+        proc_old[k] = _STATUS_SENTINEL
+        proc_new[m] = _STATUS_SENTINEL
+
     matcher = difflib.SequenceMatcher(
-        a=old_lines,
-        b=new_lines,
+        a=proc_old,
+        b=proc_new,
         autojunk=False,
     )
     opcodes = matcher.get_opcodes()
-    has_amendment = any(
-        line.startswith(_AMENDMENT_MARKER)
-        for tag, _, _, j1, j2 in opcodes
-        if tag in {"insert", "replace"}
-        for line in new_lines[j1:j2]
-    )
+
     mutations: list[tuple[int, int | None, str]] = []
+
+    if len(head_status_indices) > 1:
+        baseline_status_line = accepted_indices[0] + 1 if accepted_indices else 1
+        for extra_idx in head_status_indices[1:]:
+            mutations.append((baseline_status_line, extra_idx + 1, new_lines[extra_idx]))
+
     for tag, i1, i2, j1, j2 in opcodes:
         if tag not in {"replace", "delete"}:
             continue
-        authorized_supersession = (
-            tag == "replace"
-            and _is_authorized_status_supersession(
-                old_lines[i1:i2], new_lines[j1:j2], i1
-            )
-            and has_amendment
-        )
-        start_idx = i1 + 1 if authorized_supersession else i1
-        for idx in range(start_idx, i2):
+        for idx in range(i1, i2):
             offset = idx - i1
             head_line_no = (
                 j1 + offset + 1 if tag == "replace" and j1 + offset < j2 else None
             )
             mutations.append((idx + 1, head_line_no, old_lines[idx]))
+
     return mutations
 
 
@@ -524,6 +613,7 @@ def _display_line(text: str, limit: int = 80) -> str:
 def _report_mutations(
     rel_posix: str,
     mutations: list[tuple[int, int | None, str]],
+    missing_amendment_block: bool = False,
 ) -> None:
     """Print a diagnostic for rewritten or deleted historical lines.
 
@@ -532,7 +622,10 @@ def _report_mutations(
     rewritten text now occupies. A deleted baseline line has no
     corresponding HEAD line.
     """
-    print(f"{rel_posix}: accepted decision text was rewritten or replaced in place")
+    if missing_amendment_block:
+        print(f"{rel_posix}: supersession requires an appended dated amendment block")
+    else:
+        print(f"{rel_posix}: accepted decision text was rewritten or replaced in place")
     for baseline_line_no, head_line_no, line in mutations[:_MAX_REPORTED_LINES]:
         if head_line_no is not None:
             location = f"baseline line {baseline_line_no} (HEAD line {head_line_no})"
@@ -665,12 +758,33 @@ def check(
             failed = True
             continue
 
+        hist_lines = hist_text.splitlines()
+        new_lines = new_text.splitlines()
+
+        old_header = hist_lines[:_HEADER_LINE_LIMIT]
+        new_header = new_lines[:_HEADER_LINE_LIMIT]
+        accepted_count = sum(bool(_ACCEPTED_STATUS.match(l.rstrip())) for l in old_header)
+        superseded_count = sum(bool(_SUPERSEDED_STATUS.match(l.rstrip())) for l in new_header)
+        head_status_count = sum(bool(_ANY_STATUS.match(l.rstrip())) for l in new_header)
+        has_amendment = _has_appended_amendment_block(hist_lines, new_lines)
+
         mutations = historical_mutations(
-            hist_text.splitlines(),
-            new_text.splitlines(),
+            hist_lines,
+            new_lines,
         )
         if mutations:
-            _report_mutations(rel_posix, mutations)
+            missing_amendment_block = (
+                accepted_count == 1
+                and superseded_count == 1
+                and head_status_count == 1
+                and not has_amendment
+                and len(mutations) == 1
+            )
+            _report_mutations(
+                rel_posix,
+                mutations,
+                missing_amendment_block=missing_amendment_block,
+            )
             failed = True
 
     return 1 if failed else 0

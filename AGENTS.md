@@ -212,27 +212,25 @@ must follow these rules:
    `ears-manager artifact put` was invoked; metadata-only changes to an
    artifact-registry entry do not by themselves require an artifact
    operation. Reviewers must flag hand edits they can identify, not
-   claim CLI provenance from an operation record. Findings should
-   include each listed diagnostic and any hand edit identified in the
-   inspected registered specification artifact or
-   [.protobot/project.yaml](.protobot/project.yaml); and, when Rule 4
-   identifies staleness in a registered specification artifact, a
-   staleness finding that prescribes `ears-manager artifact put`, not a
-   hand edit.
+   claim CLI provenance from an operation record. Findings should name
+   each failing diagnostic and each identified hand edit, and, when
+   Rule 4 identifies staleness, prescribe `ears-manager artifact put`
+   rather than a hand edit.
 
-7. **Preserve accepted architecture decision records.**
-   Never rewrite, replace, delete, or rename an accepted or
-   superseded architecture decision record in place, except to
-   supersede an accepted record via
-   `> Status: **Superseded by ADR-NNNN**`. Amendments and
+7. **Preserve accepted and superseded architecture decision records.**
+   Accepted and superseded architecture decision records under
+   `docs/decisions/` are immutable historical records. Never rewrite or
+   replace decision text in place, nor delete or rename a record file.
+   The sole exception is supersession: replace an accepted record's
+   status header line with
+   `> Status: **Superseded by ADR-NNNN** — Month Year`. Amendments and
    supersessions append a dated amendment block
-   (`**[Amended Month Year]**`). Review agents must verify an
-   accepted or superseded architecture decision record is never
-   rewritten, replaced, deleted, or renamed in place, except to
-   supersede an accepted record via
-   `> Status: **Superseded by ADR-NNNN**`, and amendments and
-   supersessions append a dated amendment block
-   (`**[Amended Month Year]**`).
+   (`**[Amended Month Year]**`) with the change, its rationale, and
+   references to updated architecture documents. Review agents must
+   verify decision text is never rewritten or replaced in place, no
+   record file is deleted or renamed, and amendments and supersessions
+   append the dated amendment block with the change, its rationale, and
+   references to updated architecture documents.
 
 ## Agent skills
 

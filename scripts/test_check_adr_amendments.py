@@ -162,32 +162,32 @@ class HistoricalMutationTests(unittest.TestCase):
         ]
         self.assertEqual([], checker.historical_mutations(old, new))
 
-    def test_authorized_status_supersession_with_additional_annotation_is_allowed(
-        self,
-    ) -> None:
-        """An authorized status supersession with additional annotation is allowed."""
+    def test_status_flip_with_trailing_text_fails(self) -> None:
+        """Trailing text after the status line is rejected as a mutation."""
         old = [
             "# ADR-0001: Example",
             "",
-            "> Status: **Accepted** (supersedes ADR-0000)",
+            "> Status: **Accepted** \u2014 September 2026",
             "",
             "Body.",
         ]
         new = [
             "# ADR-0001: Example",
             "",
-            "> Status: **Superseded by ADR-0004** (see issue #406)",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026 and arbitrary prose",
             "",
             "Body.",
             "",
             "**[Amended November 2026]** Superseded by ADR-0004.",
         ]
-        self.assertEqual([], checker.historical_mutations(old, new))
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 3, "> Status: **Accepted** \u2014 September 2026")],
+            mutations,
+        )
 
-    def test_authorized_status_supersession_from_annotated_accepted_status_is_allowed(
-        self,
-    ) -> None:
-        """An accepted ADR with an annotated status line can be superseded."""
+    def test_status_flip_from_annotated_accepted_status_fails(self) -> None:
+        """An accepted status line with trailing annotation cannot be superseded."""
         old = [
             "# ADR-0001: Example",
             "",
@@ -204,7 +204,11 @@ class HistoricalMutationTests(unittest.TestCase):
             "",
             "**[Amended November 2026]** Superseded by ADR-0004.",
         ]
-        self.assertEqual([], checker.historical_mutations(old, new))
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 3, "> Status: **Accepted** (supersedes ADR-0000)")],
+            mutations,
+        )
 
     def test_status_supersession_outside_header_is_not_authorized(self) -> None:
         """A status-line-shaped replace outside the header window still fails."""
@@ -318,14 +322,88 @@ class HistoricalMutationTests(unittest.TestCase):
             "",
             "Body.",
             "",
-            "**[Amended November 2026]**",
+            "**[Amended November 2026]** Superseded by ADR-0004: rationale for transition; see docs/decisions/0004-adopt-protobot-v2.md.",
         ]
         self.assertEqual([], checker.historical_mutations(old, new))
 
-    def test_status_flip_with_immediately_adjacent_amendment_block_passes(
+    def test_status_flip_with_undated_amendment_block_fails(self) -> None:
+        """An undated amendment block marker fails."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Body.",
+            "",
+            "**[Amended ]**",
+        ]
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 3, "> Status: **Accepted** \u2014 September 2026")],
+            mutations,
+        )
+
+    def test_status_flip_with_amendment_block_in_code_fence_fails(self) -> None:
+        """An amendment marker inside a fenced code block is ignored and fails."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Body.",
+            "",
+            "```markdown",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
+            "```",
+        ]
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 3, "> Status: **Accepted** \u2014 September 2026")],
+            mutations,
+        )
+
+    def test_status_flip_with_amendment_block_before_title_fails(self) -> None:
+        """An amendment marker placed before the title is rejected."""
+        old = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Body.",
+        ]
+        new = [
+            "**[Amended November 2026]** Superseded by ADR-0004.",
+            "",
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "",
+            "Body.",
+        ]
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 5, "> Status: **Accepted** \u2014 September 2026")],
+            mutations,
+        )
+
+    def test_status_flip_with_amendment_block_before_last_baseline_line_fails(
         self,
     ) -> None:
-        """A status flip with an amendment block directly following the status line passes."""
+        """An amendment block inserted before the last baseline line fails."""
         old = [
             "# ADR-0001: Example",
             "",
@@ -341,12 +419,14 @@ class HistoricalMutationTests(unittest.TestCase):
             "",
             "Body.",
         ]
-        self.assertEqual([], checker.historical_mutations(old, new))
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual(
+            [(3, 3, "> Status: **Accepted** \u2014 September 2026")],
+            mutations,
+        )
 
-    def test_status_flip_with_blank_line_before_amendment_block_passes(
-        self,
-    ) -> None:
-        """A status flip with only a blank line before the amendment block passes."""
+    def test_status_flip_with_second_status_line_fails(self) -> None:
+        """Inserting a second status line in the header is rejected."""
         old = [
             "# ADR-0001: Example",
             "",
@@ -357,13 +437,15 @@ class HistoricalMutationTests(unittest.TestCase):
         new = [
             "# ADR-0001: Example",
             "",
+            "> Status: **Accepted** \u2014 September 2026",
             "> Status: **Superseded by ADR-0004** \u2014 November 2026",
             "",
-            "**[Amended November 2026]** Superseded by ADR-0004.",
-            "",
             "Body.",
+            "",
+            "**[Amended November 2026]** Superseded by ADR-0004.",
         ]
-        self.assertEqual([], checker.historical_mutations(old, new))
+        mutations = checker.historical_mutations(old, new)
+        self.assertTrue(len(mutations) > 0)
 
 
 class AcceptedStatusTests(unittest.TestCase):
@@ -551,8 +633,8 @@ class GitRepoCheckTests(unittest.TestCase):
         self.assertIn("rewritten or replaced in place", output)
         self.assertIn("Use one file per record.", output)
 
-    def test_superseded_status_transition_with_annotation_passes(self) -> None:
-        """A superseded status line with additional annotation passes check."""
+    def test_superseded_status_transition_with_trailing_text_fails(self) -> None:
+        """A superseded status line with trailing text fails check()."""
         path = self.root / self.adr_rel
         path.write_text(
             _ACCEPTED_ADR.replace(
@@ -566,11 +648,11 @@ class GitRepoCheckTests(unittest.TestCase):
             encoding="utf-8",
         )
         rc, output = self._check(self.adr_rel.as_posix())
-        self.assertEqual(0, rc)
-        self.assertEqual("", output)
+        self.assertEqual(1, rc)
+        self.assertIn("accepted decision text was rewritten or replaced in place", output)
 
-    def test_superseded_status_transition_with_adjacent_amendment_passes(self) -> None:
-        """A superseded status line with an immediately adjacent amendment passes check."""
+    def test_superseded_status_transition_with_adjacent_amendment_before_body_fails(self) -> None:
+        """An amendment block placed directly after the status line before body text fails check()."""
         amendment = (
             "\n**[Amended November 2026]** Superseded by ADR-0004; see "
             "docs/decisions/0004-adopt-protobot-v2.md."
@@ -584,39 +666,56 @@ class GitRepoCheckTests(unittest.TestCase):
             encoding="utf-8",
         )
         rc, output = self._check(self.adr_rel.as_posix())
-        self.assertEqual(0, rc)
-        self.assertEqual("", output)
+        self.assertEqual(1, rc)
+        self.assertIn("supersession requires an appended dated amendment block", output)
 
-    def test_annotated_accepted_adr_supersession_passes(self) -> None:
-        """An accepted ADR with an annotated status line can be superseded."""
+    def test_status_only_supersession_without_amendment_reports_distinct_diagnostic(self) -> None:
+        """A status-only supersession without an amendment block reports a distinct diagnostic."""
         path = self.root / self.adr_rel
-        annotated_adr = _ACCEPTED_ADR.replace(
-            "> Status: **Accepted** \u2014 September 2026",
-            "> Status: **Accepted** (supersedes ADR-0000)",
-        )
-        path.write_text(annotated_adr, encoding="utf-8")
-        _git(
-            self.root,
-            "commit",
-            "-a",
-            "--no-gpg-sign",
-            "-m",
-            "add annotated accepted ADR",
-        )
         path.write_text(
-            annotated_adr.replace(
-                "> Status: **Accepted** (supersedes ADR-0000)",
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
                 "> Status: **Superseded by ADR-0004** \u2014 November 2026",
-            )
-            + (
-                "\n**[Amended November 2026]** Superseded by ADR-0004; see "
-                "docs/decisions/0004-adopt-protobot-v2.md.\n"
             ),
             encoding="utf-8",
         )
         rc, output = self._check(self.adr_rel.as_posix())
-        self.assertEqual(0, rc)
-        self.assertEqual("", output)
+        self.assertEqual(1, rc)
+        self.assertIn("supersession requires an appended dated amendment block", output)
+        self.assertNotIn("accepted decision text was rewritten or replaced in place", output)
+
+    def test_mutation_diagnostic_rendering(self) -> None:
+        """Assert rendered baseline line N (HEAD line M), (deleted), and truncation strings."""
+        path = self.root / self.adr_rel
+        lines = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Replaced.",
+            "Del1.",
+            "Anchor.",
+        ] + [f"Line {i}." for i in range(15)]
+        base_text = "\n".join(lines) + "\n"
+        path.write_text(base_text, encoding="utf-8")
+        _git(self.root, "commit", "-a", "--no-gpg-sign", "-m", "update base adr")
+
+        mutated_lines = [
+            "# ADR-0001: Example",
+            "",
+            "> Status: **Accepted** \u2014 September 2026",
+            "",
+            "Rewritten.",
+            "Anchor.",
+        ] + [f"New {i}." for i in range(15)]
+
+        path.write_text("\n".join(mutated_lines) + "\n", encoding="utf-8")
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("accepted decision text was rewritten or replaced in place", output)
+        self.assertIn("baseline line 5 (HEAD line 5)", output)
+        self.assertIn("baseline line 6 (deleted)", output)
+        self.assertRegex(output, r"… \(\d+ more line\(s\)\)")
 
     def test_rewritten_decision_text_fails(self) -> None:
         """In-place rewriting of accepted decision prose fails."""
