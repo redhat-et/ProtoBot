@@ -241,13 +241,10 @@ class WarmPhaseTests(unittest.TestCase):
 
     def test_warm_failure_warns_and_returns_zero(self) -> None:
         failure = RuntimeError("pre-commit install-hooks failed (exit 1)\nBuild failed")
-        with (
-            patch.object(bootstrap, "_run_upstream_script", return_value=0),
-            patch.object(bootstrap, "_warm_cache", side_effect=failure),
-        ):
+        with patch.object(bootstrap, "_warm_cache", side_effect=failure):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = bootstrap.main(["--upstream", "code"])
+                rc = bootstrap.main(["--upstream", "code", "--skip-upstream"])
         self.assertEqual(0, rc)
         message = stdout.getvalue()
         self.assertIn("::warning::", message)
@@ -485,6 +482,23 @@ class PythonEnvironmentTests(unittest.TestCase):
         self.assertIn("pyvenv.cfg is missing or unreadable", str(ctx.exception))
         self.assertFalse(tarball.exists())
 
+    def test_empty_base_executable_rejects(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        env_dir = cache_home / "repodir" / "py_env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "pyvenv.cfg").write_text(
+            "version_info = 3.12.4.final.0\nbase-executable =\n", encoding="utf-8"
+        )
+        with (
+            patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertIn("empty base-executable", str(ctx.exception))
+        self.assertFalse(tarball.exists())
+
     def test_base_executable_outside_usr_bin_rejects(self) -> None:
         root = self._temporary_root()
         cache_home = root / "cache"
@@ -651,13 +665,10 @@ class WorkflowCommandTests(unittest.TestCase):
 
     def test_printed_detail_cannot_contain_a_legacy_marker(self) -> None:
         failure = RuntimeError("boom\n##[error]x")
-        with (
-            patch.object(bootstrap, "_run_upstream_script", return_value=0),
-            patch.object(bootstrap, "_warm_cache", side_effect=failure),
-        ):
+        with patch.object(bootstrap, "_warm_cache", side_effect=failure):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = bootstrap.main(["--upstream", "code"])
+                rc = bootstrap.main(["--upstream", "code", "--skip-upstream"])
         self.assertEqual(0, rc)
         lines = stdout.getvalue().splitlines()
         # No printed line carries a literal legacy marker.
@@ -670,13 +681,10 @@ class WorkflowCommandTests(unittest.TestCase):
 
     def test_fail_soft_warning_is_sanitized_with_inert_detail(self) -> None:
         failure = RuntimeError("boom\nsecond line ::error:: 100% done")
-        with (
-            patch.object(bootstrap, "_run_upstream_script", return_value=0),
-            patch.object(bootstrap, "_warm_cache", side_effect=failure),
-        ):
+        with patch.object(bootstrap, "_warm_cache", side_effect=failure):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = bootstrap.main(["--upstream", "code"])
+                rc = bootstrap.main(["--upstream", "code", "--skip-upstream"])
         self.assertEqual(0, rc)
         output = stdout.getvalue()
         warning_lines = [
@@ -699,13 +707,14 @@ class WorkflowCommandTests(unittest.TestCase):
         tarball = Path(temporary_directory.name) / "pc.tar.gz"
         tarball.write_bytes(b"stale")
         with (
-            patch.object(bootstrap, "_run_upstream_script", return_value=0),
             patch.object(bootstrap, "_warm_cache", side_effect=RuntimeError("boom")),
             patch.object(Path, "unlink", side_effect=PermissionError("read-only")),
         ):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = bootstrap.main(["--upstream", "code", "--tarball", str(tarball)])
+                rc = bootstrap.main(
+                    ["--upstream", "code", "--skip-upstream", "--tarball", str(tarball)]
+                )
         self.assertEqual(1, rc)
         output = stdout.getvalue()
         self.assertIn("::error::", output)

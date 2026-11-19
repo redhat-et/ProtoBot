@@ -53,6 +53,7 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zlib
 from collections.abc import Iterator
 from pathlib import Path
@@ -376,16 +377,22 @@ def _staged_repository_rejection(
 ) -> str | None:
     """Return why a staged repository row cannot be used, or None.
 
-    The stored value must be an absolute path string inside the cache
-    root used at build time — ``cache_root`` under the path contract —
-    and the staged tree must hold that directory with a
-    ``.pre-commit-hooks.yaml``, or pre-commit later fails to load the
-    repository's hook manifest. Both sides are compared lexically with
-    ``os.path.normpath``: resolving would follow symlinks in the live
-    cache and inspect the wrong staging directory.
+    The stored value must be an absolute path string without ``..``
+    components inside the cache root used at build time — ``cache_root``
+    under the path contract — and the staged tree must hold that
+    directory with a ``.pre-commit-hooks.yaml``, or pre-commit later
+    fails to load the repository's hook manifest. Both sides are
+    compared lexically with ``os.path.normpath``: resolving would
+    follow symlinks in the live cache and inspect the wrong staging
+    directory.
     """
     if not isinstance(stored, str) or not stored or not os.path.isabs(stored):
         return f"the stored path {stored!r} is not an absolute path"
+    if ".." in Path(stored).parts:
+        # normpath would collapse ``..`` lexically, but the filesystem
+        # resolves the original spelling through any symlink in the
+        # path, so the two can name different directories.
+        return f"the stored path {stored} contains '..'"
     normalized_stored = Path(os.path.normpath(stored))
     normalized_root = Path(os.path.normpath(cache_root))
     if (
@@ -493,14 +500,18 @@ def _rewrite_version_info(env_dir: Path, version_info: str, cache_root: Path) ->
     """Replace the ``version_info`` line, preserving every other line.
 
     The rewrite is refused, without raising, when the resolved
-    ``pyvenv.cfg`` lies outside *cache_root*, so a symlink cannot direct
-    the write outside the cache. The new content lands in a temporary
-    file in the same validated directory and replaces ``pyvenv.cfg``
+    environment directory or ``pyvenv.cfg`` lies outside *cache_root*,
+    so a symlink cannot direct the write outside the cache. The new
+    content lands in a temporary file that ``tempfile.mkstemp`` creates
+    exclusively in the validated directory, and replaces ``pyvenv.cfg``
     with one rename.
     """
+    resolved_root = cache_root.resolve()
+    resolved_env = env_dir.resolve()
+    if resolved_env != resolved_root and resolved_root not in resolved_env.parents:
+        return False
     cfg = env_dir / "pyvenv.cfg"
     resolved_cfg = cfg.resolve()
-    resolved_root = cache_root.resolve()
     if resolved_cfg != resolved_root and resolved_root not in resolved_cfg.parents:
         return False
     lines = cfg.read_text(encoding="utf-8").splitlines()
@@ -515,9 +526,19 @@ def _rewrite_version_info(env_dir: Path, version_info: str, cache_root: Path) ->
             rewritten.append(line)
     if not replaced:
         rewritten.append(f"version_info = {version_info}")
-    temporary = env_dir / f".pyvenv.cfg.{os.getpid()}.tmp"
-    temporary.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
-    os.replace(temporary, cfg)
+    # mkstemp creates the file exclusively with a random name, so a
+    # symlink planted at a predictable temporary name cannot redirect
+    # the write.
+    descriptor, temporary_name = tempfile.mkstemp(dir=env_dir, prefix=".pyvenv.cfg.")
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o644)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(rewritten) + "\n")
+        os.replace(temporary, cfg)
+    except OSError:
+        _remove_quietly(temporary)
+        raise
     return True
 
 
@@ -577,8 +598,12 @@ def _base_executable_rejection(base_executable: str, reported: str) -> str | Non
 
     ``base-executable`` comes from the archive's ``pyvenv.cfg``, so it
     is only executed when it names a platform interpreter, and it must
-    report the same version as the environment's own interpreter.
+    report the same version as the environment's own interpreter. An
+    empty value is present-but-unusable, which pre-commit would try to
+    execute, so it is reported like any other disagreement.
     """
+    if not base_executable:
+        return "base-executable is empty"
     base = Path(base_executable)
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
     allowed_names = {"python3", f"python{current}"}
@@ -626,9 +651,8 @@ def _verify_and_normalize_env(
         return probe_failure
     if _pyvenv_major_minor(reported) != current:
         return f"bin/python reports {reported}, not Python {current}"
-    base_executable = values.get("base-executable", "")
-    if base_executable:
-        base_rejection = _base_executable_rejection(base_executable, reported)
+    if "base-executable" in values:
+        base_rejection = _base_executable_rejection(values["base-executable"], reported)
         if base_rejection:
             return base_rejection
     # A real interpreter reports five components, for example
@@ -638,7 +662,7 @@ def _verify_and_normalize_env(
     if rewritten != version_info and not _rewrite_version_info(
         env_dir, rewritten, cache_root
     ):
-        return f"pyvenv.cfg resolves outside {cache_root}"
+        return f"the environment or its pyvenv.cfg resolves outside {cache_root}"
     return None
 
 
@@ -788,12 +812,14 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
             return False
         # Every required and retained revision needs its payload, so a
         # retained row without a repository directory cannot be promoted.
-        # pre-commit never clones local or meta repositories, so those
-        # rows carry no payload to check.
+        # pre-commit never clones local or meta repositories, and it
+        # stores local environments with additional dependencies under
+        # ``local:`` keys that carry no hook manifest, so those rows get
+        # the key check only.
         to_validate = {
             (repo, ref)
             for repo, ref in required | live
-            if repo not in _NON_CLONED_REPOS
+            if repo not in _NON_CLONED_REPOS and not repo.startswith("local:")
         }
         for repo, rev in sorted(to_validate):
             rejection = _staged_repository_rejection(

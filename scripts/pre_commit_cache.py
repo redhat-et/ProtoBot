@@ -447,8 +447,11 @@ def _python_env_rejection(env_dir: Path, sandbox_python: str) -> str | None:
     parts = version_info.split(".")
     if len(parts) < 2 or f"{parts[0]}.{parts[1]}" != sandbox_python:
         return f"version_info {version_info} is not Python {sandbox_python}"
-    base_executable = values.get("base-executable")
-    if base_executable:
+    if "base-executable" in values:
+        base_executable = values["base-executable"]
+        if not base_executable:
+            # pre-commit would try to execute the empty value.
+            return "pyvenv.cfg has an empty base-executable"
         executable = Path(base_executable)
         allowed_names = {"python3", f"python{sandbox_python}"}
         if (
