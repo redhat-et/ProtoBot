@@ -396,13 +396,15 @@ def _repository_relative_or_none(stored: object, cache_root: Path) -> Path | Non
 
 # The environment directory names pre-commit 4.5.1 uses, matched
 # exactly or with a version suffix (``py_env``, ``py_env-python3.12``).
-# Languages without an installed environment (docker_image, fail,
-# pygrep, and the unsupported ones) set ENVIRONMENT_DIR to None.
+# docker does create a docker environment directory; docker_image,
+# fail, pygrep, and the unsupported languages set ENVIRONMENT_DIR to
+# None.
 _ENVIRONMENT_DIR_NAMES = frozenset(
     {
         "conda",
         "coursier",
         "dartenv",
+        "docker",
         "dotnetenv",
         "golangenv",
         "hs_env",

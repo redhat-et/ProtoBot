@@ -1225,7 +1225,12 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertTrue(self.tarball.exists())
         self.assertFalse((self.home / "db.db").exists())
 
-    def _build_retained_local_env_tarball(self, *, with_environment: bool) -> None:
+    def _build_retained_local_env_tarball(
+        self,
+        *,
+        with_environment: bool,
+        environment_name: str = "py_env-python3.12",
+    ) -> None:
         """Archive with a retained local: row and an optional environment.
 
         The live row stores the revision under ``repo-local`` and holds
@@ -1246,7 +1251,7 @@ class PreflightRestoreTests(unittest.TestCase):
             },
         )
         # The live cache holds the installed environment.
-        (self.home / "repo-local" / "py_env-python3.12").mkdir(parents=True)
+        (self.home / "repo-local" / environment_name).mkdir(parents=True)
         packed = self.root / "packed"
         paths = {}
         for index, row in enumerate(self._config_rows()):
@@ -1259,7 +1264,7 @@ class PreflightRestoreTests(unittest.TestCase):
         staged_local = packed / "staged-local"
         staged_local.mkdir()
         if with_environment:
-            (staged_local / "py_env-python3.12").mkdir()
+            (staged_local / environment_name).mkdir()
         paths[local_dep] = str(self.home / "staged-local")
         _make_db(packed / "db.db", [*self._config_rows(), local_dep], paths)
         with tarfile.open(self.tarball, "w:gz") as tar:
@@ -1284,6 +1289,29 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertTrue(self.tarball.exists())
         # The live cache, including its environment, is untouched.
         self.assertTrue((self.home / "repo-local" / "py_env-python3.12").is_dir())
+
+    def test_retained_docker_environment_omitted_is_rejected(self) -> None:
+        # The docker language creates a docker environment directory;
+        # an archive omitting it cannot replace the live cache.
+        self._build_retained_local_env_tarball(
+            with_environment=False, environment_name="docker"
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("local:dep @ rev1", message)
+        self.assertIn("docker", message)
+        self.assertIn("omits the installed environment", message)
+        self.assertTrue(self.tarball.exists())
+        # The live cache, including its docker environment, is untouched.
+        self.assertTrue((self.home / "repo-local" / "docker").is_dir())
 
     def test_retained_local_row_with_its_environment_is_promoted(self) -> None:
         self._build_retained_local_env_tarball(with_environment=True)
@@ -1670,6 +1698,7 @@ class EnvironmentDirTests(unittest.TestCase):
         repo_dir = Path(temporary_directory.name)
         for name in (
             "build_env_scripts",
+            "docker",
             "golang_env",
             "golangenv-default",
             "py_env-python3.12",
@@ -1679,7 +1708,7 @@ class EnvironmentDirTests(unittest.TestCase):
             (repo_dir / name).mkdir()
         (repo_dir / "manifest.yaml").write_text("hooks: []\n", encoding="utf-8")
         self.assertEqual(
-            {"golangenv-default", "py_env-python3.12", "rbenv", "renv"},
+            {"docker", "golangenv-default", "py_env-python3.12", "rbenv", "renv"},
             checker._environment_dirs(repo_dir),
         )
 
