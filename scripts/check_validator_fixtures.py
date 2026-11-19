@@ -48,6 +48,7 @@ _NOLINT_CURRENT = re.compile(r"(?://|/\*)\s*nolint:fixtures\b")
 _DOCUMENT_LITERAL = re.compile(
     r"(?<!\[\])\blayout\.Document\[records\.(Requirement|InterfaceRecord)\]\{"
 )
+_MAP_DOCUMENT_HEADER = re.compile(r"\bmap\[[^\]]*\]\s*$")
 _DOCUMENT_SLICE_START = re.compile(
     r"\[\]layout\.Document\[records\.(Requirement|InterfaceRecord)\]\{"
 )
@@ -124,7 +125,7 @@ def _remediation(type_name: str) -> str:
     )
 
 
-def _line_is_exempt(raw_lines: list[str], index: int, comment_part: str = "") -> bool:
+def _line_is_exempt(raw_lines: list[str], index: int) -> bool:
     """Return True when the match at *index* carries a nolint marker.
 
     The marker may appear on the matched line itself (as a ``//`` or
@@ -161,14 +162,13 @@ def _slice_has_unexempted_bare_element(
 
     while line_idx < len(stripped_lines):
         line = stripped_lines[line_idx]
-        if in_string == "`":
-            code_part = line
-        else:
-            code_part, _, _ = line.partition("//")
-        line_len = len(code_part)
+        line_len = len(line)
 
         while col < line_len:
-            ch = code_part[col]
+            if in_string is None and col + 1 < line_len and line[col : col + 2] == "//":
+                break
+
+            ch = line[col]
 
             if in_string is not None:
                 if in_string == '"':
@@ -269,11 +269,14 @@ def find_violations(rel_path: str, text: str) -> list[Violation]:
     stripped_lines = source.splitlines()
     violations: list[Violation] = []
     for index, line in enumerate(stripped_lines):
-        code_part, _, comment_part = line.partition("//")
+        code_part, _, _ = line.partition("//")
         if not code_part.strip():
             continue
         matches: list[tuple[str, str]] = []
         for match in _DOCUMENT_LITERAL.finditer(code_part):
+            prefix = code_part[: match.start()]
+            if _MAP_DOCUMENT_HEADER.search(prefix):
+                continue
             matches.append(("document_literal", match.group(1)))
         for match in _DOCUMENT_SLICE_START.finditer(code_part):
             if _slice_has_unexempted_bare_element(
@@ -284,7 +287,7 @@ def find_violations(rel_path: str, text: str) -> list[Violation]:
             matches.append(("record_literal", match.group(1)))
         if not matches:
             continue
-        if _line_is_exempt(raw_lines, index, comment_part):
+        if _line_is_exempt(raw_lines, index):
             continue
         unique_matches: list[tuple[str, str]] = []
         for m in matches:
@@ -366,9 +369,13 @@ def format_violations(violations: list[Violation], errors: list[str]) -> list[st
     for error in errors:
         lines.append(f"ERROR: {error}")
     for violation in violations:
+        if violation.kind == "document_literal":
+            literal_type = f"layout.Document[records.{violation.type_name}]{{}}"
+        else:
+            literal_type = f"records.{violation.type_name}{{}}"
         lines.append(
             f"ERROR: {violation.rel_path}:{violation.line}: prohibited "
-            f"records.{violation.type_name}{{}} literal "
+            f"{literal_type} literal "
             f"({violation.snippet!r}); {violation.remediation}"
         )
     return lines

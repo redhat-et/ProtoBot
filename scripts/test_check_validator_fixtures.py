@@ -232,6 +232,65 @@ class FindViolationsTests(unittest.TestCase):
         self.assertEqual("document_literal", violations[0].kind)
         self.assertEqual("Requirement", violations[0].type_name)
 
+    def test_builder_only_map_is_not_flagged(self) -> None:
+        """A map containing only builder calls does not flag its header."""
+        code = """
+    docs := map[string]layout.Document[records.Requirement]{
+        "REQ-00001": testutil.ValidRequirementDocument(),
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual([], violations)
+
+    def test_map_containing_bare_literal_is_flagged(self) -> None:
+        """A map containing a bare document or record literal is flagged on that literal."""
+        code = """
+    docs := map[string]layout.Document[records.Requirement]{
+        "REQ-00001": layout.Document[records.Requirement]{
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+
+    def test_slice_element_after_raw_string_url_is_flagged(self) -> None:
+        """A raw string literal with '//' inside a builder call does not hide subsequent literals."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{
+        testutil.ValidRequirementDocument(testutil.WithRationale(`https://example.com/spec`)),
+        {
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+
+    def test_slice_element_after_quoted_string_url_is_flagged(self) -> None:
+        """A quoted string literal with '//' inside a builder call does not hide subsequent literals."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{
+        testutil.ValidRequirementDocument(testutil.WithRationale("https://example.com/spec")),
+        {
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+
+    def test_line_is_exempt_without_comment_part(self) -> None:
+        """_line_is_exempt checks annotations using only raw lines and line index."""
+        raw_lines = ["// nolint:fixtures", "req := records.Requirement{}"]
+        self.assertTrue(checker._line_is_exempt(raw_lines, 1))
+
     def test_exempts_testutil_package_and_nolint_comments(self) -> None:
         """Verify builder package and explicit nolint annotations are exempted."""
         annotated = """
@@ -500,7 +559,31 @@ class FormatViolationsTests(unittest.TestCase):
         self.assertEqual(2, len(lines))
         self.assertIn("ERROR: boom", lines[0])
         self.assertIn("x_test.go:5", lines[1])
+        self.assertIn("prohibited records.Requirement{} literal", lines[1])
         self.assertIn("validator/internal/testutil.ValidRequirementDocument", lines[1])
+
+    def test_format_violations_uses_violation_kind(self) -> None:
+        """Format violations distinguishes document literals from record literals."""
+        doc_violation = checker.Violation(
+            rel_path="validator/internal/specvalidation/doc_test.go",
+            line=12,
+            kind="document_literal",
+            type_name="Requirement",
+            snippet="doc := layout.Document[records.Requirement]{}",
+            remediation="use validator/internal/testutil.ValidRequirementDocument",
+        )
+        iface_violation = checker.Violation(
+            rel_path="validator/internal/specvalidation/iface_test.go",
+            line=20,
+            kind="document_literal",
+            type_name="InterfaceRecord",
+            snippet="doc := layout.Document[records.InterfaceRecord]{}",
+            remediation="use validator/internal/testutil.ValidInterfaceDocument",
+        )
+        lines = checker.format_violations([doc_violation, iface_violation], [])
+        self.assertEqual(2, len(lines))
+        self.assertIn("prohibited layout.Document[records.Requirement]{} literal", lines[0])
+        self.assertIn("prohibited layout.Document[records.InterfaceRecord]{} literal", lines[1])
 
 
 class CheckAndMainTests(unittest.TestCase):
