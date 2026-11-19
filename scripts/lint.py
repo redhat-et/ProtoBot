@@ -370,6 +370,29 @@ def _cached_repo_paths(cache_root: Path) -> dict[tuple[str, str], object]:
     return {(repo, ref): path for repo, ref, path in rows}
 
 
+def _repository_relative(stored: str, cache_root: Path) -> Path:
+    """Return a validated stored path's position inside the cache root."""
+    return Path(os.path.normpath(stored)).relative_to(
+        Path(os.path.normpath(cache_root))
+    )
+
+
+def _environment_dirs(repo_dir: Path) -> set[str]:
+    """Return the environment directory names under *repo_dir*.
+
+    pre-commit names hook environments ``py_env``, ``node_env``,
+    ``rust_env``, ``golang_env``, and so on, so a child directory whose
+    name contains ``_env`` is treated as an environment.
+    """
+    if not repo_dir.is_dir():
+        return set()
+    return {
+        entry.name
+        for entry in repo_dir.iterdir()
+        if entry.is_dir() and "_env" in entry.name
+    }
+
+
 def _staged_repository_rejection(
     stored: object,
     staging: Path,
@@ -404,7 +427,7 @@ def _staged_repository_rejection(
         and normalized_root not in normalized_stored.parents
     ):
         return f"the stored path {stored} is outside the cache root {cache_root}"
-    staged_dir = staging / normalized_stored.relative_to(normalized_root)
+    staged_dir = staging / _repository_relative(stored, cache_root)
     if not staged_dir.is_dir():
         return f"the repository directory {staged_dir} is missing from the archive"
     if require_manifest and not (staged_dir / ".pre-commit-hooks.yaml").is_file():
@@ -543,6 +566,15 @@ def _rewrite_version_info(env_dir: Path, version_info: str, cache_root: Path) ->
     except OSError:
         _remove_quietly(temporary)
         raise
+    finally:
+        # On the success path the ``with`` block already closed the
+        # descriptor; close it on every other path so a failing fchmod
+        # or write cannot leak it. Closing an already closed descriptor
+        # raises OSError, which is ignored here.
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
     return True
 
 
@@ -795,6 +827,25 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
         if members.skipped_members or members.size_capped:
             return False
         staged_paths = _cached_repo_paths(staging)
+        live = _cached_repos(pre_commit_home)
+        # A row whose repo or ref is not text cannot be sorted or
+        # compared; reject the archive instead of crashing.
+        malformed = sorted(
+            (
+                row
+                for row in set(staged_paths) | live
+                if not all(isinstance(part, str) for part in row)
+            ),
+            key=repr,
+        )
+        if malformed:
+            print(
+                f"WARNING: the archive {tarball} or the live cache holds a "
+                f"malformed repository row {malformed!r}; repo and ref must "
+                f"be text. Keeping the tarball and the existing cache.",
+                file=sys.stderr,
+            )
+            return False
         if not required <= set(staged_paths):
             print(
                 f"WARNING: the archive {tarball} does not cover every "
@@ -804,7 +855,6 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                 file=sys.stderr,
             )
             return False
-        live = _cached_repos(pre_commit_home)
         if not live <= set(staged_paths):
             print(
                 f"WARNING: promoting the archive {tarball} would drop cached "
@@ -821,11 +871,12 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
         # and never clones local or meta repositories, so those rows
         # need a valid stored path and directory but no manifest.
         for repo, rev in sorted(required | live):
+            stored = staged_paths.get((repo, rev), "")
             require_manifest = repo not in _NON_CLONED_REPOS and not repo.startswith(
                 "local:"
             )
             rejection = _staged_repository_rejection(
-                staged_paths.get((repo, rev), ""),
+                stored,
                 staging,
                 pre_commit_home,
                 require_manifest=require_manifest,
@@ -838,6 +889,23 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                     file=sys.stderr,
                 )
                 return False
+            if (repo, rev) in live:
+                # A retained revision must keep its installed hook
+                # environments: a matching row and repository directory
+                # are not enough when the archive omits them.
+                relative = _repository_relative(stored, pre_commit_home)
+                staged_envs = _environment_dirs(staging / relative)
+                missing = _environment_dirs(pre_commit_home / relative) - staged_envs
+                if missing:
+                    listing = ", ".join(sorted(missing))
+                    print(
+                        f"WARNING: the archive {tarball} omits the installed "
+                        f"environment(s) {listing} that the live cache holds "
+                        f"for {repo} @ {rev}; keeping the tarball and the "
+                        f"live cache.",
+                        file=sys.stderr,
+                    )
+                    return False
         # Normalize before the promotion, so a concurrent lint.py never
         # sees unrepaired metadata.
         unverified = _normalize_pyvenv_patch_versions(staging)

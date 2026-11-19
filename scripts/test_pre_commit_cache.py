@@ -5,6 +5,7 @@ import hashlib
 import io
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -178,9 +179,17 @@ class UpstreamDelegationTests(unittest.TestCase):
     def test_upstream_script_exit_code_is_verbatim(self) -> None:
         for code in (0, 78, 1):
             with self.subTest(code=code):
+
+                class _FakeProcess:
+                    pid = 1
+                    returncode = code
+
+                    def communicate(self, timeout=None):
+                        return (None, None)
+
                 with (
                     patch.object(bootstrap, "_download_upstream_script"),
-                    patch.object(bootstrap, "_run", return_value=_completed(code)),
+                    patch.object(bootstrap, "_popen", return_value=_FakeProcess()),
                 ):
                     rc = bootstrap._run_upstream_script("code")
                 self.assertEqual(code, rc)
@@ -198,18 +207,30 @@ class UpstreamDelegationTests(unittest.TestCase):
                 # warm phase must not run.
                 self.assertEqual(code == 0, warm.called)
 
-    def test_upstream_script_timeout_is_a_hard_failure(self) -> None:
+    def test_upstream_script_timeout_kills_the_process_group(self) -> None:
         # A stalled upstream script must not block the runner phase
-        # indefinitely; the timeout kills it and fails the run.
+        # indefinitely; the whole process group is killed and the run
+        # fails hard.
+        kills: list[tuple[int, int]] = []
+        communicates: list[object] = []
+
+        class _StalledProcess:
+            pid = 4242
+            returncode = None
+
+            def communicate(self, timeout=None):
+                communicates.append(timeout)
+                if len(communicates) == 1:
+                    raise subprocess.TimeoutExpired(
+                        cmd=["bash"], timeout=bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS
+                    )
+                return (None, None)
+
         with (
             patch.object(bootstrap, "_download_upstream_script"),
-            patch.object(
-                bootstrap,
-                "_run",
-                side_effect=subprocess.TimeoutExpired(
-                    cmd=["bash"], timeout=bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS
-                ),
-            ),
+            patch.object(bootstrap, "_popen", return_value=_StalledProcess()),
+            patch("os.killpg", side_effect=lambda pgid, sig: kills.append((pgid, sig))),
+            patch("os.getpgid", side_effect=lambda pid: pid),
         ):
             stderr, stdout = io.StringIO(), io.StringIO()
             with (
@@ -218,11 +239,26 @@ class UpstreamDelegationTests(unittest.TestCase):
             ):
                 rc = bootstrap.main(["--upstream", "code"])
         self.assertEqual(1, rc)
+        # The group was killed with SIGKILL and the process reaped.
+        self.assertEqual([(4242, signal.SIGKILL)], kills)
+        self.assertEqual(
+            [bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS, None], communicates
+        )
         message = stderr.getvalue()
         self.assertIn("did not finish within", message)
         self.assertIn(str(bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS), message)
         self.assertIn(bootstrap._upstream_url("code"), message)
-        self.assertIn("UPSTREAM_SCRIPT_TIMEOUT_SECONDS", message)
+
+    def test_upstream_process_returns_the_exit_code(self) -> None:
+        class _FinishedProcess:
+            pid = 1
+            returncode = 17
+
+            def communicate(self, timeout=None):
+                return (None, None)
+
+        with patch.object(bootstrap, "_popen", return_value=_FinishedProcess()):
+            self.assertEqual(17, bootstrap._run_upstream_process(["bash", "script.sh"]))
 
     def test_unverifiable_upstream_script_is_a_hard_failure(self) -> None:
         for side_effect in (
@@ -267,10 +303,15 @@ class WarmPhaseTests(unittest.TestCase):
 
     def test_warm_failure_warns_and_returns_zero(self) -> None:
         failure = RuntimeError("pre-commit install-hooks failed (exit 1)\nBuild failed")
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        tarball = Path(temporary_directory.name) / "pc.tar.gz"
         with patch.object(bootstrap, "_warm_cache", side_effect=failure):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = bootstrap.main(["--upstream", "code", "--skip-upstream"])
+                rc = bootstrap.main(
+                    ["--upstream", "code", "--skip-upstream", "--tarball", str(tarball)]
+                )
         self.assertEqual(0, rc)
         message = stdout.getvalue()
         self.assertIn("::warning::", message)
@@ -691,10 +732,15 @@ class WorkflowCommandTests(unittest.TestCase):
 
     def test_printed_detail_cannot_contain_a_legacy_marker(self) -> None:
         failure = RuntimeError("boom\n##[error]x")
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        tarball = Path(temporary_directory.name) / "pc.tar.gz"
         with patch.object(bootstrap, "_warm_cache", side_effect=failure):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = bootstrap.main(["--upstream", "code", "--skip-upstream"])
+                rc = bootstrap.main(
+                    ["--upstream", "code", "--skip-upstream", "--tarball", str(tarball)]
+                )
         self.assertEqual(0, rc)
         lines = stdout.getvalue().splitlines()
         # No printed line carries a literal legacy marker.
@@ -707,10 +753,15 @@ class WorkflowCommandTests(unittest.TestCase):
 
     def test_fail_soft_warning_is_sanitized_with_inert_detail(self) -> None:
         failure = RuntimeError("boom\nsecond line ::error:: 100% done")
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        tarball = Path(temporary_directory.name) / "pc.tar.gz"
         with patch.object(bootstrap, "_warm_cache", side_effect=failure):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = bootstrap.main(["--upstream", "code", "--skip-upstream"])
+                rc = bootstrap.main(
+                    ["--upstream", "code", "--skip-upstream", "--tarball", str(tarball)]
+                )
         self.assertEqual(0, rc)
         output = stdout.getvalue()
         warning_lines = [

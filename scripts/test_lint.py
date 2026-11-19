@@ -1172,6 +1172,122 @@ class PreflightRestoreTests(unittest.TestCase):
         # The external file is unchanged.
         self.assertEqual("do not touch\n", outside.read_text(encoding="utf-8"))
 
+    def test_fchmod_failure_closes_the_descriptor_and_is_reported(self) -> None:
+        # A failing fchmod must not leak the mkstemp descriptor; the
+        # failure is reported through the restore warning.
+        self._build_tarball(self._config_rows())
+        captured: dict[str, int] = {}
+        original_mkstemp = tempfile.mkstemp
+
+        def capturing_mkstemp(*args, **kwargs):
+            descriptor, name = original_mkstemp(*args, **kwargs)
+            captured["fd"] = descriptor
+            return descriptor, name
+
+        with (
+            patch("tempfile.mkstemp", side_effect=capturing_mkstemp),
+            patch("os.fchmod", side_effect=OSError("fchmod refused")),
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        # The restore succeeded and the failure was reported.
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("fchmod refused", message)
+        # The descriptor was closed on the failure path.
+        with self.assertRaises(OSError):
+            os.fstat(captured["fd"])
+
+    def test_blob_repo_key_is_rejected(self) -> None:
+        # A BLOB repo key must produce a normal rejection warning, not
+        # a TypeError from sorting or startswith.
+        self._build_tarball([*self._config_rows(), (b"blob-repo", "rev1")])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("malformed repository row", message)
+        self.assertIn("must be text", message)
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def _build_retained_local_env_tarball(self, *, with_environment: bool) -> None:
+        """Archive with a retained local: row and an optional environment."""
+        local_dep = ("local:dep", "rev1")
+        _make_db(
+            self.home / "db.db",
+            [("https://example.invalid/foo", "aaaa"), local_dep],
+        )
+        # The live cache holds the installed environment.
+        (self.home / "repo-local" / "py_env-python3.12").mkdir(parents=True)
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(self._config_rows()):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        staged_local = packed / "repo-local"
+        staged_local.mkdir()
+        if with_environment:
+            (staged_local / "py_env-python3.12").mkdir()
+        paths[local_dep] = str(self.home / "repo-local")
+        _make_db(packed / "db.db", [*self._config_rows(), local_dep], paths)
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+
+    def test_retained_local_row_missing_its_environment_is_rejected(self) -> None:
+        self._build_retained_local_env_tarball(with_environment=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("local:dep @ rev1", message)
+        self.assertIn("py_env-python3.12", message)
+        self.assertIn("omits the installed environment", message)
+        self.assertTrue(self.tarball.exists())
+        # The live cache, including its environment, is untouched.
+        self.assertTrue((self.home / "repo-local" / "py_env-python3.12").is_dir())
+
+    def test_retained_local_row_with_its_environment_is_promoted(self) -> None:
+        self._build_retained_local_env_tarball(with_environment=True)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        # The promoted cache holds the retained environment.
+        self.assertTrue((self.home / "repo-local" / "py_env-python3.12").is_dir())
+
     def test_blob_stored_path_is_rejected(self) -> None:
         # A BLOB in the path column must produce a normal rejection,
         # not a TypeError traceback.

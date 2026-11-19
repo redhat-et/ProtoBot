@@ -46,6 +46,7 @@ import argparse
 import hashlib
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -233,6 +234,33 @@ def _download_upstream_script(
     destination.write_bytes(data)
 
 
+def _popen(argv: list[str]) -> subprocess.Popen[str]:
+    """Start the upstream pre-script in its own process group.
+
+    Module-level so tests can intercept it. The child inherits stdout
+    and stderr so its output streams to the Actions log.
+    """
+    return subprocess.Popen(argv, start_new_session=True)
+
+
+def _run_upstream_process(argv: list[str]) -> int:
+    """Run the upstream pre-script and return its exit code.
+
+    Bash and all of its children run in one process group. On timeout
+    the whole group is killed — a child such as ``gh`` cannot keep the
+    pipes open — and the process is reaped before the timeout is
+    re-raised.
+    """
+    process = _popen(argv)
+    try:
+        process.communicate(timeout=UPSTREAM_SCRIPT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        process.communicate()
+        raise
+    return process.returncode
+
+
 def _run_upstream_script(upstream: str) -> int:
     """Download, verify, and run the pinned upstream pre-script.
 
@@ -261,9 +289,7 @@ def _run_upstream_script(upstream: str) -> int:
             # The inherited environment and working directory carry
             # FULLSEND_PRESCRIPT_OUTPUT and the env.runner variables to
             # the upstream script unchanged.
-            return _run(
-                ["bash", str(script)], timeout=UPSTREAM_SCRIPT_TIMEOUT_SECONDS
-            ).returncode
+            return _run_upstream_process(["bash", str(script)])
         except subprocess.TimeoutExpired:
             # A timeout is a hard failure: the upstream input validation
             # did not finish, so the run must stop rather than proceed
