@@ -133,6 +133,11 @@ class FindViolationsTests(unittest.TestCase):
         text = 'switch path {\ncase\n\t"/dev/null":\n\treturn nil\n}\n'
         self.assertEqual([], checker.find_violations(text))
 
+    def test_exempts_switch_case_with_colon_in_value(self) -> None:
+        """Do not flag a switch case whose earlier value contains a colon."""
+        text = 'switch path {\ncase "a:b", "/dev/null":\n\treturn nil\n}\n'
+        self.assertEqual([], checker.find_violations(text))
+
     def test_exempts_path_boundary_substring(self) -> None:
         """Do not flag paths where /dev/null is part of a larger path."""
         text = 'path := "/tmp/dev/null"\n'
@@ -203,11 +208,29 @@ class FindViolationsTests(unittest.TestCase):
         self.assertEqual(1, violations[0][0])
         self.assertIn("/dev/null/x", violations[0][1])
 
+    def test_detects_trailing_dash_path(self) -> None:
+        """Flag a path literal like /dev/null-2."""
+        text = 'path := "/dev/null-2"\n'
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(1, violations[0][0])
+        self.assertIn("/dev/null-2", violations[0][1])
+
+    def test_detects_flag_attached_null_device(self) -> None:
+        """Flag a command flag like -o/dev/null with attached argument."""
+        text = 'args := []string{"-o/dev/null"}\n'
+        violations = checker.find_violations(text)
+        self.assertEqual(1, len(violations))
+        self.assertEqual(1, violations[0][0])
+        self.assertIn("-o/dev/null", violations[0][1])
+
     def test_null_device_at_boundary_helper(self) -> None:
         """Verify the path boundary helper distinguishes boundaries."""
         self.assertTrue(checker._null_device_at_boundary('"/dev/null/x"', 1))
         self.assertFalse(checker._null_device_at_boundary('"/tmp/dev/null"', 5))
         self.assertTrue(checker._null_device_at_boundary('"/dev/null"', 1))
+        self.assertTrue(checker._null_device_at_boundary('"/dev/null-2"', 1))
+        self.assertTrue(checker._null_device_at_boundary('"-o/dev/null"', 3))
 
     def test_detects_text_matching_call_without_pragma(self) -> None:
         """Flag text-matching calls like strings.HasSuffix unless suppressed."""

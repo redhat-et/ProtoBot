@@ -41,7 +41,7 @@ import string
 import sys
 
 _PATH_CHARS_BEFORE = set(string.ascii_letters + string.digits + "_./-")
-_PATH_CHARS_AFTER = set(string.ascii_letters + string.digits + "_-")
+_PATH_CHARS_AFTER = set(string.ascii_letters + string.digits + "_")
 
 _LITERAL_PATTERN = (
     r"(?:"
@@ -54,14 +54,32 @@ _NULL_DEVICE_LITERAL = re.compile(_LITERAL_PATTERN)
 _COMPARISON_EXEMPTION = re.compile(
     rf"(?:(==|!=)\s*{_LITERAL_PATTERN}|{_LITERAL_PATTERN}\s*(==|!=))"
 )
-_CASE_EXEMPTION = re.compile(rf"\bcase\s+(?![^:]*<-)[^:]*?({_LITERAL_PATTERN})[^:]*:")
+_CASE_ITEM = (
+    r"(?:"
+    r'"(?:[^"\\]|\\.)*"'
+    r"|"
+    r"`[^`]*`"
+    r"|"
+    r"'(?:[^'\\]|\\.)*'"
+    r"|"
+    r"(?:(?!<-)[^:\"'`])"
+    r")"
+)
+_CASE_EXEMPTION = re.compile(
+    rf"\bcase\s+{_CASE_ITEM}*?({_LITERAL_PATTERN}){_CASE_ITEM}*?:"
+)
 _PRAGMA_PATTERN = re.compile(r"(?://|/\*)\s*portability:allow-null-device")
 
 
 def _null_device_at_boundary(text: str, idx: int) -> bool:
     """Return True when ``/dev/null`` at *idx* in *text* is at a path boundary."""
     if idx > 0 and text[idx - 1] in _PATH_CHARS_BEFORE:
-        return False
+        start = idx - 1
+        while start > 0 and text[start - 1] in _PATH_CHARS_BEFORE:
+            start -= 1
+        token = text[start:idx]
+        if not (text[start] == "-" and "/" not in token):
+            return False
     after_idx = idx + len("/dev/null")
     return not (after_idx < len(text) and text[after_idx] in _PATH_CHARS_AFTER)
 
