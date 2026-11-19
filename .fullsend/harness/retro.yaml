@@ -1,0 +1,6 @@
+---
+base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.56.1/harness/retro.yaml#sha256=71e97c1e0ac17ca1f36d6b61b84a40f3d5337829f1d3cd242ab420f337530bbe"
+
+# Raise the retro budget to 45 minutes so the agent can finish subagent
+# analysis and write its result before the runner deadline.
+timeout_minutes: 45
