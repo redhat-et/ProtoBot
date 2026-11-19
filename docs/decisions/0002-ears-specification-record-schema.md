@@ -465,6 +465,17 @@ the `stores` block of `.protobot/project.yaml` and are not artifact-registry
 entries. Their layout and integrity digest rules are defined by
 [ADR-0003](0003-ears-manager-storage-layout.md).
 
+**[Amended November 2026, #547]** `ears-manager check` accepts
+`--base-ref FULL-SHA` to specify an explicit artifact comparison base
+commit. Only the artifact-operation comparison and continued-registration
+check use this base commit. Change-set approval classification and
+proposed-base freshness checks continue to evaluate against the
+default-branch head. CI passes the merge base of the default branch and
+the pull request head, so a pull request forked before a
+default-branch registered artifact change is not blamed for that change.
+See [`check`](../architecture/ears-manager-cli.md#check) and
+[Gates and labels](../architecture/git-integration.md#gates-and-labels).
+
 ---
 
 ## Relationship Encoding

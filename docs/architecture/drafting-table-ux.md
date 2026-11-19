@@ -171,11 +171,11 @@ without a guard decision is limited as
 records.
 `ears-manager check` validates well-formedness, registered artifact digests,
 artifact path/canonical-content deltas against `artifact_operations[]` in
-proposed change sets, continued registration of default-branch artifacts, and
-proposed `base_commit` freshness as a CI gate before merge. A passing check
-confirms manifest association, not that `ears-manager artifact put` was
-invoked; `.protobot/project.yaml` remains an exclusively governed file under
-Rule 5 in `AGENTS.md`.
+proposed change sets, continued registration of artifacts registered on the
+artifact comparison base, and proposed `base_commit` freshness as a CI gate
+before merge. A passing check confirms manifest association, not that
+`ears-manager artifact put` was invoked; `.protobot/project.yaml` remains an
+exclusively governed file under Rule 5 in `AGENTS.md`.
 
 ### WMS lifecycle state
 

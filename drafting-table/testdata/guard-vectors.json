@@ -14,6 +14,20 @@
     "allow": true
   },
   {
+    "name": "read-only ears-manager check with a base ref",
+    "role": "drafting-table",
+    "tool_name": "bash",
+    "tool_input": {"command": "ears-manager --output json check --base-ref 0123456789abcdef0123456789abcdef01234567"},
+    "allow": true
+  },
+  {
+    "name": "check base ref out of order",
+    "role": "drafting-table",
+    "tool_name": "bash",
+    "tool_input": {"command": "ears-manager --output json check --base-ref 0123456789abcdef0123456789abcdef01234567 --change-set CS-00003"},
+    "reason": "not an allowed ears-manager command form"
+  },
+  {
     "name": "unquoted brace expansion in option value",
     "role": "drafting-table",
     "tool_name": "bash",

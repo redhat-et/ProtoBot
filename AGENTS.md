@@ -208,17 +208,15 @@ must follow these rules:
    path or canonical-content delta to have a matching `artifact_id` in
    an `artifact_operations[]` entry in any proposed change set, and
    rejects unregistration of an artifact-registry entry present on the
-   default branch. It confirms manifest association only, not that
-   `ears-manager artifact put` was invoked; metadata-only changes to an
-   artifact-registry entry do not by themselves require an artifact
-   operation. Reviewers must flag hand edits they can identify, not
+   comparison base (the merge base in CI). It confirms manifest association
+   only, not that `ears-manager artifact put` was invoked; metadata-only
+   changes to an artifact-registry entry do not by themselves require an
+   artifact operation. Reviewers must flag hand edits they can identify, not
    claim CLI provenance from an operation record. Findings should
-   include each listed diagnostic and any hand edit identified in the
-   inspected registered specification artifact or
+   include each listed diagnostic and any hand edit in that artifact or
    [.protobot/project.yaml](.protobot/project.yaml); and, when Rule 4
-   identifies staleness in a registered specification artifact, a
-   staleness finding that prescribes `ears-manager artifact put`, not a
-   hand edit.
+   finds staleness in a registered specification artifact, a finding
+   that prescribes `ears-manager artifact put`, not a hand edit.
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
