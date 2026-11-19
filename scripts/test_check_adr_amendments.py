@@ -167,14 +167,17 @@ class HistoricalMutationTests(unittest.TestCase):
         old = [
             "# ADR-0001: Example",
             "",
-            "> Status: **Accepted** \u2014 September 2026",
+            "> Status: **Accepted** — September 2026",
             "",
             "Body.",
         ]
         new = [
             "# ADR-0001: Example",
             "",
-            "> Status: **Superseded by ADR-0004** \u2014 November 2026 and arbitrary prose",
+            (
+                "> Status: **Superseded by ADR-0004** — November 2026 and"
+                " arbitrary prose"
+            ),
             "",
             "Body.",
             "",
@@ -182,7 +185,7 @@ class HistoricalMutationTests(unittest.TestCase):
         ]
         mutations = checker.historical_mutations(old, new)
         self.assertEqual(
-            [(3, 3, "> Status: **Accepted** \u2014 September 2026")],
+            [(3, 3, "> Status: **Accepted** — September 2026")],
             mutations,
         )
 
@@ -318,11 +321,14 @@ class HistoricalMutationTests(unittest.TestCase):
         new = [
             "# ADR-0001: Example",
             "",
-            "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            "> Status: **Superseded by ADR-0004** — November 2026",
             "",
             "Body.",
             "",
-            "**[Amended November 2026]** Superseded by ADR-0004: rationale for transition; see docs/decisions/0004-adopt-protobot-v2.md.",
+            (
+                "**[Amended November 2026]** Superseded by ADR-0004: rationale"
+                " for transition; see docs/decisions/0004-adopt-protobot-v2.md."
+            ),
         ]
         self.assertEqual([], checker.historical_mutations(old, new))
 
@@ -638,7 +644,7 @@ class GitRepoCheckTests(unittest.TestCase):
         path = self.root / self.adr_rel
         path.write_text(
             _ACCEPTED_ADR.replace(
-                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Accepted** — September 2026",
                 "> Status: **Superseded by ADR-0004** (see issue #406)",
             )
             + (
@@ -649,10 +655,15 @@ class GitRepoCheckTests(unittest.TestCase):
         )
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(1, rc)
-        self.assertIn("accepted decision text was rewritten or replaced in place", output)
+        self.assertIn(
+            "accepted decision text was rewritten or replaced in place",
+            output,
+        )
 
-    def test_superseded_status_transition_with_adjacent_amendment_before_body_fails(self) -> None:
-        """An amendment block placed directly after the status line before body text fails check()."""
+    def test_superseded_status_transition_with_adjacent_amendment_before_body_fails(
+        self,
+    ) -> None:
+        """An amendment block placed directly after the status line fails check()."""
         amendment = (
             "\n**[Amended November 2026]** Superseded by ADR-0004; see "
             "docs/decisions/0004-adopt-protobot-v2.md."
@@ -660,59 +671,87 @@ class GitRepoCheckTests(unittest.TestCase):
         path = self.root / self.adr_rel
         path.write_text(
             _ACCEPTED_ADR.replace(
-                "> Status: **Accepted** \u2014 September 2026",
-                "> Status: **Superseded by ADR-0004** \u2014 November 2026" + amendment,
+                "> Status: **Accepted** — September 2026",
+                "> Status: **Superseded by ADR-0004** — November 2026"
+                + amendment,
             ),
             encoding="utf-8",
         )
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(1, rc)
-        self.assertIn("supersession requires an appended dated amendment block", output)
+        self.assertIn(
+            "supersession requires an appended dated amendment block",
+            output,
+        )
 
-    def test_status_only_supersession_without_amendment_reports_distinct_diagnostic(self) -> None:
-        """A status-only supersession without an amendment block reports a distinct diagnostic."""
+    def test_status_only_supersession_without_amendment_reports_distinct_diagnostic(
+        self,
+    ) -> None:
+        """A status-only supersession without amendment reports a distinct diagnostic."""
         path = self.root / self.adr_rel
         path.write_text(
             _ACCEPTED_ADR.replace(
-                "> Status: **Accepted** \u2014 September 2026",
-                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+                "> Status: **Accepted** — September 2026",
+                "> Status: **Superseded by ADR-0004** — November 2026",
             ),
             encoding="utf-8",
         )
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(1, rc)
-        self.assertIn("supersession requires an appended dated amendment block", output)
-        self.assertNotIn("accepted decision text was rewritten or replaced in place", output)
+        self.assertIn(
+            "supersession requires an appended dated amendment block",
+            output,
+        )
+        self.assertNotIn(
+            "accepted decision text was rewritten or replaced in place",
+            output,
+        )
 
     def test_mutation_diagnostic_rendering(self) -> None:
-        """Assert rendered baseline line N (HEAD line M), (deleted), and truncation strings."""
+        """Assert rendered baseline line, HEAD line, and truncation strings."""
         path = self.root / self.adr_rel
-        lines = [
-            "# ADR-0001: Example",
-            "",
-            "> Status: **Accepted** \u2014 September 2026",
-            "",
-            "Replaced.",
-            "Del1.",
-            "Anchor.",
-        ] + [f"Line {i}." for i in range(15)]
+        lines = (
+            [
+                "# ADR-0001: Example",
+                "",
+                "> Status: **Accepted** — September 2026",
+                "",
+                "Replaced.",
+                "Del1.",
+                "Anchor.",
+            ]
+            + [f"Line {i}." for i in range(15)]
+        )
         base_text = "\n".join(lines) + "\n"
         path.write_text(base_text, encoding="utf-8")
-        _git(self.root, "commit", "-a", "--no-gpg-sign", "-m", "update base adr")
+        _git(
+            self.root,
+            "commit",
+            "-a",
+            "--no-gpg-sign",
+            "-m",
+            "update base adr",
+        )
 
-        mutated_lines = [
-            "# ADR-0001: Example",
-            "",
-            "> Status: **Accepted** \u2014 September 2026",
-            "",
-            "Rewritten.",
-            "Anchor.",
-        ] + [f"New {i}." for i in range(15)]
+        mutated_lines = (
+            [
+                "# ADR-0001: Example",
+                "",
+                "> Status: **Accepted** — September 2026",
+                "",
+                "Rewritten.",
+                "Anchor.",
+            ]
+            + [f"New {i}." for i in range(15)]
+        )
 
         path.write_text("\n".join(mutated_lines) + "\n", encoding="utf-8")
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(1, rc)
-        self.assertIn("accepted decision text was rewritten or replaced in place", output)
+        self.assertIn(
+            "accepted decision text was rewritten or replaced in place",
+            output,
+        )
         self.assertIn("baseline line 5 (HEAD line 5)", output)
         self.assertIn("baseline line 6 (deleted)", output)
         self.assertRegex(output, r"… \(\d+ more line\(s\)\)")
