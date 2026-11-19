@@ -184,7 +184,7 @@ repos:
         entry: python3 scripts/test_lint.py
         language: system
         pass_filenames: false
-        files: ^scripts/(lint|test_lint)\.py$
+        files: ^(scripts/(lint|test_lint)\.py|\.github/workflows/ci-workflow\.yaml)$
       - id: adr-amendments
         name: adr-amendments
         entry: python3 scripts/check_adr_amendments.py

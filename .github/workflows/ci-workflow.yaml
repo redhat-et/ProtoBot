@@ -39,7 +39,10 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install pre-commit
-        run: uv tool install pre-commit==4.6.2
+        # scripts/lint.py owns the required pre-commit version.
+        run: |
+          version="$(python3 scripts/lint.py --print-pre-commit-version)"
+          uv tool install "pre-commit==${version}"
 
       - name: Enable cache for pre-commit hooks
         # https://github.com/actions/cache
@@ -53,9 +56,14 @@ jobs:
             pre-commit|
 
       - name: Run pre-commit checks
-        run: pre-commit run -a
+        # Same entrypoint as local runs: --all-files keeps the previous
+        # `pre-commit run -a` scope; --online-if-ci keeps zizmor's online
+        # audits because GitHub Actions sets CI=true.
+        run: python3 scripts/lint.py --all-files --online-if-ci
 
       - name: Run pre-commit gc
+        # scripts/lint.py sets PRE_COMMIT_HOME only for its own process,
+        # so this step still uses ~/.cache/pre-commit.
         run: pre-commit gc
 
   go:

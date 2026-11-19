@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -285,6 +286,11 @@ class MainCliMappingTests(unittest.TestCase):
         )
         env_patcher.start()
         self.addCleanup(env_patcher.stop)
+        # Force offline mode: these tests must not change their path
+        # when GitHub Actions sets CI=true.
+        ci_patcher = patch.object(checker, "_ci_is_enabled", return_value=False)
+        ci_patcher.start()
+        self.addCleanup(ci_patcher.stop)
         # Config has no cloned repos, so the cache is trivially satisfied.
         config_patcher = patch.object(
             checker,
@@ -348,6 +354,33 @@ class MainCliMappingTests(unittest.TestCase):
             "pre-commit", ["pre-commit", "run", "--files"]
         )
 
+    def test_offline_bare_mode_reads_config_once(self) -> None:
+        # Regression test: the offline pre-flight and bare mode's
+        # always_run check must share one config read, not two. The
+        # test forces offline mode and stubs the pre-flight, so it
+        # runs the same way with and without CI=true and never reads
+        # the hook cache.
+        config = {"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]}
+        with (
+            patch.object(checker, "_ci_is_enabled", return_value=False),
+            patch.object(
+                checker, "_load_config", return_value=config
+            ) as mock_load_config,
+            patch.object(checker, "_preflight", return_value=0) as mock_preflight,
+            patch.object(checker, "_changed_files", return_value=[]),
+            patch("os.execvp") as mock_execvp,
+        ):
+            rc = checker.main([])
+        mock_load_config.assert_called_once()
+        mock_preflight.assert_called_once()
+        # The pre-flight ran offline and received the same config
+        # object that _load_config returned: bare mode reused the
+        # shared read instead of loading the config again.
+        self.assertFalse(mock_preflight.call_args[0][0])
+        self.assertIs(config, mock_preflight.call_args[0][2])
+        mock_execvp.assert_not_called()
+        self.assertEqual(0, rc)
+
 
 class MainEnvironmentTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -410,6 +443,11 @@ class MainCheckParityTests(unittest.TestCase):
         )
         env_patcher.start()
         self.addCleanup(env_patcher.stop)
+        # Force offline mode: the cache-gate tests must not change
+        # their path when GitHub Actions sets CI=true.
+        ci_patcher = patch.object(checker, "_ci_is_enabled", return_value=False)
+        ci_patcher.start()
+        self.addCleanup(ci_patcher.stop)
 
     def test_cache_miss_reports_before_validating_config(self) -> None:
         with (
@@ -477,6 +515,324 @@ class MainCheckParityTests(unittest.TestCase):
             rc = checker.main(["--check-parity", "--online"])
         self.assertEqual(0, rc)
         mock_run.assert_called_once()
+
+
+class PrintPreCommitVersionTests(unittest.TestCase):
+    def test_prints_pinned_version_without_reading_config(self) -> None:
+        def _fail_if_called() -> None:
+            self.fail("--print-pre-commit-version must not read the config")
+
+        buf = io.StringIO()
+        with (
+            patch.object(checker, "_load_config", side_effect=_fail_if_called),
+            patch("os.execvp") as mock_execvp,
+            contextlib.redirect_stdout(buf),
+        ):
+            rc = checker.main(["--print-pre-commit-version"])
+        self.assertEqual(0, rc)
+        self.assertRegex(checker.PRE_COMMIT_VERSION, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(f"{checker.PRE_COMMIT_VERSION}\n", buf.getvalue())
+        mock_execvp.assert_not_called()
+
+    def test_print_version_rejects_mode_and_scope_flags(self) -> None:
+        for flags in (
+            ["--print-pre-commit-version", "--check-parity"],
+            ["--print-pre-commit-version", "--all-files"],
+            ["--print-pre-commit-version", "--files", "a.py"],
+        ):
+            with self.subTest(flags=flags):
+                buf = io.StringIO()
+                with (
+                    contextlib.redirect_stderr(buf),
+                    patch("os.execvp") as mock_execvp,
+                    self.assertRaises(SystemExit) as raised,
+                ):
+                    checker.main(flags)
+                self.assertEqual(2, raised.exception.code)
+                mock_execvp.assert_not_called()
+                self.assertIn("cannot be combined with", buf.getvalue())
+
+    def test_print_version_ignores_online_flags(self) -> None:
+        # The print branch returns before online mode is computed, so
+        # --online-if-ci must not change its behavior. CI is unset
+        # here: without the early return, --online-if-ci would resolve
+        # offline and set the zizmor flag before printing.
+        buf = io.StringIO()
+        env = dict(os.environ)
+        env.pop("CI", None)
+        env.pop("ZIZMOR_NO_ONLINE_AUDITS", None)
+        with (
+            patch.dict(os.environ, env, clear=True),
+            contextlib.redirect_stdout(buf),
+            patch("os.execvp") as mock_execvp,
+        ):
+            rc = checker.main(["--print-pre-commit-version", "--online-if-ci"])
+            self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
+        self.assertEqual(0, rc)
+        self.assertEqual(f"{checker.PRE_COMMIT_VERSION}\n", buf.getvalue())
+        mock_execvp.assert_not_called()
+
+
+class MainCiInvocationTests(unittest.TestCase):
+    """The CI invocation must work without reading the config.
+
+    CI runs ``python3 scripts/lint.py --all-files --online-if-ci``
+    under ``CI=true``. That path must not read
+    ``.pre-commit-config.yaml`` (so it needs no PyYAML) and must not
+    force zizmor's audits offline.
+    """
+
+    def test_ci_invocation_runs_pre_commit_without_config(self) -> None:
+        def _fail_if_called() -> None:
+            self.fail("the CI invocation must not read the config")
+
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        env = dict(os.environ)
+        env["CI"] = "true"
+        env["PRE_COMMIT_HOME"] = str(Path(temporary_directory.name) / "cache")
+        env.pop("ZIZMOR_NO_ONLINE_AUDITS", None)
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(checker, "_load_config", side_effect=_fail_if_called),
+            patch("os.execvp") as mock_execvp,
+        ):
+            checker.main(["--all-files", "--online-if-ci"])
+            # Assert inside the patch: the wrapper must not set the
+            # zizmor flag for this online run.
+            self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
+        mock_execvp.assert_called_once_with(
+            "pre-commit", ["pre-commit", "run", "--all-files"]
+        )
+
+    def test_ci_invocation_with_files_scope_runs_without_config(self) -> None:
+        def _fail_if_called() -> None:
+            self.fail("the CI invocation must not read the config")
+
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        env = dict(os.environ)
+        env["CI"] = "true"
+        env["PRE_COMMIT_HOME"] = str(Path(temporary_directory.name) / "cache")
+        env.pop("ZIZMOR_NO_ONLINE_AUDITS", None)
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(checker, "_load_config", side_effect=_fail_if_called),
+            patch("os.execvp") as mock_execvp,
+        ):
+            checker.main(["--online-if-ci", "--files", "a.py", "b.yaml"])
+            self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
+        mock_execvp.assert_called_once_with(
+            "pre-commit",
+            ["pre-commit", "run", "--files", "a.py", "b.yaml"],
+        )
+
+
+# A `run:` key line. Group 1 is the indentation; group 2 is the
+# inline value, if any.
+_RUN_KEY_LINE = re.compile(r"^([ \t]*)run:(?:[ \t]+(.*))?$")
+
+# A direct `pre-commit run` invocation: the `pre-commit` command or
+# the `-m pre_commit` module form, each followed by a `run` token.
+# The lookarounds match whole tokens only. `x-pre-commit` and
+# `run-all` do not match.
+_DIRECT_PRE_COMMIT_RUN = re.compile(
+    r"(?<![\w.-])(?:pre-commit|-m[ \t]+pre_commit)[ \t]+run(?![\w-])"
+)
+
+
+def _strip_line_comment(line: str) -> str:
+    """Return *line* cut at its first comment start.
+
+    A ``#`` starts a comment when it begins the line or follows a
+    space or tab outside quotes. A ``#`` inside a quoted string
+    (``echo "a # b"``) is shell data and stays. A ``#`` glued to a
+    scalar (``a#b``) is data and stays.
+    """
+    quote = ""
+    for index, char in enumerate(line):
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in ("'", '"'):
+            quote = char
+        elif char == "#" and (index == 0 or line[index - 1] in " \t"):
+            return line[:index]
+    return line
+
+
+def _without_yaml_comments(text: str) -> str:
+    """Return *text* with the comment part of every line removed.
+
+    Each line is cut at its first comment start, so a comment cannot
+    hide a command from the contract guards: an unterminated quote
+    keeps the rest of the line, which can only leave too much text,
+    never too little.
+    shortcut: escaped quotes toggle quote state, and a quote opened on
+    one line does not carry to the next; upgrade to a real shell lexer
+    if the workflow ever needs that precision.
+    """
+    return "\n".join(_strip_line_comment(line) for line in text.splitlines())
+
+
+def _has_direct_pre_commit_run(text: str) -> bool:
+    """Return whether *text* invokes ``pre-commit run`` directly.
+
+    Comment parts are removed first, so an explanatory comment that
+    names the old command does not count. The remaining text is
+    searched for the ``pre-commit`` command or the ``-m pre_commit``
+    module form followed by a ``run`` token, so prefixed and chained
+    forms (``uv run pre-commit run -a``, ``python3 -m pre_commit run
+    -a``, ``foo && pre-commit run``) are caught too.
+    """
+    return _DIRECT_PRE_COMMIT_RUN.search(_without_yaml_comments(text)) is not None
+
+
+def _run_commands(text: str) -> list[str]:
+    """Return the command lines of every ``run:`` value in *text*.
+
+    Comment parts are removed first, so a comment that names a
+    command does not count and a step name never becomes a command.
+    The inline form (``run: <command>``) yields the command on the
+    same line. The block form (``run: |`` or ``run: >``) yields every
+    non-empty stripped line of the indented block that follows. The
+    helper parses text only, so the tests need no PyYAML.
+    """
+    lines = _without_yaml_comments(text).splitlines()
+    commands: list[str] = []
+    index = 0
+    while index < len(lines):
+        key = _RUN_KEY_LINE.match(lines[index])
+        if key is None:
+            index += 1
+            continue
+        indent = key.group(1)
+        value = key.group(2) or ""
+        if value[:1] in ("|", ">"):
+            index += 1
+            while index < len(lines):
+                block_line = lines[index]
+                if block_line.strip() and not block_line.startswith(indent + " "):
+                    break
+                if block_line.strip():
+                    commands.append(block_line.strip())
+                index += 1
+        else:
+            if value.strip():
+                commands.append(value.strip())
+            index += 1
+    return commands
+
+
+class DirectPreCommitRunMatcherTests(unittest.TestCase):
+    def test_detects_direct_invocations(self) -> None:
+        for command in (
+            "run: pre-commit run -a",
+            "run: uv run pre-commit run -a",
+            "run: python3 -m pre_commit run -a",
+            "run: python -m pre_commit run -a",
+            "echo x && python3 -m pre_commit run",
+            "pre-commit run --all-files",
+            "echo x && pre-commit run",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(_has_direct_pre_commit_run(command))
+
+    def test_ignores_the_wrapper_comments_and_other_subcommands(self) -> None:
+        for line in (
+            "run: python3 scripts/lint.py --all-files --online-if-ci",
+            "# `pre-commit run -a` is no longer used",
+            "run: pre-commit gc",
+            "run: python3 -m pre_commit validate-config .pre-commit-config.yaml",
+            "run: x-pre-commit run-all",
+        ):
+            with self.subTest(line=line):
+                self.assertFalse(_has_direct_pre_commit_run(line))
+
+
+class RunCommandsExtractionTests(unittest.TestCase):
+    def test_extracts_inline_and_block_commands_and_drops_comments(self) -> None:
+        snippet = (
+            "      # run: echo not-a-command\n"
+            "      - name: Run pre-commit checks\n"
+            "        run: python3 scripts/lint.py --all-files --online-if-ci\n"
+            "      - name: Install pre-commit\n"
+            "        run: |\n"
+            '          version="$(python3 scripts/lint.py'
+            ' --print-pre-commit-version)"\n'
+            '          # uv tool install "pre-commit==${version}"\n'
+            '          uv tool install "pre-commit==${version}"\n'
+            "      - name: Run pre-commit gc\n"
+            "        run: pre-commit gc\n"
+        )
+        self.assertEqual(
+            [
+                "python3 scripts/lint.py --all-files --online-if-ci",
+                'version="$(python3 scripts/lint.py --print-pre-commit-version)"',
+                'uv tool install "pre-commit==${version}"',
+                "pre-commit gc",
+            ],
+            _run_commands(snippet),
+        )
+
+    def test_step_name_is_not_extracted_as_a_command(self) -> None:
+        snippet = "      - name: Run pre-commit gc\n        run: echo skipped\n"
+        self.assertEqual(["echo skipped"], _run_commands(snippet))
+
+    def test_quoted_hash_does_not_hide_a_direct_run(self) -> None:
+        # A `#` inside quotes is shell data, not a comment. The
+        # extracted command must stay whole so the matcher still
+        # catches the direct run at its end.
+        snippet = '        run: echo "a # b" && pre-commit run\n'
+        commands = _run_commands(snippet)
+        self.assertEqual(['echo "a # b" && pre-commit run'], commands)
+        self.assertTrue(_has_direct_pre_commit_run(commands[0]))
+
+    def test_comment_naming_the_wrapper_does_not_satisfy_the_contract(self) -> None:
+        # The raw-text assertions passed on this snippet: the wrapper
+        # command appears in a comment, and the executed command is a
+        # module-form direct run.
+        snippet = (
+            "      # python3 scripts/lint.py --all-files --online-if-ci\n"
+            "        run: python3 -m pre_commit run -a\n"
+        )
+        commands = _run_commands(snippet)
+        self.assertNotIn("python3 scripts/lint.py --all-files --online-if-ci", commands)
+        self.assertEqual(["python3 -m pre_commit run -a"], commands)
+        self.assertTrue(_has_direct_pre_commit_run(commands[0]))
+
+
+class CiWorkflowContractTests(unittest.TestCase):
+    """The CI pre-commit job uses the wrapper as its lint entrypoint.
+
+    Every assertion inspects the executed ``run:`` command lines, not
+    the raw file text, so comments and step names cannot satisfy it.
+    """
+
+    def setUp(self) -> None:
+        workflow_path = checker.REPO_ROOT / ".github" / "workflows" / "ci-workflow.yaml"
+        self.commands = _run_commands(workflow_path.read_text(encoding="utf-8"))
+
+    def test_no_direct_pre_commit_run_invocation(self) -> None:
+        for command in self.commands:
+            with self.subTest(command=command):
+                self.assertFalse(_has_direct_pre_commit_run(command))
+
+    def test_run_step_invokes_the_wrapper(self) -> None:
+        self.assertIn(
+            "python3 scripts/lint.py --all-files --online-if-ci",
+            self.commands,
+        )
+
+    def test_install_step_pins_the_wrapper_version(self) -> None:
+        self.assertIn(
+            'version="$(python3 scripts/lint.py --print-pre-commit-version)"',
+            self.commands,
+        )
+        self.assertIn('uv tool install "pre-commit==${version}"', self.commands)
+
+    def test_pre_commit_gc_step_is_present(self) -> None:
+        self.assertIn("pre-commit gc", self.commands)
 
 
 if __name__ == "__main__":
