@@ -1411,12 +1411,7 @@ class CheckRepoTests(unittest.TestCase):
                 _ceiling(file_path=".agents/skills/helper/SKILL.md", value=2800),
             )
         )
-        skillsaw_config = (
-            "rules:\n"
-            "  context-budget:\n"
-            "    limits:\n"
-            "      skill: 3000\n"
-        )
+        skillsaw_config = "rules:\n  context-budget:\n    limits:\n      skill: 3000\n"
         (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
             skillsaw_config, encoding="utf-8"
         )
