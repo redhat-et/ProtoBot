@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -346,12 +347,13 @@ def _extract_tarball(tar: tarfile.TarFile, destination: Path) -> _MemberFilter:
     return members
 
 
-def _cached_repo_paths(cache_root: Path) -> dict[tuple[str, str], str]:
+def _cached_repo_paths(cache_root: Path) -> dict[tuple[str, str], object]:
     """Return ``{(repo, ref): stored repository path}`` from a db.db.
 
     Reads the same ``repos`` table as ``_cached_repos``, keeping the
-    absolute ``path`` column that records where the repository
-    directory lived when the cache was built.
+    ``path`` column that records where the repository directory lived
+    when the cache was built. The value is returned as SQLite stored
+    it, so a hostile row can hold a BLOB.
     """
     db_path = cache_root / "db.db"
     if not db_path.exists():
@@ -368,22 +370,30 @@ def _cached_repo_paths(cache_root: Path) -> dict[tuple[str, str], str]:
 
 
 def _staged_repository_rejection(
-    stored: str,
+    stored: object,
     staging: Path,
     cache_root: Path,
 ) -> str | None:
     """Return why a staged repository row cannot be used, or None.
 
-    The stored path must name a directory inside the cache root used at
-    build time — ``cache_root`` under the path contract — and the
-    staged tree must hold that directory with a
+    The stored value must be an absolute path string inside the cache
+    root used at build time — ``cache_root`` under the path contract —
+    and the staged tree must hold that directory with a
     ``.pre-commit-hooks.yaml``, or pre-commit later fails to load the
-    repository's hook manifest.
+    repository's hook manifest. Both sides are compared lexically with
+    ``os.path.normpath``: resolving would follow symlinks in the live
+    cache and inspect the wrong staging directory.
     """
-    resolved = Path(stored).resolve()
-    if resolved != cache_root and cache_root not in resolved.parents:
+    if not isinstance(stored, str) or not stored or not os.path.isabs(stored):
+        return f"the stored path {stored!r} is not an absolute path"
+    normalized_stored = Path(os.path.normpath(stored))
+    normalized_root = Path(os.path.normpath(cache_root))
+    if (
+        normalized_stored != normalized_root
+        and normalized_root not in normalized_stored.parents
+    ):
         return f"the stored path {stored} is outside the cache root {cache_root}"
-    staged_dir = staging / resolved.relative_to(cache_root)
+    staged_dir = staging / normalized_stored.relative_to(normalized_root)
     if not staged_dir.is_dir():
         return f"the repository directory {staged_dir} is missing from the archive"
     if not (staged_dir / ".pre-commit-hooks.yaml").is_file():
@@ -407,17 +417,27 @@ def _python_env_dirs(cache_root: Path) -> list[Path]:
     return sorted(directories)
 
 
+def _read_pyvenv_cfg(cfg: Path) -> dict[str, str]:
+    """Parse the ``key = value`` lines of a ``pyvenv.cfg``.
+
+    Raises ``OSError`` or ``UnicodeDecodeError`` when the file cannot be
+    read; callers that only warn catch those themselves.
+    """
+    values: dict[str, str] = {}
+    for line in cfg.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip()] = value.strip()
+    return values
+
+
 def _pyvenv_version_info(env_dir: Path) -> str | None:
     """Return the ``version_info`` recorded in *env_dir*'s ``pyvenv.cfg``."""
     try:
-        content = env_dir.joinpath("pyvenv.cfg").read_text(encoding="utf-8")
+        values = _read_pyvenv_cfg(env_dir / "pyvenv.cfg")
     except (OSError, UnicodeDecodeError):
         return None
-    for line in content.splitlines():
-        key, separator, value = line.partition("=")
-        if separator and key.strip() == "version_info":
-            return value.strip()
-    return None
+    return values.get("version_info")
 
 
 def _pyvenv_major_minor(version_info: str) -> str | None:
@@ -426,6 +446,11 @@ def _pyvenv_major_minor(version_info: str) -> str | None:
     if len(parts) < 2:
         return None
     return f"{parts[0]}.{parts[1]}"
+
+
+def _version_key(version: str) -> str:
+    """Return the ``major.minor.micro`` part of a version string."""
+    return ".".join(version.split(".")[:3])
 
 
 def _warn_on_interpreter_mismatch(pre_commit_home: Path) -> None:
@@ -464,9 +489,20 @@ def _warn_on_interpreter_mismatch(pre_commit_home: Path) -> None:
     )
 
 
-def _rewrite_version_info(env_dir: Path, version_info: str) -> None:
-    """Replace the ``version_info`` line, preserving every other line."""
+def _rewrite_version_info(env_dir: Path, version_info: str, cache_root: Path) -> bool:
+    """Replace the ``version_info`` line, preserving every other line.
+
+    The rewrite is refused, without raising, when the resolved
+    ``pyvenv.cfg`` lies outside *cache_root*, so a symlink cannot direct
+    the write outside the cache. The new content lands in a temporary
+    file in the same validated directory and replaces ``pyvenv.cfg``
+    with one rename.
+    """
     cfg = env_dir / "pyvenv.cfg"
+    resolved_cfg = cfg.resolve()
+    resolved_root = cache_root.resolve()
+    if resolved_cfg != resolved_root and resolved_root not in resolved_cfg.parents:
+        return False
     lines = cfg.read_text(encoding="utf-8").splitlines()
     rewritten = []
     replaced = False
@@ -479,11 +515,135 @@ def _rewrite_version_info(env_dir: Path, version_info: str) -> None:
             rewritten.append(line)
     if not replaced:
         rewritten.append(f"version_info = {version_info}")
-    cfg.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    temporary = env_dir / f".pyvenv.cfg.{os.getpid()}.tmp"
+    temporary.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    os.replace(temporary, cfg)
+    return True
 
 
-def _normalize_pyvenv_patch_versions(pre_commit_home: Path) -> None:
-    """Rewrite each python environment's recorded patch version.
+def _interpreter_link_rejection(interpreter: Path, current: str) -> str | None:
+    """Return why *interpreter* must not be executed, or None.
+
+    The environment's ``bin/python`` comes from the archive, so it is
+    only executed when it is a symlink to a platform interpreter:
+    ``/usr/bin/python3``, ``/usr/bin/python<current>``, or the running
+    interpreter itself.
+    """
+    if not interpreter.exists():
+        return f"bin/python {interpreter} is missing"
+    if not interpreter.is_symlink():
+        return f"bin/python {interpreter} is not a symlink"
+    target = interpreter.resolve()
+    if target == Path(sys.executable).resolve():
+        return None
+    allowed_names = {"python3", f"python{current}"}
+    if target.parent != Path("/usr/bin") or target.name not in allowed_names:
+        return (
+            f"bin/python resolves to {target}, not /usr/bin/python3, "
+            f"/usr/bin/python{current}, or the running interpreter"
+        )
+    return None
+
+
+def _probe_interpreter(executable: Path) -> tuple[str | None, str | None]:
+    """Ask *executable* for its version; return (version, failure reason)."""
+    try:
+        result = subprocess.run(
+            [
+                str(executable),
+                "-S",
+                "-c",
+                "import sys;print('.'.join(str(p) for p in sys.version_info))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"the interpreter probe timed out: {executable}"
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, f"the interpreter probe failed: {error}"
+    if result.returncode != 0:
+        return None, f"the interpreter probe exited {result.returncode}"
+    reported = result.stdout.strip()
+    if _pyvenv_major_minor(reported) is None:
+        return None, f"the interpreter reported an unparseable version: {reported!r}"
+    return reported, None
+
+
+def _base_executable_rejection(base_executable: str, reported: str) -> str | None:
+    """Return why the base executable disagrees with the environment.
+
+    ``base-executable`` comes from the archive's ``pyvenv.cfg``, so it
+    is only executed when it names a platform interpreter, and it must
+    report the same version as the environment's own interpreter.
+    """
+    base = Path(base_executable)
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    allowed_names = {"python3", f"python{current}"}
+    if (
+        not base.is_absolute()
+        or base.parent != Path("/usr/bin")
+        or base.name not in allowed_names
+    ):
+        return (
+            f"base-executable {base_executable} is not /usr/bin/python3 or "
+            f"/usr/bin/python{current}"
+        )
+    if not base.is_file():
+        return f"base-executable {base_executable} does not exist"
+    base_reported, failure = _probe_interpreter(base)
+    if failure:
+        return failure
+    if _version_key(base_reported) != _version_key(reported):
+        return (
+            f"base-executable {base_executable} reports {base_reported}, but "
+            f"the environment reports {reported}"
+        )
+    return None
+
+
+def _verify_and_normalize_env(
+    env_dir: Path, cache_root: Path, current: str
+) -> str | None:
+    """Normalize one environment; return a failure reason or None.
+
+    Returns None without changes when the recorded ``major.minor``
+    differs from this interpreter; the restore's interpreter-mismatch
+    warning reports that case.
+    """
+    values = _read_pyvenv_cfg(env_dir / "pyvenv.cfg")
+    version_info = values.get("version_info", "")
+    if not version_info or _pyvenv_major_minor(version_info) != current:
+        return None
+    interpreter = env_dir / "bin" / "python"
+    gate = _interpreter_link_rejection(interpreter, current)
+    if gate:
+        return gate
+    reported, probe_failure = _probe_interpreter(interpreter)
+    if probe_failure:
+        return probe_failure
+    if _pyvenv_major_minor(reported) != current:
+        return f"bin/python reports {reported}, not Python {current}"
+    base_executable = values.get("base-executable", "")
+    if base_executable:
+        base_rejection = _base_executable_rejection(base_executable, reported)
+        if base_rejection:
+            return base_rejection
+    # A real interpreter reports five components, for example
+    # ``3.12.4.final.0``; keep major.minor.micro and normalize the tail
+    # to the form virtualenv writes.
+    rewritten = f"{_version_key(reported)}.final.0"
+    if rewritten != version_info and not _rewrite_version_info(
+        env_dir, rewritten, cache_root
+    ):
+        return f"pyvenv.cfg resolves outside {cache_root}"
+    return None
+
+
+def _normalize_pyvenv_patch_versions(cache_root: Path) -> list[tuple[Path, str]]:
+    """Verify and rewrite each python environment's recorded patch version.
 
     The runner cannot know the sandbox image's Python patch version, so
     a ``pyvenv.cfg`` built with, for example, 3.12.4 fails pre-commit's
@@ -493,58 +653,24 @@ def _normalize_pyvenv_patch_versions(pre_commit_home: Path) -> None:
     environment's ``bin/python`` is asked for its version — the same
     interpreter that pre-commit will run — and the ``version_info``
     line is rewritten to the reported ``major.minor.micro`` followed by
-    ``.final.0``, the form virtualenv writes. When the interpreter
-    cannot run, or its ``major.minor`` differs, the file is left
-    unchanged and the restore warning reports the environment. An
-    environment whose ``pyvenv.cfg`` cannot be read or rewritten is
-    skipped with a warning, because pre-commit may then try to reinstall
-    it; the restore itself still succeeds. No other metadata is
-    changed.
+    ``.final.0``, the form virtualenv writes. Running this before the
+    promotion means a concurrent ``lint.py`` never sees unrepaired
+    metadata. Returns the environments that could not be verified, as
+    ``(path relative to *cache_root*, reason)`` pairs; pre-commit may
+    try to reinstall those. An environment whose ``pyvenv.cfg`` cannot
+    be read or rewritten is reported the same way; the restore itself
+    still succeeds. No other metadata is changed.
     """
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
-    unnormalized: list[Path] = []
-    for env_dir in _python_env_dirs(pre_commit_home):
+    unverified: list[tuple[Path, str]] = []
+    for env_dir in _python_env_dirs(cache_root):
         try:
-            version_info = _pyvenv_version_info(env_dir)
-            if version_info is None or _pyvenv_major_minor(version_info) != current:
-                continue
-            interpreter = env_dir / "bin" / "python"
-            try:
-                result = subprocess.run(
-                    [
-                        str(interpreter),
-                        "-S",
-                        "-c",
-                        "import sys;print('.'.join(str(p) for p in sys.version_info))",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    check=False,
-                )
-            except (OSError, subprocess.SubprocessError):
-                continue
-            if result.returncode != 0:
-                continue
-            reported = result.stdout.strip()
-            reported_parts = reported.split(".")
-            if len(reported_parts) < 3 or _pyvenv_major_minor(reported) != current:
-                continue
-            # A real interpreter reports five components, for example
-            # ``3.12.4.final.0``; keep major.minor.micro and normalize the
-            # tail to the form virtualenv writes.
-            rewritten = f"{'.'.join(reported_parts[:3])}.final.0"
-            if rewritten != version_info:
-                _rewrite_version_info(env_dir, rewritten)
-        except (OSError, UnicodeDecodeError):
-            unnormalized.append(env_dir)
-    if unnormalized:
-        listing = ", ".join(str(directory) for directory in unnormalized)
-        print(
-            f"WARNING: could not normalize the version_info of {listing}; "
-            f"pre-commit may try to reinstall these environments.",
-            file=sys.stderr,
-        )
+            reason = _verify_and_normalize_env(env_dir, cache_root, current)
+        except (OSError, UnicodeDecodeError) as error:
+            reason = f"pyvenv.cfg could not be read or rewritten: {error}"
+        if reason:
+            unverified.append((env_dir.relative_to(cache_root), reason))
+    return unverified
 
 
 def _remove_quietly(path: Path) -> None:
@@ -585,10 +711,13 @@ def _swap_cache_home(staging: Path, pre_commit_home: Path) -> None:
         except OSError as rollback_error:
             # Keep the promotion error as the primary cause and tell the
             # operator where the live cache is and how to recover it.
+            recovery = (
+                f"mv -- {shlex.quote(str(backup))} {shlex.quote(str(pre_commit_home))}"
+            )
             raise OSError(
                 f"{promotion_error}; the live cache was moved to {backup} "
                 f"and could not be moved back ({rollback_error}); recover "
-                f"it with: mv {backup} {pre_commit_home}"
+                f"it with: {recovery}"
             ) from promotion_error
         raise
     if moved_aside:
@@ -647,21 +776,6 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                 file=sys.stderr,
             )
             return False
-        cache_root = pre_commit_home.resolve()
-        for repo, rev in sorted(required):
-            rejection = _staged_repository_rejection(
-                staged_paths.get((repo, rev), ""),
-                staging,
-                cache_root,
-            )
-            if rejection:
-                print(
-                    f"WARNING: the archive {tarball} cannot provide "
-                    f"{repo} @ {rev}: {rejection}; keeping the tarball and "
-                    f"the existing cache.",
-                    file=sys.stderr,
-                )
-                return False
         live = _cached_repos(pre_commit_home)
         if not live <= set(staged_paths):
             print(
@@ -672,6 +786,32 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                 file=sys.stderr,
             )
             return False
+        # Every required and retained revision needs its payload, so a
+        # retained row without a repository directory cannot be promoted.
+        # pre-commit never clones local or meta repositories, so those
+        # rows carry no payload to check.
+        to_validate = {
+            (repo, ref)
+            for repo, ref in required | live
+            if repo not in _NON_CLONED_REPOS
+        }
+        for repo, rev in sorted(to_validate):
+            rejection = _staged_repository_rejection(
+                staged_paths.get((repo, rev), ""),
+                staging,
+                pre_commit_home,
+            )
+            if rejection:
+                print(
+                    f"WARNING: the archive {tarball} cannot provide "
+                    f"{repo} @ {rev}: {rejection}; keeping the tarball and "
+                    f"the existing cache.",
+                    file=sys.stderr,
+                )
+                return False
+        # Normalize before the promotion, so a concurrent lint.py never
+        # sees unrepaired metadata.
+        unverified = _normalize_pyvenv_patch_versions(staging)
         _swap_cache_home(staging, pre_commit_home)
     except (tarfile.TarError, EOFError, OSError, zlib.error) as error:
         print(
@@ -681,10 +821,18 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
         return False
     finally:
         _remove_quietly(staging)
-    _normalize_pyvenv_patch_versions(pre_commit_home)
     print(
         f"Restored the offline pre-commit cache from {tarball} into {pre_commit_home}."
     )
+    if unverified:
+        listing = "; ".join(
+            f"{pre_commit_home / env} ({reason})" for env, reason in unverified
+        )
+        print(
+            f"WARNING: could not normalize the version_info of {listing}; "
+            f"pre-commit may try to reinstall these environments.",
+            file=sys.stderr,
+        )
     _warn_on_interpreter_mismatch(pre_commit_home)
     return True
 

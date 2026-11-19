@@ -4,6 +4,7 @@ import contextlib
 import io
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -18,6 +19,11 @@ if __package__:
     from scripts import lint as checker
 else:
     import lint as checker
+
+
+# env_specs sentinel: link an environment's bin/python to the running
+# interpreter, as a real virtualenv links to its base interpreter.
+_RUNTIME = "runtime"
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -41,12 +47,13 @@ def _init_repo(repo: Path) -> None:
 def _make_db(
     db_path: Path,
     rows: list[tuple[str, str]],
-    paths: dict[tuple[str, str], str] | None = None,
+    paths: dict[tuple[str, str], str | bytes] | None = None,
 ) -> None:
     """Create a pre-commit-style ``db.db`` with *rows* of ``(repo, ref)``.
 
     *paths* maps a row to its build-time repository directory; rows
-    without an entry store ``unused``.
+    without an entry store ``unused``. A ``bytes`` value is stored as a
+    BLOB.
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
@@ -276,6 +283,13 @@ class PreflightRestoreTests(unittest.TestCase):
             f"{sys.version_info.micro}.final.0"
         )
 
+    def _stale_patch_version(self) -> str:
+        """A patch version that never matches the running interpreter."""
+        return (
+            f"{sys.version_info.major}.{sys.version_info.minor}."
+            f"{sys.version_info.micro + 1}.final.0"
+        )
+
     def _build_tarball(
         self,
         rows: list[tuple[str, str]],
@@ -283,7 +297,7 @@ class PreflightRestoreTests(unittest.TestCase):
         other_interpreters: tuple[str, ...] = (),
         env_specs: tuple[tuple[str, str | None, str | None], ...] = (),
         include_repo_dirs: bool = True,
-        stored_paths: dict[tuple[str, str], str] | None = None,
+        stored_paths: dict[tuple[str, str], str | bytes] | None = None,
     ) -> None:
         """Write a bootstrap tarball holding a cache with *rows* cached.
 
@@ -291,12 +305,14 @@ class PreflightRestoreTests(unittest.TestCase):
         the build-time repository paths, one repository directory per
         row with a ``.pre-commit-hooks.yaml``, and python environments
         described by ``pyvenv.cfg`` metadata. ``env_specs`` adds
-        environments as ``(name, version_info, stub_version)``; a
-        ``stub_version`` also installs a ``bin/python`` script that
-        prints it. ``stored_paths`` overrides the row paths.
+        environments as ``(name, version_info, interpreter)``:
+        ``_RUNTIME`` links ``bin/python`` to the running interpreter, a
+        version string installs a regular-file stub script that prints
+        it, and ``None`` leaves ``bin/python`` out. ``stored_paths``
+        overrides the row paths.
         """
         packed = self.root / "packed"
-        paths: dict[tuple[str, str], str] = {}
+        paths: dict[tuple[str, str], str | bytes] = {}
         if include_repo_dirs:
             for index, row in enumerate(rows):
                 repo_dir = packed / f"repo{index}"
@@ -310,29 +326,31 @@ class PreflightRestoreTests(unittest.TestCase):
         default_env = packed / "repodir" / f"py_env-python{self._current_interpreter()}"
         (default_env / "bin").mkdir(parents=True, exist_ok=True)
         (default_env / "pyvenv.cfg").write_text(
-            f"version_info = {self._current_interpreter()}.0.final.0\n",
+            f"version_info = {self._stale_patch_version()}\n",
             encoding="utf-8",
         )
         # A real virtualenv's bin/python is an absolute link to the base
         # interpreter; the restore must keep it.
-        os.symlink("/usr/bin/python3", default_env / "bin" / "python")
+        os.symlink(sys.executable, default_env / "bin" / "python")
         for version in other_interpreters:
             env_dir = packed / "repodir" / f"py_env-python{version}"
             env_dir.mkdir(parents=True, exist_ok=True)
             (env_dir / "pyvenv.cfg").write_text(
                 f"version_info = {version}.0.final.0\n", encoding="utf-8"
             )
-        for name, version_info, stub_version in env_specs:
+        for name, version_info, interpreter in env_specs:
             env_dir = packed / "repodir" / name
             (env_dir / "bin").mkdir(parents=True, exist_ok=True)
             if version_info is not None:
                 (env_dir / "pyvenv.cfg").write_text(
                     f"version_info = {version_info}\n", encoding="utf-8"
                 )
-            if stub_version is not None:
+            if interpreter == _RUNTIME:
+                os.symlink(sys.executable, env_dir / "bin" / "python")
+            elif interpreter is not None:
                 stub = env_dir / "bin" / "python"
                 stub.write_text(
-                    f"#!/bin/sh\nprintf '%s\\n' '{stub_version}'\n",
+                    f"#!/bin/sh\nprintf '%s\\n' '{interpreter}'\n",
                     encoding="utf-8",
                 )
                 stub.chmod(0o755)
@@ -379,7 +397,17 @@ class PreflightRestoreTests(unittest.TestCase):
             / "python"
         )
         self.assertTrue(link.is_symlink())
-        self.assertEqual("/usr/bin/python3", os.readlink(link))
+        self.assertEqual(sys.executable, os.readlink(link))
+        # The promoted pyvenv.cfg is already normalized: the fixture
+        # records a stale patch version and bin/python reports the
+        # running interpreter.
+        cfg = (
+            self.home
+            / "repodir"
+            / f"py_env-python{self._current_interpreter()}"
+            / "pyvenv.cfg"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f"version_info = {self._current_python()}", cfg)
         # No interpreter warning for a matching cache.
         self.assertEqual("", stderr.getvalue())
 
@@ -474,13 +502,7 @@ class PreflightRestoreTests(unittest.TestCase):
         # rewrites version_info so pre-commit's health check passes.
         self._build_tarball(
             self._config_rows(),
-            env_specs=(
-                (
-                    "py_env-stale",
-                    f"{self._current_interpreter()}.0.final.0",
-                    self._current_python(),
-                ),
-            ),
+            env_specs=(("py_env-stale", self._stale_patch_version(), _RUNTIME),),
         )
         stdout = io.StringIO()
         with (
@@ -501,13 +523,7 @@ class PreflightRestoreTests(unittest.TestCase):
         # restore; the environment is skipped with a warning.
         self._build_tarball(
             self._config_rows(),
-            env_specs=(
-                (
-                    "py_env-stale",
-                    f"{self._current_interpreter()}.0.final.0",
-                    self._current_python(),
-                ),
-            ),
+            env_specs=(("py_env-stale", self._stale_patch_version(), _RUNTIME),),
         )
         with (
             patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
@@ -534,7 +550,7 @@ class PreflightRestoreTests(unittest.TestCase):
     def test_env_reporting_another_major_minor_is_left_unchanged(self) -> None:
         self._build_tarball(
             self._config_rows(),
-            env_specs=(("py_env-other", "3.11.9.final.0", "3.11.9"),),
+            env_specs=(("py_env-other", "3.11.9.final.0", None),),
         )
         stdout, stderr = io.StringIO(), io.StringIO()
         with (
@@ -552,6 +568,208 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("version_info = 3.11.9.final.0", cfg)
         self.assertIn("built for another interpreter", stderr.getvalue())
 
+    def test_probe_reporting_another_major_minor_is_reported(self) -> None:
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(("py_env-drifted", self._stale_patch_version(), _RUNTIME),),
+        )
+        with patch.object(
+            checker,
+            "_probe_interpreter",
+            return_value=("9.9.1.final.0", None),
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("py_env-drifted", message)
+        self.assertIn("reports 9.9.1.final.0", message)
+        # The environment's file is left unchanged.
+        cfg = (self.home / "repodir" / "py_env-drifted" / "pyvenv.cfg").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(f"version_info = {self._stale_patch_version()}", cfg)
+
+    def test_regular_file_bin_python_is_not_executed(self) -> None:
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(("py_env-regular", self._stale_patch_version(), "9.9.1"),),
+        )
+        original_probe = checker._probe_interpreter
+
+        def probe_refusing_regular_files(executable):
+            if "py_env-regular" in str(executable):
+                raise AssertionError("the regular file was executed")
+            return original_probe(executable)
+
+        with patch.object(
+            checker, "_probe_interpreter", side_effect=probe_refusing_regular_files
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("py_env-regular", message)
+        self.assertIn("is not a symlink", message)
+        # The environment's file is left unchanged.
+        cfg = (self.home / "repodir" / "py_env-regular" / "pyvenv.cfg").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(f"version_info = {self._stale_patch_version()}", cfg)
+
+    def test_missing_bin_python_is_reported(self) -> None:
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(("py_env-nolink", self._stale_patch_version(), None),),
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("py_env-nolink", message)
+        self.assertIn("is missing", message)
+
+    def test_non_zero_probe_exit_is_reported(self) -> None:
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(("py_env-failing", self._stale_patch_version(), _RUNTIME),),
+        )
+        with patch.object(
+            checker,
+            "_probe_interpreter",
+            return_value=(None, "the interpreter probe exited 1"),
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("py_env-failing", message)
+        self.assertIn("the interpreter probe exited 1", message)
+
+    def test_base_executable_disagreement_is_reported(self) -> None:
+        # bin/python is a real interpreter; the patched probe makes the
+        # base executable report a different version.
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        _make_db(packed / "db.db", rows, paths)
+        env_dir = packed / "repodir" / "py_env-based"
+        (env_dir / "bin").mkdir(parents=True)
+        (env_dir / "pyvenv.cfg").write_text(
+            f"version_info = {self._stale_patch_version()}\n"
+            "base-executable = /usr/bin/python3\n",
+            encoding="utf-8",
+        )
+        os.symlink(sys.executable, env_dir / "bin" / "python")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        with patch.object(
+            checker,
+            "_probe_interpreter",
+            side_effect=[(self._current_python(), None), ("3.9.1.final.0", None)],
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("py_env-based", message)
+        self.assertIn("base-executable /usr/bin/python3 reports 3.9.1.final.0", message)
+
+    def test_pyvenv_cfg_symlink_outside_the_cache_is_not_written(self) -> None:
+        outside = self.root / "outside.cfg"
+        outside.write_text(
+            f"version_info = {self._stale_patch_version()}\n", encoding="utf-8"
+        )
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        _make_db(packed / "db.db", rows, paths)
+        env_dir = packed / "repodir" / "py_env-linked"
+        (env_dir / "bin").mkdir(parents=True)
+        os.symlink(sys.executable, env_dir / "bin" / "python")
+        os.symlink(outside, env_dir / "pyvenv.cfg")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        # The restore succeeded, the external file is unchanged, and the
+        # environment is reported as unnormalized.
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertEqual(
+            f"version_info = {self._stale_patch_version()}\n",
+            outside.read_text(encoding="utf-8"),
+        )
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("py_env-linked", message)
+        self.assertIn("resolves outside", message)
+        live_cfg = self.home / "repodir" / "py_env-linked" / "pyvenv.cfg"
+        self.assertTrue(live_cfg.is_symlink())
+
     def test_rewrite_version_info_preserves_other_lines(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
@@ -560,7 +778,10 @@ class PreflightRestoreTests(unittest.TestCase):
             "home = /usr/bin\nversion_info = 3.12.0.final.0\nbinary = x\n",
             encoding="utf-8",
         )
-        checker._rewrite_version_info(env_dir, "3.12.9.final.0")
+        replaced = checker._rewrite_version_info(
+            env_dir, "3.12.9.final.0", env_dir.parent
+        )
+        self.assertTrue(replaced)
         self.assertEqual(
             "home = /usr/bin\nversion_info = 3.12.9.final.0\nbinary = x\n",
             (env_dir / "pyvenv.cfg").read_text(encoding="utf-8"),
@@ -682,6 +903,102 @@ class PreflightRestoreTests(unittest.TestCase):
             checker._cached_repos(self.home),
         )
         self.assertEqual([], list(self.root.glob(f".{self.home.name}.restore-*")))
+
+    def test_blob_stored_path_is_rejected(self) -> None:
+        # A BLOB in the path column must produce a normal rejection,
+        # not a TypeError traceback.
+        self._build_tarball(
+            self._config_rows(),
+            stored_paths={
+                ("https://example.invalid/foo", "aaaa"): b"\x00\x01",
+            },
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("cannot provide", message)
+        self.assertIn("is not an absolute path", message)
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_stored_path_through_a_live_symlink_is_rejected(self) -> None:
+        # The live cache holds repo0 as a symlink to repo1; the archive
+        # has only repo1. The check must compare lexically, so the
+        # missing repo0 is caught instead of silently mapping to repo1.
+        live_repo1 = self.home / "repo1"
+        live_repo1.mkdir(parents=True)
+        os.symlink("repo1", self.home / "repo0")
+        packed = self.root / "packed"
+        repo1 = packed / "repo1"
+        repo1.mkdir(parents=True)
+        (repo1 / ".pre-commit-hooks.yaml").write_text("hooks: []\n", encoding="utf-8")
+        _make_db(
+            packed / "db.db",
+            self._config_rows(),
+            {
+                ("https://example.invalid/foo", "aaaa"): str(self.home / "repo0"),
+                ("https://example.invalid/bar", "bbbb"): str(self.home / "repo1"),
+            },
+        )
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("https://example.invalid/foo @ aaaa", message)
+        self.assertIn("is missing from the archive", message)
+        self.assertTrue(self.tarball.exists())
+        # The live cache, including its symlink, is untouched.
+        self.assertTrue((self.home / "repo0").is_symlink())
+
+    def test_retained_revision_without_a_payload_is_rejected(self) -> None:
+        # The live cache holds an extra revision; the archive has its
+        # row but no repository directory for it.
+        extra = ("https://example.invalid/extra", "eeee")
+        _make_db(
+            self.home / "db.db",
+            [("https://example.invalid/foo", "aaaa"), extra],
+        )
+        self._build_tarball(
+            [*self._config_rows(), extra],
+            stored_paths={extra: str(self.home / "repo-absent")},
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("https://example.invalid/extra @ eeee", message)
+        self.assertIn("is missing from the archive", message)
+        self.assertTrue(self.tarball.exists())
+        # The live cache keeps both of its revisions.
+        self.assertEqual(
+            {
+                ("https://example.invalid/foo", "aaaa"),
+                ("https://example.invalid/extra", "eeee"),
+            },
+            checker._cached_repos(self.home),
+        )
 
     def test_row_without_a_repository_directory_is_rejected(self) -> None:
         # db.db covers the configured revisions, but the archive does
@@ -1019,15 +1336,40 @@ class SwapCacheHomeTests(unittest.TestCase):
         message = str(ctx.exception)
         # The promotion error stays the primary cause.
         self.assertIn("replace refused", message)
-        # The backup location and the recovery command are named.
+        # The backup location and the quoted recovery command are named.
         self.assertIn(str(backup), message)
-        self.assertIn(f"mv {backup} {self.home}", message)
+        recovery = f"mv -- {shlex.quote(str(backup))} {shlex.quote(str(self.home))}"
+        self.assertIn(recovery, message)
         # The backup with the live cache is still there.
         self.assertTrue(backup.is_dir())
         self.assertEqual(
             {("https://example.invalid/foo", "aaaa")},
             checker._cached_repos(backup),
         )
+
+    def test_recovery_command_is_quoted_for_paths_with_spaces(self) -> None:
+        home = self.root / "cache with space"
+        _make_db(home / "db.db", [("https://example.invalid/foo", "aaaa")])
+        staging = self.root / "staging"
+        staging.mkdir()
+        original_replace = os.replace
+        calls = {"count": 0}
+
+        def replace_failing_on_promotion_and_rollback(source, destination):
+            calls["count"] += 1
+            if calls["count"] in (2, 3):
+                raise OSError("replace refused")
+            return original_replace(source, destination)
+
+        with (
+            patch("os.replace", side_effect=replace_failing_on_promotion_and_rollback),
+            self.assertRaises(OSError) as ctx,
+        ):
+            checker._swap_cache_home(staging, home)
+        backup = self.root / f".{home.name}.backup-{os.getpid()}"
+        recovery = f"mv -- {shlex.quote(str(backup))} {shlex.quote(str(home))}"
+        self.assertIn(recovery, str(ctx.exception))
+        self.assertIn(str(backup), str(ctx.exception))
 
     def test_successful_promotion_removes_the_backup(self) -> None:
         self._seed_live_cache()

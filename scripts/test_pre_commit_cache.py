@@ -649,6 +649,25 @@ class WorkflowCommandTests(unittest.TestCase):
         self.assertNotIn("##[", clean)
         self.assertIn("##\u200b[", clean)
 
+    def test_printed_detail_cannot_contain_a_legacy_marker(self) -> None:
+        failure = RuntimeError("boom\n##[error]x")
+        with (
+            patch.object(bootstrap, "_run_upstream_script", return_value=0),
+            patch.object(bootstrap, "_warm_cache", side_effect=failure),
+        ):
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = bootstrap.main(["--upstream", "code"])
+        self.assertEqual(0, rc)
+        lines = stdout.getvalue().splitlines()
+        # No printed line carries a literal legacy marker.
+        for line in lines:
+            self.assertNotIn("##[", line)
+        # The detail line starts with the non-whitespace ``| `` marker
+        # and carries the broken marker.
+        detail = [line for line in lines if line.startswith("| ")]
+        self.assertTrue(any("##\u200b[error]x" in line for line in detail), lines)
+
     def test_fail_soft_warning_is_sanitized_with_inert_detail(self) -> None:
         failure = RuntimeError("boom\nsecond line ::error:: 100% done")
         with (
