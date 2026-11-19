@@ -33,34 +33,6 @@ repos:
       - id: trailing-whitespace      # Trims trailing whitespace
         args: [--markdown-linebreak-ext=md]
 
-  - repo: https://github.com/pre-commit/pygrep-hooks
-    rev: 3a6eb0fadf60b3cccfd80bad9dbb6fae7e47b316  # frozen: v1.10.0
-    hooks:
-      # Forbid UTF-8 replacement character
-      - id: text-unicode-replacement-char
-
-  - repo: https://github.com/adrienverge/yamllint
-    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530  # frozen: v1.38.0
-    hooks:
-      # Lint yaml files
-      - id: yamllint
-        args: ["--strict", "-c", ".github/yamllint-config.yaml"]
-        exclude: |
-          (?x)^\.fullsend/config\.yaml$
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: c0f278f1254ccc8fb09676bcdb8d847e7db493e5  # frozen: v0.17.4
-    hooks:
-      # Note: lint/fix before format
-      - id: ruff-check
-      # args: [ --fix ]
-      - id: ruff-format
-
-  - repo: https://github.com/stbenjam/skillsaw
-    rev: b11cf99c18ee5b1b2cb3156094b1a7d39fa0f1c7  # frozen: v0.23.0
-    hooks:
-      - id: skillsaw
-
   - repo: https://github.com/DavidAnson/markdownlint-cli2
     rev: 341e2a331ba578029e66c2e01183e7a6b5ca9ab4  # frozen: v0.24.0
     hooks:
@@ -78,17 +50,82 @@ repos:
       # Lint Dockerfiles
       - id: hadolint
 
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: 4de1378e4cd853bfc2b111b05fff35e2dbf809a3  # frozen: v0.9.0.6
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 44507b236cb9d68cfe3e94cc8b5840cfd5988318  # frozen: 44.221.1
     hooks:
-      - id: shellcheck
+      - id: renovate-config-validator
 
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: 01886c8a910c64595c47f186ca1ffc0b77fa5458  # frozen: v1.5.0
+  # Offline local checks so sandboxed agents catch formatting, vet,
+  # and skillsaw baseline-ceiling ratchet errors without network hook
+  # repositories.
+  #
+  # The hooks below pin a PyPI package via `additional_dependencies`
+  # instead of cloning a hook repository from GitHub/GitLab, because the
+  # sandboxed coding-agent profile allows pypi.org/files.pythonhosted.org
+  # but not git/github.com clones (see issue #550). `language: python`
+  # makes pre-commit build a per-hook virtualenv and `pip install` the
+  # pinned package; no image change or network to a VCS host is needed.
+  - repo: local
     hooks:
+      # Forbid UTF-8 replacement character.
+      # Mirrors https://github.com/pre-commit/pygrep-hooks's
+      # text-unicode-replacement-char hook. `pygrep` is built into
+      # pre-commit, so this needs no additional_dependencies.
+      - id: text-unicode-replacement-char
+        name: text-unicode-replacement-char
+        entry: "\uFFFD"
+        language: pygrep
+        types: [text]
+      - id: yamllint
+        name: yamllint
+        description: This hook runs yamllint.
+        entry: yamllint
+        language: python
+        additional_dependencies: ["yamllint==1.38.0"]
+        types: [file, yaml]
+        args: ["--strict", "-c", ".github/yamllint-config.yaml"]
+        exclude: |
+          (?x)^\.fullsend/config\.yaml$
+      # Note: lint/fix before format
+      - id: ruff-check
+        name: ruff-check
+        description: "Run 'ruff check' for extremely fast Python linting"
+        entry: ruff check --force-exclude
+        language: python
+        additional_dependencies: ["ruff==0.17.4"]
+        types_or: [python, pyi, jupyter]
+      # args: [ --fix ]
+      - id: ruff-format
+        name: ruff-format
+        description: "Run 'ruff format' for extremely fast Python formatting"
+        entry: ruff format --force-exclude
+        language: python
+        additional_dependencies: ["ruff==0.17.4"]
+        types_or: [python, pyi, jupyter, markdown]
+      - id: skillsaw
+        name: skillsaw
+        description: Lint agentic contextual building blocks (CLAUDE.md, skills, plugins, hooks, ...)
+        entry: skillsaw lint
+        language: python
+        additional_dependencies: ["skillsaw==0.23.0"]
+        pass_filenames: false
+        files: .
+      - id: shellcheck
+        name: shellcheck
+        description: Test shell scripts with shellcheck
+        entry: shellcheck
+        language: python
+        additional_dependencies: ["shellcheck-py==0.9.0.6"]
+        types: [shell]
+        require_serial: true  # shellcheck can detect sourcing this way
       # Prevent secrets from being committed
       - id: detect-secrets
+        name: Detect secrets
+        entry: detect-secrets-hook
+        language: python
+        additional_dependencies: ["detect-secrets==1.5.0"]
         args: ["--baseline", ".secrets.baseline"]
+        files: .*
         exclude: |
           (?x)^(
                 .fullsend/config\.yaml |
@@ -99,35 +136,37 @@ repos:
       # YAML normalization quotes scalar values before line filters run.
       - id: detect-secrets
         name: detect-secrets-change-set-records
+        entry: detect-secrets-hook
+        language: python
+        additional_dependencies: ["detect-secrets==1.5.0"]
         args:
           - "--baseline"
           - ".secrets.baseline"
           - "--exclude-lines"
           - '^(base_commit|impact_assessment_base_commit): "[0-9a-fA-F]{40}"$'
         files: ^\.protobot/change-sets/
-
-  - repo: https://gitlab.com/bmares/check-json5
-    rev: 82381b1133603e4ff6eb3d866ec4501d121b669b  # frozen: v1.0.1
-    hooks:
-      # Check that JSON files are valid JSON5
+      # Check that JSON files are valid JSON5. Uses
+      # https://github.com/simonvanlierde/check-json5, a maintained
+      # PyPI-published fork of https://gitlab.com/bmares/check-json5
+      # (which has no PyPI package of its own).
       - id: check-json5
-
-  - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: 06a39750ec31860bb44f2acf67182c40016cd1e7  # frozen: v1.32.0
-    hooks:
+        name: check json5
+        description: checks json files for syntax parsable as json5 (with comments).
+        entry: check-json5
+        language: python
+        additional_dependencies: ["json5==0.17.3", "check-json5==1.4.1"]
+        files: (\.(json|jsonc|json5|geojson|jsonld|hujson|jwcc|code-workspace|code-snippets|webmanifest)|(^|/)\.babelrc)$
+        types: [text]
       - id: zizmor
+        name: zizmor
+        description: "Find security issues in GitHub Actions CI/CD setups"
+        language: python
+        additional_dependencies: ["zizmor==1.32.0"]
+        types: [yaml]
+        files: (^|/)(\.github/(workflows/[^/]+|dependabot)\.ya?ml|action\.ya?ml|\.pre-commit-(config|hooks)\.ya?ml)$
+        require_serial: true
+        entry: zizmor
         args: ["--config", ".zizmor.yml"]
-
-  - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 44507b236cb9d68cfe3e94cc8b5840cfd5988318  # frozen: 44.221.1
-    hooks:
-      - id: renovate-config-validator
-
-  # Offline local checks so sandboxed agents catch formatting, vet,
-  # and skillsaw baseline-ceiling ratchet errors without network hook
-  # repositories.
-  - repo: local
-    hooks:
       - id: gofmt
         name: gofmt
         entry: python3 scripts/check_gofmt.py
