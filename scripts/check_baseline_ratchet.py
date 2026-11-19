@@ -430,12 +430,22 @@ def context_budget_category(
 ) -> str | None:
     """Return the skillsaw context-budget category for *file_path*.
 
-    Skillsaw categorizes files into standard categories:
-    * ``agents-md``: ``AGENTS.md``
+    These categorization rules match the specification and behavior of
+    skillsaw v0.23.0 (https://github.com/stbenjam/skillsaw), as configured in
+    ``.skillsaw.yaml`` and pinned in ``.pre-commit-config.yaml``.
+
+    Skillsaw categorizes files into standard context-budget categories:
+    * ``agents-md``: ``AGENTS.md`` files (root or subdirectories)
     * ``skill``: skill files (named ``SKILL.md`` or located under a ``skills`` directory)
-    * ``instruction``: general agent instruction files (e.g. ``CLAUDE.md``)
+    * ``instruction``: general agent instruction files (e.g. ``CLAUDE.md``,
+      ``COPILOT.md``, ``INSTRUCTIONS.md``, ``.cursorrules``, ``.windsurfrules``,
+      ``copilot-instructions.md``)
     * ``memory``: persistent memory files (e.g. ``MEMORY.md``)
-    * ``extra``: files explicitly listed in ``.skillsaw.yaml`` ``content-paths``
+    * ``extra``: files explicitly listed in ``.skillsaw.yaml`` ``content-paths``,
+      matched either by exact relative path or via glob patterns
+
+    Canonical category names passed directly as *file_path* pass through
+    unchanged.
 
     Returns the category string, or ``None`` if *file_path* does not belong
     to a recognized category.
@@ -471,13 +481,15 @@ def context_budget_category(
 def extract_warn_limit(entry: Any) -> int | float | None:
     """Extract a numeric warn limit from a skillsaw limit entry.
 
-    A limit entry in ``.skillsaw.yaml`` under
-    ``rules.context-budget.limits.<category>`` may be:
+    The schema rules match skillsaw v0.23.0
+    (https://github.com/stbenjam/skillsaw). A limit entry in ``.skillsaw.yaml``
+    under ``rules.context-budget.limits.<category>`` may be:
     * An integer or float (shorthand for a warn-only limit), e.g. ``4000``
     * A mapping with a ``warn`` key, e.g. ``{"warn": 4000}`` or
       ``{"warn": 4000, "error": 5000}``
-    * A mapping with a ``file`` key for whole-file limits, e.g.
-      ``{"file": 4000}`` or ``{"file": {"warn": 4000}}``
+    * A mapping with a ``file`` key for whole-file limits, supporting either:
+      - A bare numeric shorthand, e.g. ``{"file": 4000}``
+      - A nested mapping with a ``warn`` key, e.g. ``{"file": {"warn": 4000}}``
 
     Returns the numeric warn limit, or ``None`` if no numeric warn limit is
     configured.

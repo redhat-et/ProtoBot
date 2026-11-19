@@ -947,6 +947,48 @@ class CompareWarnLimitsTests(unittest.TestCase):
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual([], diagnostics)
 
+    def test_skill_category_whole_file_numeric_shorthand_limit_is_accepted(
+        self,
+    ) -> None:
+        """Accept a skill category limit using bare numeric whole-file shorthand."""
+        head_index = {(".agents/skills/helper/SKILL.md", "context-budget"): [3000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "skill": {
+                            "file": 3000,
+                        },
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_skill_category_whole_file_numeric_shorthand_limit_exceeding_ceiling_is_rejected(
+        self,
+    ) -> None:
+        """Reject a whole-file bare numeric limit when it exceeds the ceiling."""
+        head_index = {(".agents/skills/helper/SKILL.md", "context-budget"): [2800]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "skill": {
+                            "file": 3000,
+                        },
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn(
+            "context-budget warn limit for .agents/skills/helper/SKILL.md (3000) exceeds baseline ceiling (2800)",
+            diagnostics[0],
+        )
+
     def test_unknown_category_file_is_reported(self) -> None:
         """Report baseline ceiling whose file path does not belong to a recognized category."""
         head_index = {("unrecognized_file.xyz", "context-budget"): [500]}
@@ -1067,6 +1109,49 @@ class CompareWarnLimitsTests(unittest.TestCase):
         }
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual([], diagnostics)
+
+
+class ExtractWarnLimitTests(unittest.TestCase):
+    def test_bare_integer_and_float_shorthand(self) -> None:
+        """Extract numeric limit directly from integer and float shorthand values."""
+        self.assertEqual(4000, checker.extract_warn_limit(4000))
+        self.assertEqual(2500.5, checker.extract_warn_limit(2500.5))
+
+    def test_boolean_is_not_treated_as_numeric(self) -> None:
+        """Reject boolean values which are subclasses of int in Python."""
+        self.assertIsNone(checker.extract_warn_limit(True))
+        self.assertIsNone(checker.extract_warn_limit(False))
+        self.assertIsNone(checker.extract_warn_limit({"warn": True}))
+        self.assertIsNone(checker.extract_warn_limit({"file": True}))
+        self.assertIsNone(checker.extract_warn_limit({"file": {"warn": False}}))
+
+    def test_warn_mapping(self) -> None:
+        """Extract warn limit from mapping containing warn key."""
+        self.assertEqual(4000, checker.extract_warn_limit({"warn": 4000}))
+        self.assertEqual(
+            3500, checker.extract_warn_limit({"warn": 3500, "error": 4500})
+        )
+
+    def test_whole_file_bare_numeric_shorthand(self) -> None:
+        """Extract warn limit from file mapping with bare numeric shorthand."""
+        self.assertEqual(3000, checker.extract_warn_limit({"file": 3000}))
+        self.assertEqual(1500.0, checker.extract_warn_limit({"file": 1500.0}))
+
+    def test_whole_file_nested_warn_mapping(self) -> None:
+        """Extract warn limit from file mapping with nested warn key."""
+        self.assertEqual(
+            3000, checker.extract_warn_limit({"file": {"warn": 3000}})
+        )
+
+    def test_non_numeric_and_empty_entries_return_none(self) -> None:
+        """Return None for non-numeric, empty, or unparseable limit entries."""
+        self.assertIsNone(checker.extract_warn_limit(None))
+        self.assertIsNone(checker.extract_warn_limit("4000"))
+        self.assertIsNone(checker.extract_warn_limit([]))
+        self.assertIsNone(checker.extract_warn_limit({}))
+        self.assertIsNone(checker.extract_warn_limit({"file": "invalid"}))
+        self.assertIsNone(checker.extract_warn_limit({"file": {}}))
+        self.assertIsNone(checker.extract_warn_limit({"file": {"warn": None}}))
 
 
 class CheckRepoTests(unittest.TestCase):
