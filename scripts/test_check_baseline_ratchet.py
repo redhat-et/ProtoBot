@@ -679,7 +679,9 @@ class ContextBudgetCategoryTests(unittest.TestCase):
     def test_agents_md_categorization(self) -> None:
         """Categorize AGENTS.md as agents-md."""
         self.assertEqual("agents-md", checker.context_budget_category("AGENTS.md"))
-        self.assertEqual("agents-md", checker.context_budget_category("subdir/AGENTS.md"))
+        self.assertEqual(
+            "agents-md", checker.context_budget_category("subdir/AGENTS.md")
+        )
 
     def test_skill_categorization(self) -> None:
         """Categorize SKILL.md and paths under skills/ as skill."""
@@ -752,13 +754,17 @@ class ContextBudgetCategoryTests(unittest.TestCase):
         """Return None for files not matching any recognized category."""
         self.assertIsNone(checker.context_budget_category("random_file.py"))
         self.assertIsNone(checker.context_budget_category("README.md"))
-        self.assertIsNone(checker.context_budget_category("docs/vision.md", config=None))
+        self.assertIsNone(
+            checker.context_budget_category("docs/vision.md", config=None)
+        )
 
     def test_config_with_invalid_or_missing_content_paths(self) -> None:
         """Handle config missing content-paths or having non-string elements safely."""
         self.assertIsNone(checker.context_budget_category("docs/vision.md", config={}))
         self.assertIsNone(
-            checker.context_budget_category("docs/vision.md", config={"content-paths": None})
+            checker.context_budget_category(
+                "docs/vision.md", config={"content-paths": None}
+            )
         )
         self.assertIsNone(
             checker.context_budget_category(
@@ -1041,7 +1047,7 @@ class CompareWarnLimitsTests(unittest.TestCase):
                         "extra": {"warn": 3000},
                     }
                 }
-            }
+            },
         }
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual([], diagnostics)
@@ -1057,7 +1063,7 @@ class CompareWarnLimitsTests(unittest.TestCase):
                         "extra": 3000,
                     }
                 }
-            }
+            },
         }
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual([], diagnostics)
