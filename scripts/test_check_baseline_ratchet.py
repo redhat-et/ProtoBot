@@ -675,6 +675,98 @@ class CandidateRefTests(unittest.TestCase):
             self.assertEqual("origin/main", resolved)
 
 
+class ContextBudgetCategoryTests(unittest.TestCase):
+    def test_agents_md_categorization(self) -> None:
+        """Categorize AGENTS.md as agents-md."""
+        self.assertEqual("agents-md", checker.context_budget_category("AGENTS.md"))
+        self.assertEqual("agents-md", checker.context_budget_category("subdir/AGENTS.md"))
+
+    def test_skill_categorization(self) -> None:
+        """Categorize SKILL.md and paths under skills/ as skill."""
+        self.assertEqual("skill", checker.context_budget_category("SKILL.md"))
+        self.assertEqual(
+            "skill",
+            checker.context_budget_category(".agents/skills/my-skill/SKILL.md"),
+        )
+        self.assertEqual(
+            "skill",
+            checker.context_budget_category(".agents/skills/helper/reference.md"),
+        )
+
+    def test_instruction_categorization(self) -> None:
+        """Categorize instruction files including CLAUDE.md and COPILOT.md."""
+        for filename in (
+            "CLAUDE.md",
+            "COPILOT.md",
+            "INSTRUCTIONS.md",
+            ".cursorrules",
+            ".windsurfrules",
+            "copilot-instructions.md",
+        ):
+            with self.subTest(file=filename):
+                self.assertEqual(
+                    "instruction", checker.context_budget_category(filename)
+                )
+                self.assertEqual(
+                    "instruction",
+                    checker.context_budget_category(f"nested/dir/{filename}"),
+                )
+
+    def test_memory_categorization(self) -> None:
+        """Categorize MEMORY.md as memory."""
+        self.assertEqual("memory", checker.context_budget_category("MEMORY.md"))
+        self.assertEqual(
+            "memory", checker.context_budget_category(".claude/memory/MEMORY.md")
+        )
+
+    def test_extra_categorization_with_exact_path(self) -> None:
+        """Categorize files listed in .skillsaw.yaml content-paths as extra."""
+        config = {"content-paths": ["docs/vision.md", "docs/architecture.md"]}
+        self.assertEqual(
+            "extra", checker.context_budget_category("docs/vision.md", config)
+        )
+        self.assertEqual(
+            "extra", checker.context_budget_category("docs/architecture.md", config)
+        )
+        self.assertIsNone(checker.context_budget_category("docs/other.md", config))
+
+    def test_extra_categorization_with_glob_pattern(self) -> None:
+        """Categorize files matching .skillsaw.yaml content-paths glob patterns as extra."""
+        config = {"content-paths": ["docs/*.md", "specs/*.txt"]}
+        self.assertEqual(
+            "extra", checker.context_budget_category("docs/vision.md", config)
+        )
+        self.assertEqual(
+            "extra",
+            checker.context_budget_category("specs/spec.txt", config),
+        )
+        self.assertIsNone(checker.context_budget_category("other/file.md", config))
+
+    def test_canonical_category_names_pass_through(self) -> None:
+        """Pass through canonical category names unchanged."""
+        for category in ("agents-md", "skill", "instruction", "memory", "extra"):
+            with self.subTest(category=category):
+                self.assertEqual(category, checker.context_budget_category(category))
+
+    def test_unrecognized_file_returns_none(self) -> None:
+        """Return None for files not matching any recognized category."""
+        self.assertIsNone(checker.context_budget_category("random_file.py"))
+        self.assertIsNone(checker.context_budget_category("README.md"))
+        self.assertIsNone(checker.context_budget_category("docs/vision.md", config=None))
+
+    def test_config_with_invalid_or_missing_content_paths(self) -> None:
+        """Handle config missing content-paths or having non-string elements safely."""
+        self.assertIsNone(checker.context_budget_category("docs/vision.md", config={}))
+        self.assertIsNone(
+            checker.context_budget_category("docs/vision.md", config={"content-paths": None})
+        )
+        self.assertIsNone(
+            checker.context_budget_category(
+                "docs/vision.md", config={"content-paths": [123, None]}
+            )
+        )
+
+
 class CompareWarnLimitsTests(unittest.TestCase):
     def test_missing_limits_entry_is_rejected(self) -> None:
         """Reject context-budget ceiling with no corresponding .skillsaw.yaml limits entry."""
@@ -886,6 +978,87 @@ class CompareWarnLimitsTests(unittest.TestCase):
         """Ignore ceiling entries that do not belong to context-budget."""
         head_index = {("docs/architecture.md", "content-section-length"): [500]}
         config = {"rules": {"context-budget": {"limits": {}}}}
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_instruction_category_ceiling_with_mapping_is_accepted(self) -> None:
+        """Accept an instruction category ceiling validated against limits.instruction mapping."""
+        head_index = {("CLAUDE.md", "context-budget"): [5000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "instruction": {"warn": 5000},
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_instruction_category_ceiling_exceeding_ceiling_is_rejected(self) -> None:
+        """Reject an instruction category ceiling when limits.instruction exceeds ceiling."""
+        head_index = {("CLAUDE.md", "context-budget"): [4500]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "instruction": 5000,
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn(
+            "context-budget warn limit for CLAUDE.md (5000) exceeds baseline ceiling (4500)",
+            diagnostics[0],
+        )
+
+    def test_memory_category_ceiling_with_mapping_is_accepted(self) -> None:
+        """Accept a memory category ceiling validated against limits.memory."""
+        head_index = {("MEMORY.md", "context-budget"): [2000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "memory": {"warn": 2000},
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_extra_category_ceiling_with_content_paths_is_accepted(self) -> None:
+        """Accept an extra category ceiling matched via .skillsaw.yaml content-paths."""
+        head_index = {("docs/vision.md", "context-budget"): [3000]}
+        config = {
+            "content-paths": ["docs/vision.md"],
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "extra": {"warn": 3000},
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_extra_category_ceiling_with_glob_content_paths_is_accepted(self) -> None:
+        """Accept an extra category ceiling matched via .skillsaw.yaml content-paths glob."""
+        head_index = {("docs/rfcs/0001.md", "context-budget"): [3000]}
+        config = {
+            "content-paths": ["docs/rfcs/*.md"],
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "extra": 3000,
+                    }
+                }
+            }
+        }
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual([], diagnostics)
 

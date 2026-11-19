@@ -57,7 +57,6 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_RELATIVE_PATH = ".skillsaw-baseline.json"
 SKILLSAW_CONFIG_RELATIVE_PATH = ".skillsaw.yaml"
-_LIMIT_KEY_UNSAFE = re.compile(r"[^a-z0-9]+")
 DEFAULT_BASE_REF_CANDIDATES = (
     "upstream/main",
     "origin/main",
@@ -467,16 +466,6 @@ def context_budget_category(
     if file_path in ("agents-md", "skill", "instruction", "memory", "extra"):
         return file_path
     return None
-
-
-def context_budget_limit_key(file_path: str) -> str:
-    """Return the context-budget category key for *file_path*.
-
-    .. deprecated::
-        Use :func:`context_budget_category` instead.
-    """
-    category = context_budget_category(file_path)
-    return category if category is not None else file_path.lower()
 
 
 def extract_warn_limit(entry: Any) -> int | float | None:
