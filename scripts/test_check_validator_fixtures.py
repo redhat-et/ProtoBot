@@ -582,8 +582,12 @@ class FormatViolationsTests(unittest.TestCase):
         )
         lines = checker.format_violations([doc_violation, iface_violation], [])
         self.assertEqual(2, len(lines))
-        self.assertIn("prohibited layout.Document[records.Requirement]{} literal", lines[0])
-        self.assertIn("prohibited layout.Document[records.InterfaceRecord]{} literal", lines[1])
+        self.assertIn(
+            "prohibited layout.Document[records.Requirement]{} literal", lines[0]
+        )
+        self.assertIn(
+            "prohibited layout.Document[records.InterfaceRecord]{} literal", lines[1]
+        )
 
 
 class CheckAndMainTests(unittest.TestCase):
