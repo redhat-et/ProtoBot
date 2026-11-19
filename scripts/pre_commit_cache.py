@@ -79,10 +79,6 @@ PRECOMMIT_VERSION = "4.5.1"
 # built for this version or the sandbox cannot run them.
 SANDBOX_PYTHON_VERSION = "3.12"
 
-# ``repo*/py_env-pythonX.Y`` directories hold one virtualenv per Python
-# hook environment, named after the interpreter that built it.
-_PY_ENV_NAME = re.compile(r"^py_env-python(?P<version>[0-9]+\.[0-9]+)$")
-
 DEFAULT_CACHE_HOME = "/sandbox/.cache/pre-commit"
 DEFAULT_TARBALL = "/tmp/workspace/pre-commit-cache.tar.gz"
 
@@ -420,25 +416,79 @@ def _ensure_cache_home(cache_home: Path) -> None:
         )
 
 
+def _read_pyvenv_cfg(env_dir: Path) -> dict[str, str]:
+    """Parse the ``key = value`` lines of a virtualenv's ``pyvenv.cfg``."""
+    content = env_dir.joinpath("pyvenv.cfg").read_text(encoding="utf-8")
+    values: dict[str, str] = {}
+    for line in content.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip()] = value.strip()
+    return values
+
+
+def _python_env_rejection(env_dir: Path, sandbox_python: str) -> str | None:
+    """Return why *env_dir* cannot run in the sandbox, or None when it can.
+
+    pre-commit's own health check reads the same ``pyvenv.cfg`` fields:
+    ``version_info`` (for example ``3.12.3.final.0``) names the
+    interpreter the environment was built for, and ``base-executable``
+    names the interpreter it embeds.
+    """
+    try:
+        values = _read_pyvenv_cfg(env_dir)
+    except OSError:
+        return "pyvenv.cfg is missing or unreadable"
+    version_info = values.get("version_info")
+    if not version_info:
+        return "pyvenv.cfg has no version_info"
+    parts = version_info.split(".")
+    if len(parts) < 2 or f"{parts[0]}.{parts[1]}" != sandbox_python:
+        return f"version_info {version_info} is not Python {sandbox_python}"
+    base_executable = values.get("base-executable")
+    if base_executable:
+        executable = Path(base_executable)
+        allowed_names = {"python3", f"python{sandbox_python}"}
+        if (
+            not executable.is_absolute()
+            or executable.parent != Path("/usr/bin")
+            or executable.name not in allowed_names
+        ):
+            return (
+                f"base-executable {base_executable} is not /usr/bin/python3 "
+                f"or /usr/bin/python{sandbox_python}"
+            )
+    return None
+
+
 def _verify_python_envs(cache_home: Path, sandbox_python: str) -> None:
     """Refuse a cache whose python hook environments use another interpreter.
 
-    Python hook environments embed the interpreter's path, so a cache
-    built for another interpreter cannot run in the sandbox. Node
-    environments are not checked: they bundle their own node binary or
-    use the sandbox PATH, so they are portable.
+    Every ``py_env`` or ``py_env-*`` directory under a repository
+    directory is checked by its ``pyvenv.cfg`` metadata, not by its
+    name: pre-commit names the directory after the hook's effective
+    ``language_version``, so names such as ``py_env-python3``,
+    ``py_env-default``, or plain ``py_env`` carry no interpreter
+    information. Node environments are not checked: they bundle their
+    own node binary or use the sandbox PATH, so they are portable.
     """
-    found = {
-        match.group("version")
-        for entry in cache_home.glob("*/py_env-python*")
-        if (match := _PY_ENV_NAME.match(entry.name))
-    }
-    others = sorted(found - {sandbox_python})
-    if others:
-        listing = ", ".join(f"py_env-python{version}" for version in others)
+    rejected: list[str] = []
+    for repo_dir in sorted(cache_home.iterdir()):
+        if not repo_dir.is_dir():
+            continue
+        for env_dir in sorted(repo_dir.iterdir()):
+            if not env_dir.is_dir():
+                continue
+            if env_dir.name != "py_env" and not env_dir.name.startswith("py_env-"):
+                continue
+            reason = _python_env_rejection(env_dir, sandbox_python)
+            if reason:
+                rejected.append(f"{env_dir.relative_to(cache_home)}: {reason}")
+    if rejected:
+        listing = "; ".join(rejected)
         raise RuntimeError(
-            f"the cache holds python hook environments for {listing}, but the "
-            f"sandbox uses Python {sandbox_python}; no archive was written. "
+            f"python hook environments do not match the sandbox interpreter "
+            f"Python {sandbox_python} ({listing}); no archive was written. "
             f"Pass --sandbox-python <X.Y> to override when building locally."
         )
 
@@ -564,20 +614,32 @@ def main(argv: list[str] | None = None) -> int:
     except (RuntimeError, OSError, subprocess.SubprocessError) as error:
         # Fail-soft: a bootstrap failure must not block the agent run.
         # scripts/lint.py still reports its actionable cache-miss error.
-        # A failed run must leave no archive at the advertised path.
+        # A failed run must leave no archive at the advertised path: the
+        # sandbox would restore a stale one and trust its contents.
         _remove_file(Path(args.tarball))
-        manual = (
-            f"PRE_COMMIT_HOME={args.cache_home} "
-            f"pre-commit install-hooks --config {_target_repo() / '.pre-commit-config.yaml'}"
-        )
         message = (
-            f"pre-commit cache bootstrap failed: {error}. Warm it manually: {manual}"
+            f"pre-commit cache bootstrap failed: {error}. "
+            f"Warm it manually: PRE_COMMIT_HOME={args.cache_home} "
+            f"pre-commit install-hooks --config "
+            f"{_target_repo() / '.pre-commit-config.yaml'}"
         )
-        # One sanitized workflow command, then the unsanitized detail so
-        # the diagnostic survives.
+        if Path(args.tarball).exists():
+            print(
+                "::error::"
+                + _sanitize_workflow_command(
+                    f"the stale archive {args.tarball} could not be removed; "
+                    f"stopping the run so the sandbox cannot restore it"
+                )
+            )
+            for line in message.splitlines():
+                print(f"| {_sanitize_workflow_command(line)}")
+            return 1
+        # One sanitized workflow command, then the detail lines. The
+        # ``| `` prefix starts each line with a non-whitespace character,
+        # so a runner cannot parse the detail as a workflow command.
         print(f"::warning::{_sanitize_workflow_command(message)}")
         for line in message.splitlines():
-            print(f"  {line}")
+            print(f"| {_sanitize_workflow_command(line)}")
     return 0
 
 

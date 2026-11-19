@@ -410,23 +410,6 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertNotIn("Restored", stdout.getvalue())
         self.assertTrue(self.tarball.exists())
 
-    def test_restore_that_does_not_fix_the_cache_keeps_the_tarball(self) -> None:
-        # The tarball restores but holds none of the configured rows, so
-        # the pre-flight still fails and the tarball must be kept.
-        self._build_tarball([("https://example.invalid/other", "zzzz")])
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with (
-            contextlib.redirect_stdout(stdout),
-            contextlib.redirect_stderr(stderr),
-        ):
-            rc = checker._preflight_with_restore(
-                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
-            )
-        self.assertEqual(1, rc)
-        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
-        self.assertIn("missing 2 hook repository revisions", stderr.getvalue())
-        self.assertTrue(self.tarball.exists())
-
     def test_hardlink_with_escaping_target_is_skipped(self) -> None:
         # A hard link whose target escapes the destination is not checked
         # by the tar filter. Extracted, a later regular file of the same
@@ -456,6 +439,133 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("skipped 1 tarball member(s)", stderr.getvalue())
         self.assertNotIn("Restored", stdout.getvalue())
         self.assertTrue(self.tarball.exists())
+
+    def test_archive_missing_a_configured_revision_is_not_promoted(self) -> None:
+        # The archive holds a row the config does not need and lacks the
+        # rows it does need; nothing may be promoted.
+        self._build_tarball([("https://example.invalid/other", "zzzz")])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("does not cover every configured", message)
+        self.assertIn("https://example.invalid/foo @ aaaa", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        # No partial cache was published and no staging directory leaked.
+        self.assertFalse((self.home / "db.db").exists())
+        self.assertEqual([], list(self.root.glob(f".{self.home.name}.restore-*")))
+
+    def test_archive_dropping_a_live_revision_is_not_promoted(self) -> None:
+        # The live cache holds a revision the archive lacks; promotion
+        # would drop it, so the live cache must stay.
+        _make_db(
+            self.home / "db.db",
+            [
+                ("https://example.invalid/foo", "aaaa"),
+                ("https://example.invalid/extra", "eeee"),
+            ],
+        )
+        self._build_tarball(self._config_rows())
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("would drop cached revisions", message)
+        self.assertIn("https://example.invalid/extra @ eeee", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        # The live cache still holds both of its revisions.
+        self.assertEqual(
+            {
+                ("https://example.invalid/foo", "aaaa"),
+                ("https://example.invalid/extra", "eeee"),
+            },
+            checker._cached_repos(self.home),
+        )
+        self.assertEqual([], list(self.root.glob(f".{self.home.name}.restore-*")))
+
+    def test_complete_archive_is_promoted_over_a_partial_live_cache(self) -> None:
+        _make_db(self.home / "db.db", [("https://example.invalid/foo", "aaaa")])
+        self._build_tarball(self._config_rows())
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertEqual(set(self._config_rows()), checker._cached_repos(self.home))
+        self.assertFalse(self.tarball.exists())
+
+    def test_symlink_cycle_does_not_crash_or_escape(self) -> None:
+        # Python 3.12 raises RuntimeError from Path.resolve on a symlink
+        # cycle; the filter must reject such members instead of letting
+        # the error escape _restore_cache. On newer Pythons the cycle
+        # resolves inside the destination and is harmless.
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            first = tarfile.TarInfo("dir/loop-a")
+            first.type = tarfile.SYMTYPE
+            first.linkname = "loop-b"
+            tar.addfile(first)
+            second = tarfile.TarInfo("dir/loop-b")
+            second.type = tarfile.SYMTYPE
+            second.linkname = "loop-a"
+            tar.addfile(second)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        try:
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        except (RuntimeError, OSError) as error:
+            self.fail(f"the symlink cycle escaped the restore: {error!r}")
+        # Nothing landed outside the cache home.
+        self.assertFalse((self.root / "loop-a").exists())
+        self.assertFalse((self.root / "loop-b").exists())
+
+    def test_unresolvable_member_path_is_rejected(self) -> None:
+        # Simulates Python 3.12, where Path.resolve raises RuntimeError
+        # for a symlink cycle: the member must count as rejected.
+        self._build_tarball(self._config_rows())
+        original_resolve = Path.resolve
+
+        def resolve_raising_on_cycle(path):
+            if path.name == "db.db":
+                raise RuntimeError("Symlink loop")
+            return original_resolve(path)
+
+        with patch.object(
+            Path, "resolve", side_effect=resolve_raising_on_cycle, autospec=True
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(1, rc)
+        self.assertIn("skipped 1 tarball member(s)", stderr.getvalue())
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
 
     def test_size_cap_after_db_leaves_no_readable_db(self) -> None:
         # db.db must not survive a size-capped extraction: a later run
@@ -559,6 +669,69 @@ class PreflightRestoreTests(unittest.TestCase):
             "Restored the offline pre-commit cache",
             raw.getvalue().decode("utf-8"),
         )
+
+
+class SwapCacheHomeTests(unittest.TestCase):
+    """A failed promotion keeps the live cache."""
+
+    def setUp(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.root = Path(temporary_directory.name)
+        self.home = self.root / "cache"
+
+    def _seed_live_cache(self) -> None:
+        _make_db(self.home / "db.db", [("https://example.invalid/foo", "aaaa")])
+
+    def test_missing_staging_refuses_and_keeps_the_live_cache(self) -> None:
+        # An empty archive never creates the staging directory; the swap
+        # must refuse before touching the live cache.
+        self._seed_live_cache()
+        staging = self.root / ".cache.restore-test"
+        with self.assertRaises(OSError):
+            checker._swap_cache_home(staging, self.home)
+        self.assertEqual(
+            {("https://example.invalid/foo", "aaaa")},
+            checker._cached_repos(self.home),
+        )
+        self.assertEqual([], list(self.root.glob(f".{self.home.name}.backup-*")))
+
+    def test_failed_replace_restores_the_live_cache(self) -> None:
+        self._seed_live_cache()
+        staging = self.root / "staging"
+        staging.mkdir()
+        (staging / "marker").write_text("staged", encoding="utf-8")
+        original_replace = os.replace
+        calls = {"count": 0}
+
+        def replace_failing_on_promotion(source, destination):
+            calls["count"] += 1
+            if calls["count"] == 2:
+                raise OSError("promotion failed")
+            return original_replace(source, destination)
+
+        with (
+            patch("os.replace", side_effect=replace_failing_on_promotion),
+            self.assertRaises(OSError),
+        ):
+            checker._swap_cache_home(staging, self.home)
+        # The live cache is back in place with its revision.
+        self.assertEqual(
+            {("https://example.invalid/foo", "aaaa")},
+            checker._cached_repos(self.home),
+        )
+        self.assertEqual([], list(self.root.glob(f".{self.home.name}.backup-*")))
+
+    def test_successful_promotion_removes_the_backup(self) -> None:
+        self._seed_live_cache()
+        staging = self.root / "staging"
+        _make_db(staging / "db.db", [("https://example.invalid/bar", "bbbb")])
+        checker._swap_cache_home(staging, self.home)
+        self.assertEqual(
+            {("https://example.invalid/bar", "bbbb")},
+            checker._cached_repos(self.home),
+        )
+        self.assertEqual([], list(self.root.glob(f".{self.home.name}.backup-*")))
 
 
 class ChangedFilesTests(unittest.TestCase):

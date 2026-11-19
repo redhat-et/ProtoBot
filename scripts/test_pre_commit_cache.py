@@ -78,6 +78,16 @@ class _FakeResponse:
 class SkipUpstreamTests(unittest.TestCase):
     """``--skip-upstream`` runs the warm phase without any download."""
 
+    def setUp(self) -> None:
+        # Pin TAR and clear the interpreter override so a developer's
+        # environment cannot change what these tests exercise.
+        env = dict(os.environ)
+        env.pop("PROTOBOT_SANDBOX_PYTHON_VERSION", None)
+        env["TAR"] = "tar"
+        patcher = patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_skip_upstream_never_downloads(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
@@ -218,6 +228,16 @@ class UpstreamDelegationTests(unittest.TestCase):
 
 class WarmPhaseTests(unittest.TestCase):
     """The warm phase is fail-soft and owns the tarball layout."""
+
+    def setUp(self) -> None:
+        # Pin TAR and clear the interpreter override so a developer's
+        # environment cannot change what these tests exercise.
+        env = dict(os.environ)
+        env.pop("PROTOBOT_SANDBOX_PYTHON_VERSION", None)
+        env["TAR"] = "tar"
+        patcher = patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_warm_failure_warns_and_returns_zero(self) -> None:
         failure = RuntimeError("pre-commit install-hooks failed (exit 1)\nBuild failed")
@@ -363,51 +383,114 @@ class WarmPhaseTests(unittest.TestCase):
 class PythonEnvironmentTests(unittest.TestCase):
     """The cache must match the sandbox interpreter before it publishes."""
 
+    def setUp(self) -> None:
+        # Pin TAR and clear the interpreter override so a developer's
+        # environment cannot change what these tests exercise.
+        env = dict(os.environ)
+        env.pop("PROTOBOT_SANDBOX_PYTHON_VERSION", None)
+        env["TAR"] = "tar"
+        patcher = patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _temporary_root(self) -> Path:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         return Path(temporary_directory.name)
 
-    def _make_env(self, cache_home: Path, name: str) -> None:
-        (cache_home / "repodir" / name).mkdir(parents=True, exist_ok=True)
+    def _make_py_env(
+        self,
+        cache_home: Path,
+        name: str,
+        *,
+        repo: str = "repodir",
+        version_info: str = "3.12.4.final.0",
+        base_executable: str | None = "/usr/bin/python3",
+    ) -> Path:
+        env_dir = cache_home / repo / name
+        env_dir.mkdir(parents=True, exist_ok=True)
+        lines = [f"version_info = {version_info}"]
+        if base_executable is not None:
+            lines.append(f"base-executable = {base_executable}")
+        (env_dir / "pyvenv.cfg").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return env_dir
 
-    def test_matching_version_publishes_the_archive(self) -> None:
+    def test_matching_metadata_publishes_the_archive(self) -> None:
         root = self._temporary_root()
         cache_home = root / "cache"
         tarball = root / "pc.tar.gz"
-        self._make_env(cache_home, "py_env-python3.12")
+        # The directory name carries no interpreter information.
+        self._make_py_env(cache_home, "py_env-python3")
         with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
             bootstrap._warm_cache(cache_home, tarball, "3.12")
         self.assertTrue(tarball.is_file())
 
-    def test_mismatched_version_raises_and_writes_no_archive(self) -> None:
+    def test_matching_name_with_mismatched_metadata_rejects(self) -> None:
         root = self._temporary_root()
         cache_home = root / "cache"
         tarball = root / "pc.tar.gz"
-        self._make_env(cache_home, "py_env-python3.11")
+        self._make_py_env(
+            cache_home, "py_env-python3.12", version_info="3.11.9.final.0"
+        )
         with (
             patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds) as run,
             self.assertRaises(RuntimeError) as ctx,
         ):
             bootstrap._warm_cache(cache_home, tarball, "3.12")
         message = str(ctx.exception)
-        self.assertIn("py_env-python3.11", message)
+        self.assertIn("version_info 3.11.9.final.0", message)
         self.assertIn("Python 3.12", message)
         self.assertIn("--sandbox-python", message)
         self.assertFalse(tarball.exists())
         # The archive step was never reached.
         self.assertFalse(any(call.args[0][0] == "tar" for call in run.call_args_list))
 
-    def test_scan_ignores_non_python_environments(self) -> None:
+    def test_unrecognized_name_with_matching_metadata_passes(self) -> None:
         root = self._temporary_root()
         cache_home = root / "cache"
         tarball = root / "pc.tar.gz"
-        for name in (
-            "py_env-python3.12",
-            "node_env-default",
-            "py_env-python",  # no version suffix: not a python env name
+        self._make_py_env(cache_home, "py_env-default")
+        (cache_home / "repodir" / "node_env-default").mkdir(parents=True)
+        with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertTrue(tarball.is_file())
+
+    def test_missing_pyvenv_cfg_rejects(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        env_dir = cache_home / "repodir" / "py_env"
+        env_dir.mkdir(parents=True)
+        with (
+            patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds),
+            self.assertRaises(RuntimeError) as ctx,
         ):
-            self._make_env(cache_home, name)
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertIn("pyvenv.cfg is missing or unreadable", str(ctx.exception))
+        self.assertFalse(tarball.exists())
+
+    def test_base_executable_outside_usr_bin_rejects(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_py_env(
+            cache_home, "py_env-python3", base_executable="/usr/local/bin/python3"
+        )
+        with (
+            patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertIn("base-executable /usr/local/bin/python3", str(ctx.exception))
+        self.assertFalse(tarball.exists())
+
+    def test_versioned_base_executable_is_allowed(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_py_env(
+            cache_home, "py_env-python3", base_executable="/usr/bin/python3.12"
+        )
         with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
             bootstrap._warm_cache(cache_home, tarball, "3.12")
         self.assertTrue(tarball.is_file())
@@ -416,7 +499,7 @@ class PythonEnvironmentTests(unittest.TestCase):
         root = self._temporary_root()
         cache_home = root / "cache"
         tarball = root / "pc.tar.gz"
-        self._make_env(cache_home, "py_env-python3.14")
+        self._make_py_env(cache_home, "py_env-python3", version_info="3.14.3.final.0")
         with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
             rc = bootstrap.main(
                 [
@@ -438,7 +521,7 @@ class PythonEnvironmentTests(unittest.TestCase):
         root = self._temporary_root()
         cache_home = root / "cache"
         tarball = root / "pc.tar.gz"
-        self._make_env(cache_home, "py_env-python3.14")
+        self._make_py_env(cache_home, "py_env-python3", version_info="3.14.3.final.0")
         with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -455,14 +538,19 @@ class PythonEnvironmentTests(unittest.TestCase):
                 )
         self.assertEqual(0, rc)
         self.assertIn("::warning::", stdout.getvalue())
-        self.assertIn("py_env-python3.14", stdout.getvalue())
+        self.assertIn("version_info 3.14.3.final.0", stdout.getvalue())
         self.assertFalse(tarball.exists())
 
-    def test_sandbox_python_defaults(self) -> None:
-        self.assertEqual(
-            bootstrap.SANDBOX_PYTHON_VERSION,
-            bootstrap._parse_args(["--upstream", "code"]).sandbox_python,
-        )
+    def test_sandbox_python_defaults_to_the_builtin(self) -> None:
+        env = dict(os.environ)
+        env.pop("PROTOBOT_SANDBOX_PYTHON_VERSION", None)
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(
+                bootstrap.SANDBOX_PYTHON_VERSION,
+                bootstrap._parse_args(["--upstream", "code"]).sandbox_python,
+            )
+
+    def test_sandbox_python_environment_override(self) -> None:
         with patch.dict(
             os.environ,
             {"PROTOBOT_SANDBOX_PYTHON_VERSION": "3.13"},
@@ -538,7 +626,7 @@ class WorkflowCommandTests(unittest.TestCase):
         clean = bootstrap._sanitize_workflow_command("x" * 600)
         self.assertLessEqual(len(clean), bootstrap._WORKFLOW_COMMAND_CAP)
 
-    def test_fail_soft_warning_is_sanitized_with_plain_detail(self) -> None:
+    def test_fail_soft_warning_is_sanitized_with_inert_detail(self) -> None:
         failure = RuntimeError("boom\nsecond line ::error:: 100% done")
         with (
             patch.object(bootstrap, "_run_upstream_script", return_value=0),
@@ -555,13 +643,35 @@ class WorkflowCommandTests(unittest.TestCase):
         self.assertEqual(1, len(warning_lines))
         self.assertIn("100%25", warning_lines[0])
         self.assertNotIn("%", warning_lines[0].replace("%25", ""))
-        # The unsanitized detail survives as indented plain lines.
-        self.assertIn("  pre-commit cache bootstrap failed: boom", output)
-        self.assertIn("  second line ::error:: 100% done", output)
+        # Each detail line starts with the non-whitespace ``| `` marker,
+        # so a runner cannot parse it as a workflow command, and percent
+        # is escaped.
+        detail_lines = [line for line in output.splitlines() if line.startswith("| ")]
+        self.assertTrue(any("::error::" in line for line in detail_lines), output)
+        for line in detail_lines:
+            self.assertNotIn("%", line.replace("%25", ""))
+
+    def test_stale_archive_that_survives_removal_fails_the_run(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        tarball = Path(temporary_directory.name) / "pc.tar.gz"
+        tarball.write_bytes(b"stale")
+        with (
+            patch.object(bootstrap, "_run_upstream_script", return_value=0),
+            patch.object(bootstrap, "_warm_cache", side_effect=RuntimeError("boom")),
+            patch.object(Path, "unlink", side_effect=PermissionError("read-only")),
+        ):
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = bootstrap.main(["--upstream", "code", "--tarball", str(tarball)])
+        self.assertEqual(1, rc)
+        output = stdout.getvalue()
+        self.assertIn("::error::", output)
+        self.assertIn(str(tarball), output)
 
 
 class ResolvePreCommitTests(unittest.TestCase):
-    def test_reinstalls_when_the_found_binary_reports_a_different_version(self):
+    def test_reinstalls_when_the_found_binary_reports_a_different_version(self) -> None:
         installed = {"done": False}
 
         def fake_run(argv, *, env=None, timeout=None, capture=False, cwd=None):

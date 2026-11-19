@@ -255,8 +255,10 @@ class _MemberFilter:
     every rejection in ``skipped_members``. A hard link member is also
     rejected when its target resolves outside the destination: the
     ``tar`` filter does not check link targets, and a hard link followed
-    by a regular file of the same name would write through it. Stops
-    yielding once the extracted bytes would exceed
+    by a regular file of the same name would write through it. A path
+    whose ``Path.resolve`` fails (``OSError``, or ``RuntimeError`` for a
+    symlink cycle on Python 3.12) is rejected with the member that
+    produced it. Stops yielding once the extracted bytes would exceed
     ``_MAX_EXTRACTED_BYTES`` and records that in ``size_capped``. The
     check runs lazily, one member at a time, so it also sees links that
     earlier members of the same archive created. It is the safety net
@@ -273,6 +275,18 @@ class _MemberFilter:
         self.extracted_bytes = 0
         self.size_capped = False
 
+    def _resolve_or_none(self, path: Path) -> Path | None:
+        """Resolve *path*, returning None when the resolution fails.
+
+        ``Path.resolve`` raises ``OSError`` and, on Python 3.12,
+        ``RuntimeError`` for a symlink cycle. An unresolvable path cannot
+        be verified, so the member that produced it is rejected.
+        """
+        try:
+            return path.resolve()
+        except (OSError, RuntimeError):
+            return None
+
     def _inside_destination(self, candidate: Path, resolved_destination: Path) -> bool:
         return (
             candidate == resolved_destination
@@ -280,7 +294,13 @@ class _MemberFilter:
         )
 
     def __iter__(self) -> Iterator[tarfile.TarInfo]:
-        resolved_destination = self._destination.resolve()
+        resolved_destination = self._resolve_or_none(self._destination)
+        if resolved_destination is None:
+            # The destination itself cannot be resolved; nothing can be
+            # verified, so every member is rejected.
+            for member in self._tar:
+                self.skipped_members += 1
+            return
         for member in self._tar:
             if not (
                 member.isfile() or member.isdir() or member.issym() or member.islnk()
@@ -290,12 +310,16 @@ class _MemberFilter:
             if member.islnk():
                 # Hard link targets are archive-root relative and are not
                 # checked by the ``tar`` filter.
-                target = (self._destination / member.linkname).resolve()
-                if not self._inside_destination(target, resolved_destination):
+                target = self._resolve_or_none(self._destination / member.linkname)
+                if target is None or not self._inside_destination(
+                    target, resolved_destination
+                ):
                     self.skipped_members += 1
                     continue
-            candidate = (self._destination / member.name).resolve()
-            if not self._inside_destination(candidate, resolved_destination):
+            candidate = self._resolve_or_none(self._destination / member.name)
+            if candidate is None or not self._inside_destination(
+                candidate, resolved_destination
+            ):
                 self.skipped_members += 1
                 continue
             if self.extracted_bytes + member.size > _MAX_EXTRACTED_BYTES:
@@ -360,24 +384,44 @@ def _remove_quietly(path: Path) -> None:
 
 
 def _swap_cache_home(staging: Path, pre_commit_home: Path) -> None:
-    """Move the staged cache into place as *pre_commit_home*."""
-    if pre_commit_home.is_symlink() or (
-        pre_commit_home.exists() and not pre_commit_home.is_dir()
-    ):
-        pre_commit_home.unlink()
-    elif pre_commit_home.is_dir():
-        shutil.rmtree(pre_commit_home)
-    os.replace(staging, pre_commit_home)
+    """Promote the staged cache, keeping the live cache on failure.
+
+    The live cache moves aside first, so a failed promotion can move it
+    back instead of losing it. The backup is removed only after the
+    staged cache is in place.
+    """
+    if not staging.is_dir():
+        raise OSError(f"the staged cache {staging} is not a directory")
+    backup = pre_commit_home.parent / f".{pre_commit_home.name}.backup-{os.getpid()}"
+    _remove_quietly(backup)
+    moved_aside = False
+    if pre_commit_home.exists() or pre_commit_home.is_symlink():
+        os.replace(pre_commit_home, backup)
+        moved_aside = True
+    try:
+        os.replace(staging, pre_commit_home)
+    except OSError:
+        if moved_aside:
+            os.replace(backup, pre_commit_home)
+        raise
+    if moved_aside:
+        _remove_quietly(backup)
 
 
-def _restore_cache(pre_commit_home: Path) -> bool:
+def _format_revisions(revisions: set[tuple[str, str]]) -> str:
+    return ", ".join(f"{repo} @ {rev}" for repo, rev in sorted(revisions))
+
+
+def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> bool:
     """Restore ``PRE_COMMIT_HOME`` from the bootstrap tarball, if present.
 
     Extraction goes to a staging directory beside ``pre_commit_home``,
-    and only a complete extraction is swapped in. A partial cache must
-    never publish a ``db.db`` that lists revisions whose files are
-    missing; a failed restore leaves ``pre_commit_home`` untouched so a
-    later run retries. The tarball itself is left in place;
+    and only an extraction that covers every revision in *required* is
+    promoted, and only when promotion would not drop revisions that the
+    live cache already holds. A partial cache must never publish a
+    ``db.db`` that lists revisions whose files are missing; a failed
+    restore leaves ``pre_commit_home`` untouched so a later run
+    retries. The tarball itself is left in place;
     ``_preflight_with_restore`` deletes it only after the restored
     cache passes the pre-flight. A corrupt or unreadable tarball only
     warns; the pre-flight then reports its usual missing-revision
@@ -405,6 +449,26 @@ def _restore_cache(pre_commit_home: Path) -> bool:
                 file=sys.stderr,
             )
         if members.skipped_members or members.size_capped:
+            return False
+        staged = _cached_repos(staging)
+        if not required <= staged:
+            print(
+                f"WARNING: the archive {tarball} does not cover every "
+                f"configured hook repository revision "
+                f"({_format_revisions(required - staged)}); keeping the tarball "
+                f"and the existing cache.",
+                file=sys.stderr,
+            )
+            return False
+        live = _cached_repos(pre_commit_home)
+        if not live <= staged:
+            print(
+                f"WARNING: promoting the archive {tarball} would drop cached "
+                f"revisions that the live cache {pre_commit_home} already "
+                f"holds ({_format_revisions(live - staged)}); keeping the "
+                f"tarball and the live cache.",
+                file=sys.stderr,
+            )
             return False
         _swap_cache_home(staging, pre_commit_home)
     except (tarfile.TarError, EOFError, OSError) as error:
@@ -459,10 +523,9 @@ def _preflight_with_restore(
     a restored cache passes the pre-flight.
     """
     if not online:
-        missing = _missing_repos(
-            _configured_repos(config), _cached_repos(pre_commit_home)
-        )
-        if missing and _restore_cache(pre_commit_home):
+        configured = _configured_repos(config)
+        missing = _missing_repos(configured, _cached_repos(pre_commit_home))
+        if missing and _restore_cache(pre_commit_home, set(configured)):
             rc = _preflight(online, pre_commit_home, config)
             if rc == 0:
                 _delete_tarball()
