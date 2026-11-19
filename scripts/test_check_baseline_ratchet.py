@@ -707,7 +707,15 @@ class CompareWarnLimitsTests(unittest.TestCase):
     def test_missing_or_non_numeric_warn_field_is_rejected(self) -> None:
         """Reject .skillsaw.yaml limits entry with missing or non-numeric warn value."""
         head_index = {("AGENTS.md", "context-budget"): [4000]}
-        for invalid_warn in ({}, {"warn": None}, {"warn": "4000"}, {"warn": True}):
+        for invalid_warn in (
+            {},
+            {"warn": None},
+            {"warn": "4000"},
+            {"warn": True},
+            None,
+            "4000",
+            True,
+        ):
             with self.subTest(entry=invalid_warn):
                 config = {
                     "rules": {
@@ -722,17 +730,29 @@ class CompareWarnLimitsTests(unittest.TestCase):
                 self.assertEqual(1, len(diagnostics))
                 self.assertIn("is missing a numeric 'warn' limit", diagnostics[0])
 
-    def test_limit_key_collision_is_rejected(self) -> None:
-        """Reject multiple context-budget files that collide on the same limits key."""
-        head_index = {
-            ("docs/foo.md", "context-budget"): [500],
-            ("docs-foo.md", "context-budget"): [500],
-        }
+    def test_integer_shorthand_warn_limit_is_accepted(self) -> None:
+        """Accept integer shorthand for context-budget warn limits."""
+        head_index = {("AGENTS.md", "context-budget"): [4000]}
         config = {
             "rules": {
                 "context-budget": {
                     "limits": {
-                        "docs-foo-md": {"warn": 400},
+                        "agents-md": 4000,
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_integer_shorthand_warn_limit_exceeding_ceiling_is_rejected(self) -> None:
+        """Reject integer shorthand warn limit when it exceeds the baseline ceiling."""
+        head_index = {("AGENTS.md", "context-budget"): [4000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "agents-md": 4100,
                     }
                 }
             }
@@ -740,7 +760,110 @@ class CompareWarnLimitsTests(unittest.TestCase):
         diagnostics = checker.compare_warn_limits(head_index, config)
         self.assertEqual(1, len(diagnostics))
         self.assertIn(
-            "share the .skillsaw.yaml limits key 'docs-foo-md'", diagnostics[0]
+            "context-budget warn limit for AGENTS.md (4100) exceeds baseline ceiling (4000)",
+            diagnostics[0],
+        )
+
+    def test_skill_category_ceiling_with_mapping_is_accepted(self) -> None:
+        """Accept a skill category ceiling validated against limits.skill mapping."""
+        head_index = {(".agents/skills/helper/SKILL.md", "context-budget"): [3000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "skill": {"warn": 3000},
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_skill_category_ceiling_with_shorthand_is_accepted(self) -> None:
+        """Accept a skill category ceiling validated against limits.skill integer shorthand."""
+        head_index = {(".agents/skills/helper/SKILL.md", "context-budget"): [3000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "skill": 3000,
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_skill_category_ceiling_exceeding_ceiling_is_rejected(self) -> None:
+        """Reject a skill category ceiling when limits.skill exceeds the ceiling."""
+        head_index = {(".agents/skills/helper/SKILL.md", "context-budget"): [2800]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "skill": 3000,
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn(
+            "context-budget warn limit for .agents/skills/helper/SKILL.md (3000) exceeds baseline ceiling (2800)",
+            diagnostics[0],
+        )
+
+    def test_multiple_files_in_same_category_are_validated(self) -> None:
+        """Validate multiple files sharing a category against the shared category limit."""
+        head_index = {
+            (".agents/skills/a/SKILL.md", "context-budget"): [3000],
+            (".agents/skills/b/SKILL.md", "context-budget"): [3500],
+        }
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "skill": 2800,
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_skill_category_whole_file_limit_mapping_is_accepted(self) -> None:
+        """Accept a skill category limit using whole-file nested mapping."""
+        head_index = {(".agents/skills/helper/SKILL.md", "context-budget"): [3000]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {
+                        "skill": {
+                            "file": {"warn": 3000},
+                            "description": {"warn": 100},
+                        },
+                    }
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual([], diagnostics)
+
+    def test_unknown_category_file_is_reported(self) -> None:
+        """Report baseline ceiling whose file path does not belong to a recognized category."""
+        head_index = {("unrecognized_file.xyz", "context-budget"): [500]}
+        config = {
+            "rules": {
+                "context-budget": {
+                    "limits": {},
+                }
+            }
+        }
+        diagnostics = checker.compare_warn_limits(head_index, config)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn(
+            "cannot determine .skillsaw.yaml context-budget category for baseline ceiling unrecognized_file.xyz",
+            diagnostics[0],
         )
 
     def test_none_config_with_context_budget_ceilings_is_rejected(self) -> None:
@@ -1255,20 +1378,44 @@ class CheckRepoTests(unittest.TestCase):
             )
         )
 
-    def test_skillsaw_config_limit_key_collision_is_rejected(self) -> None:
-        """Reject multiple context-budget files colliding on the same limits key in check_repo."""
+    def test_skillsaw_config_with_skill_category_and_integer_shorthand_accepted(
+        self,
+    ) -> None:
+        """Accept .skillsaw.yaml with skill category ceiling and integer shorthand limits."""
         self._write_baseline(
             _baseline(
-                _ceiling(file_path="docs/foo.md", value=500),
-                _ceiling(file_path="docs-foo.md", value=500),
+                _ceiling(file_path="AGENTS.md", value=4000),
+                _ceiling(file_path=".agents/skills/helper/SKILL.md", value=3000),
             )
         )
         skillsaw_config = (
             "rules:\n"
             "  context-budget:\n"
             "    limits:\n"
-            "      docs-foo-md:\n"
-            "        warn: 400\n"
+            "      agents-md: 4000\n"
+            "      skill: 3000\n"
+        )
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            skillsaw_config, encoding="utf-8"
+        )
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
+
+    def test_skillsaw_config_with_skill_category_exceeding_ceiling_rejected(
+        self,
+    ) -> None:
+        """Reject .skillsaw.yaml when skill category limit exceeds ceiling in check_repo."""
+        self._write_baseline(
+            _baseline(
+                _ceiling(file_path=".agents/skills/helper/SKILL.md", value=2800),
+            )
+        )
+        skillsaw_config = (
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      skill: 3000\n"
         )
         (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
             skillsaw_config, encoding="utf-8"
@@ -1277,7 +1424,8 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(1, exit_code)
         self.assertTrue(
             any(
-                "share the .skillsaw.yaml limits key 'docs-foo-md'" in msg
+                "context-budget warn limit for .agents/skills/helper/SKILL.md (3000) exceeds baseline ceiling (2800)"
+                in msg
                 for msg in messages
             )
         )

@@ -15,11 +15,11 @@ up to the warn threshold unchecked. Dropping a ceiling is only accepted when
 the file itself was removed from the repository.
 
 Separately, for every ``context-budget`` ceiling tracked in the working-tree
-baseline, each file must map to a unique limits key and have a corresponding
-``rules.context-budget.limits.<key>.warn`` numeric value in ``.skillsaw.yaml``
-that stays ``<=`` the recorded ceiling. A missing limit entry or a warn limit
-above the ceiling creates the same blind spot described above as soon as the
-file grows back up to the warn threshold.
+baseline, its category (e.g. ``agents-md``, ``skill``) must have a corresponding
+warn limit in ``.skillsaw.yaml`` under ``rules.context-budget.limits.<category>``
+(as an integer or ``{warn, error}`` mapping) that stays ``<=`` the recorded
+ceiling. A missing limit entry or a warn limit above the ceiling creates the same
+blind spot described above as soon as the file grows back up to the warn threshold.
 
 Used as the ``baseline-ratchet`` local pre-commit hook (and via
 ``scripts/lint.py``). Base content is loaded from the first existing git ref
@@ -426,13 +426,89 @@ def compare_ceilings(
     return diagnostics
 
 
-def context_budget_limit_key(file_path: str) -> str:
-    """Return the ``.skillsaw.yaml`` ``limits`` key for *file_path*.
+def context_budget_category(
+    file_path: str, config: dict[str, Any] | None = None
+) -> str | None:
+    """Return the skillsaw context-budget category for *file_path*.
 
-    The file path is lower-cased and every run of non-alphanumeric
-    characters becomes a single hyphen, e.g. ``AGENTS.md`` -> ``agents-md``.
+    Skillsaw categorizes files into standard categories:
+    * ``agents-md``: ``AGENTS.md``
+    * ``skill``: skill files (named ``SKILL.md`` or located under a ``skills`` directory)
+    * ``instruction``: general agent instruction files (e.g. ``CLAUDE.md``)
+    * ``memory``: persistent memory files (e.g. ``MEMORY.md``)
+    * ``extra``: files explicitly listed in ``.skillsaw.yaml`` ``content-paths``
+
+    Returns the category string, or ``None`` if *file_path* does not belong
+    to a recognized category.
     """
-    return _LIMIT_KEY_UNSAFE.sub("-", file_path.lower()).strip("-")
+    path = Path(file_path)
+    name = path.name
+    if name == "AGENTS.md":
+        return "agents-md"
+    if name == "SKILL.md" or "skills" in path.parts:
+        return "skill"
+    if name in (
+        "CLAUDE.md",
+        "COPILOT.md",
+        "INSTRUCTIONS.md",
+        ".cursorrules",
+        ".windsurfrules",
+        "copilot-instructions.md",
+    ):
+        return "instruction"
+    if name == "MEMORY.md":
+        return "memory"
+    if config is not None:
+        content_paths = config.get("content-paths")
+        if isinstance(content_paths, list):
+            for cp in content_paths:
+                if isinstance(cp, str) and (cp == file_path or path.match(cp)):
+                    return "extra"
+    if file_path in ("agents-md", "skill", "instruction", "memory", "extra"):
+        return file_path
+    return None
+
+
+def context_budget_limit_key(file_path: str) -> str:
+    """Return the context-budget category key for *file_path*.
+
+    .. deprecated::
+        Use :func:`context_budget_category` instead.
+    """
+    category = context_budget_category(file_path)
+    return category if category is not None else file_path.lower()
+
+
+def extract_warn_limit(entry: Any) -> int | float | None:
+    """Extract a numeric warn limit from a skillsaw limit entry.
+
+    A limit entry in ``.skillsaw.yaml`` under
+    ``rules.context-budget.limits.<category>`` may be:
+    * An integer or float (shorthand for a warn-only limit), e.g. ``4000``
+    * A mapping with a ``warn`` key, e.g. ``{"warn": 4000}`` or
+      ``{"warn": 4000, "error": 5000}``
+    * A mapping with a ``file`` key for whole-file limits, e.g.
+      ``{"file": 4000}`` or ``{"file": {"warn": 4000}}``
+
+    Returns the numeric warn limit, or ``None`` if no numeric warn limit is
+    configured.
+    """
+    if isinstance(entry, bool):
+        return None
+    if isinstance(entry, (int, float)):
+        return entry
+    if isinstance(entry, dict):
+        warn = entry.get("warn")
+        if not isinstance(warn, bool) and isinstance(warn, (int, float)):
+            return warn
+        file_entry = entry.get("file")
+        if not isinstance(file_entry, bool) and isinstance(file_entry, (int, float)):
+            return file_entry
+        if isinstance(file_entry, dict):
+            file_warn = file_entry.get("warn")
+            if not isinstance(file_warn, bool) and isinstance(file_warn, (int, float)):
+                return file_warn
+    return None
 
 
 def load_skillsaw_config(repo_root: Path) -> dict[str, Any] | None:
@@ -470,21 +546,22 @@ def compare_warn_limits(
 ) -> list[str]:
     """Return diagnostics for ``.skillsaw.yaml`` context-budget warn limits.
 
-    For every ``context-budget`` ceiling key in *head_index*, look up the
-    matching ``rules.context-budget.limits.<key>.warn`` entry in *config*
-    (the parsed ``.skillsaw.yaml``). A warn limit greater than the recorded
-    ceiling stops skillsaw from emitting a context-budget finding once the
-    file grows back up to the warn limit, which drops the ceiling on the
-    next baseline regeneration (see the module docstring).
+    For every ``context-budget`` ceiling key in *head_index*, derive its
+    category (e.g. ``agents-md``, ``skill``) and look up the matching
+    entry under ``rules.context-budget.limits.<category>`` in *config*
+    (the parsed ``.skillsaw.yaml``). Limit entries may be an integer (shorthand
+    for warn-only limit) or a mapping with a numeric ``warn`` limit. A warn
+    limit greater than the recorded ceiling stops skillsaw from emitting a
+    context-budget finding once the file grows back up to the warn limit,
+    which drops the ceiling on the next baseline regeneration (see the
+    module docstring).
 
     When *config* is ``None`` (the config file does not exist), checking is
     skipped only when *head_index* contains no ``context-budget`` ceilings.
     If *head_index* contains any ``context-budget`` ceiling entries, the
     absence of ``.skillsaw.yaml`` is an error (failing closed). When *config*
-    is present, each ``context-budget`` ceiling must map to a unique limits
-    key and have a corresponding limits entry with a numeric ``warn`` limit.
-    Key collisions, missing limit entries, and non-numeric warn limits all
-    produce diagnostics.
+    is present, each ``context-budget`` ceiling must map to a recognized category
+    with a configured numeric ``warn`` limit.
     """
     has_context_budget = any(rule_id == "context-budget" for _, rule_id in head_index)
     if config is None:
@@ -499,46 +576,32 @@ def compare_warn_limits(
     if not isinstance(limits, dict):
         limits = {}
 
-    key_to_files: dict[str, list[str]] = {}
-    file_to_key: dict[str, str] = {}
+    diagnostics: list[str] = []
     for file_path, rule_id in sorted(head_index):
         if rule_id != "context-budget":
             continue
-        key = context_budget_limit_key(file_path)
-        file_to_key[file_path] = key
-        key_to_files.setdefault(key, []).append(file_path)
-
-    diagnostics: list[str] = []
-    colliding_keys: set[str] = set()
-    for key, files in sorted(key_to_files.items()):
-        if len(files) > 1:
-            colliding_keys.add(key)
-            clean_key = sanitize_log_string(key)
-            file_list = ", ".join(sanitize_log_string(f) for f in files)
-            diagnostics.append(
-                f"ERROR: Multiple files with context-budget ceilings share "
-                f"the .skillsaw.yaml limits key '{clean_key}': {file_list}. "
-                "Each file must map to a unique limits key."
-            )
-
-    for file_path, key in sorted(file_to_key.items()):
-        if key in colliding_keys:
-            continue
         clean_path = sanitize_log_string(file_path)
-        clean_key = sanitize_log_string(key)
-        entry = limits.get(key)
-        if not isinstance(entry, dict):
+        category = context_budget_category(file_path, config)
+        if category is None:
+            diagnostics.append(
+                f"ERROR: cannot determine .skillsaw.yaml context-budget category "
+                f"for baseline ceiling {clean_path}."
+            )
+            continue
+        clean_category = sanitize_log_string(category)
+        if category not in limits:
             diagnostics.append(
                 "ERROR: .skillsaw.yaml is missing a "
-                f"rules.context-budget.limits.{clean_key} entry for "
+                f"rules.context-budget.limits.{clean_category} entry for "
                 f"baseline ceiling {clean_path}."
             )
             continue
-        warn = entry.get("warn")
-        if isinstance(warn, bool) or not isinstance(warn, (int, float)):
+        entry = limits[category]
+        warn = extract_warn_limit(entry)
+        if warn is None:
             diagnostics.append(
                 "ERROR: .skillsaw.yaml rules.context-budget.limits."
-                f"{clean_key} is missing a numeric 'warn' limit for "
+                f"{clean_category} is missing a numeric 'warn' limit for "
                 f"baseline ceiling {clean_path}."
             )
             continue
