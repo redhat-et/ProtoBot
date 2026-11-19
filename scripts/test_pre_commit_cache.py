@@ -261,6 +261,36 @@ class UpstreamDelegationTests(unittest.TestCase):
         with patch.object(bootstrap, "_popen", return_value=_FinishedProcess()):
             self.assertEqual(17, bootstrap._run_upstream_process(["bash", "script.sh"]))
 
+    def test_keyboard_interrupt_stops_the_process_group(self) -> None:
+        # Ctrl+C must kill the whole group and reap Bash before the
+        # interrupt propagates.
+        kills: list[tuple[int, int]] = []
+        communicates: list[object] = []
+
+        class _InterruptedProcess:
+            pid = 4321
+            returncode = None
+
+            def communicate(self, timeout=None):
+                communicates.append(timeout)
+                if len(communicates) == 1:
+                    raise KeyboardInterrupt
+                return (None, None)
+
+        with (
+            patch.object(bootstrap, "_popen", return_value=_InterruptedProcess()),
+            patch("os.killpg", side_effect=lambda pgid, sig: kills.append((pgid, sig))),
+            patch("os.getpgid", side_effect=lambda pid: pid),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            bootstrap._run_upstream_process(["bash", "script.sh"])
+        # The group was killed with SIGKILL and the process reaped
+        # before the interrupt propagated.
+        self.assertEqual([(4321, signal.SIGKILL)], kills)
+        self.assertEqual(
+            [bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS, None], communicates
+        )
+
     def test_unverifiable_upstream_script_is_a_hard_failure(self) -> None:
         for side_effect in (
             OSError("no route to host"),

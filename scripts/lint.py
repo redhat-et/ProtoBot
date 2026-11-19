@@ -377,22 +377,44 @@ def _repository_relative(stored: str, cache_root: Path) -> Path:
     )
 
 
-# The environment directory names pre-commit uses, matched exactly or
-# with a version suffix (``py_env``, ``py_env-python3.12``).
+def _repository_relative_or_none(stored: object, cache_root: Path) -> Path | None:
+    """Return a stored path's position inside the cache root, or None.
+
+    Used for live rows, whose stored path was validated when the row
+    was staged; an unusable value simply carries no environments to
+    compare.
+    """
+    if not isinstance(stored, str) or not stored or not os.path.isabs(stored):
+        return None
+    if ".." in Path(stored).parts:
+        return None
+    try:
+        return _repository_relative(stored, cache_root)
+    except ValueError:
+        return None
+
+
+# The environment directory names pre-commit 4.5.1 uses, matched
+# exactly or with a version suffix (``py_env``, ``py_env-python3.12``).
+# Languages without an installed environment (docker_image, fail,
+# pygrep, and the unsupported ones) set ENVIRONMENT_DIR to None.
 _ENVIRONMENT_DIR_NAMES = frozenset(
     {
-        "py_env",
-        "node_env",
-        "rbenv",
-        "rust_env",
-        "golang_env",
+        "conda",
+        "coursier",
+        "dartenv",
         "dotnetenv",
-        "swift_env",
-        "r_env",
-        "conda_env",
-        "perl_env",
-        "dart_env",
+        "golangenv",
+        "hs_env",
+        "juliaenv",
         "lua_env",
+        "node_env",
+        "perl_env",
+        "py_env",
+        "rbenv",
+        "renv",
+        "rustenv",
+        "swift_env",
     }
 )
 
@@ -856,6 +878,7 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
             return False
         staged_paths = _cached_repo_paths(staging)
         live = _cached_repos(pre_commit_home)
+        live_paths = _cached_repo_paths(pre_commit_home)
         # A row whose repo or ref is not text cannot be sorted or
         # compared; reject the archive instead of crashing.
         malformed = sorted(
@@ -920,20 +943,28 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
             if (repo, rev) in live:
                 # A retained revision must keep its installed hook
                 # environments: a matching row and repository directory
-                # are not enough when the archive omits them.
-                relative = _repository_relative(stored, pre_commit_home)
-                staged_envs = _environment_dirs(staging / relative)
-                missing = _environment_dirs(pre_commit_home / relative) - staged_envs
-                if missing:
-                    listing = ", ".join(sorted(missing))
-                    print(
-                        f"WARNING: the archive {tarball} omits the installed "
-                        f"environment(s) {listing} that the live cache holds "
-                        f"for {repo} @ {rev}; keeping the tarball and the "
-                        f"live cache.",
-                        file=sys.stderr,
+                # are not enough when the archive omits them. The live
+                # side is looked up through the live row's stored path,
+                # which can differ from the staged one.
+                staged_relative = _repository_relative(stored, pre_commit_home)
+                live_relative = _repository_relative_or_none(
+                    live_paths.get((repo, rev), ""), pre_commit_home
+                )
+                if live_relative is not None:
+                    staged_envs = _environment_dirs(staging / staged_relative)
+                    missing = (
+                        _environment_dirs(pre_commit_home / live_relative) - staged_envs
                     )
-                    return False
+                    if missing:
+                        listing = ", ".join(sorted(missing))
+                        print(
+                            f"WARNING: the archive {tarball} omits the installed "
+                            f"environment(s) {listing} that the live cache holds "
+                            f"for {repo} @ {rev}; keeping the tarball and the "
+                            f"live cache.",
+                            file=sys.stderr,
+                        )
+                        return False
         # Normalize before the promotion, so a concurrent lint.py never
         # sees unrepaired metadata.
         unverified = _normalize_pyvenv_patch_versions(staging)

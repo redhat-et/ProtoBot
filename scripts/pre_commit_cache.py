@@ -254,7 +254,10 @@ def _run_upstream_process(argv: list[str]) -> int:
     process = _popen(argv)
     try:
         process.communicate(timeout=UPSTREAM_SCRIPT_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        # A timeout or Ctrl+C must stop the whole process group — a
+        # child such as gh cannot keep the pipes open — and the process
+        # is reaped before the exception is re-raised.
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         process.communicate()
         raise

@@ -1226,11 +1226,24 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertFalse((self.home / "db.db").exists())
 
     def _build_retained_local_env_tarball(self, *, with_environment: bool) -> None:
-        """Archive with a retained local: row and an optional environment."""
+        """Archive with a retained local: row and an optional environment.
+
+        The live row stores the revision under ``repo-local`` and holds
+        its environment there; the staged row stores it under
+        ``staged-local`` and the archive creates the environment there.
+        The live and staged stored paths differ on purpose, so the
+        retained-environment check must read the live row for the live
+        side: reading the staged path would find no live environment
+        and let an omitting archive through.
+        """
         local_dep = ("local:dep", "rev1")
         _make_db(
             self.home / "db.db",
             [("https://example.invalid/foo", "aaaa"), local_dep],
+            {
+                ("https://example.invalid/foo", "aaaa"): str(self.home / "repo0"),
+                local_dep: str(self.home / "repo-local"),
+            },
         )
         # The live cache holds the installed environment.
         (self.home / "repo-local" / "py_env-python3.12").mkdir(parents=True)
@@ -1243,11 +1256,11 @@ class PreflightRestoreTests(unittest.TestCase):
                 "hooks: []\n", encoding="utf-8"
             )
             paths[row] = str(self.home / f"repo{index}")
-        staged_local = packed / "repo-local"
+        staged_local = packed / "staged-local"
         staged_local.mkdir()
         if with_environment:
             (staged_local / "py_env-python3.12").mkdir()
-        paths[local_dep] = str(self.home / "repo-local")
+        paths[local_dep] = str(self.home / "staged-local")
         _make_db(packed / "db.db", [*self._config_rows(), local_dep], paths)
         with tarfile.open(self.tarball, "w:gz") as tar:
             for path in sorted(packed.rglob("*")):
@@ -1285,8 +1298,9 @@ class PreflightRestoreTests(unittest.TestCase):
             )
         self.assertEqual(0, rc)
         self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
-        # The promoted cache holds the retained environment.
-        self.assertTrue((self.home / "repo-local" / "py_env-python3.12").is_dir())
+        # The promoted cache holds the retained environment under the
+        # staged row's directory.
+        self.assertTrue((self.home / "staged-local" / "py_env-python3.12").is_dir())
 
     def test_blob_stored_path_is_rejected(self) -> None:
         # A BLOB in the path column must produce a normal rejection,
@@ -1648,17 +1662,25 @@ class PreflightRestoreTests(unittest.TestCase):
 
 
 class EnvironmentDirTests(unittest.TestCase):
-    """Environment directories match pre-commit's exact names."""
+    """Environment directories match pre-commit's real names."""
 
     def test_environment_dir_names(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         repo_dir = Path(temporary_directory.name)
-        for name in ("build_env_scripts", "rbenv", "py_env-python3.12", "hooks"):
+        for name in (
+            "build_env_scripts",
+            "golang_env",
+            "golangenv-default",
+            "py_env-python3.12",
+            "rbenv",
+            "renv",
+        ):
             (repo_dir / name).mkdir()
         (repo_dir / "manifest.yaml").write_text("hooks: []\n", encoding="utf-8")
         self.assertEqual(
-            {"rbenv", "py_env-python3.12"}, checker._environment_dirs(repo_dir)
+            {"golangenv-default", "py_env-python3.12", "rbenv", "renv"},
+            checker._environment_dirs(repo_dir),
         )
 
 
