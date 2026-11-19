@@ -209,7 +209,12 @@ def _slice_has_unexempted_bare_element(
                 col += 1
                 continue
 
-            if expecting_element and depth == 1 and paren_depth == 0 and bracket_depth == 0:
+            if (
+                expecting_element
+                and depth == 1
+                and paren_depth == 0
+                and bracket_depth == 0
+            ):
                 expecting_element = False
                 if ch == "}":
                     depth -= 1
@@ -240,9 +245,8 @@ def _slice_has_unexempted_bare_element(
             elif ch == "]":
                 if bracket_depth > 0:
                     bracket_depth -= 1
-            elif ch == ",":
-                if depth == 1 and paren_depth == 0 and bracket_depth == 0:
-                    expecting_element = True
+            elif ch == "," and depth == 1 and paren_depth == 0 and bracket_depth == 0:
+                expecting_element = True
 
             col += 1
 
