@@ -17,20 +17,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+try:
+    from go_dependency_errors import is_dependency_error as _is_dependency_error
+except ImportError:  # imported as ``scripts.<module>``
+    from scripts.go_dependency_errors import (
+        is_dependency_error as _is_dependency_error,
+    )
 
-_DEPENDENCY_ERROR_INDICATORS = (
-    "module lookup disabled",
-    "cannot find module providing package",
-    "no required module provides package",
-    "missing go.sum entry",
-    "dial tcp",
-    "connection refused",
-    "no such host",
-    "i/o timeout",
-    "tls handshake timeout",
-    "server response:",
-)
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def find_go_module(repo_root: Path, file_path: Path) -> Path | None:
@@ -61,16 +55,6 @@ def _display_module(module: Path, repo_root: Path) -> str:
         return str(module.resolve().relative_to(repo_root.resolve()))
     except ValueError:
         return str(module)
-
-
-def _is_dependency_error(output: str) -> bool:
-    """Return True if *output* indicates dependency resolution / cache miss failure."""
-    lower = output.lower()
-    if any(indicator in lower for indicator in _DEPENDENCY_ERROR_INDICATORS):
-        return True
-    return "go: downloading" in output and any(
-        kw in lower for kw in ("error", "timeout", "failed")
-    )
 
 
 def _build_vet_command(module: Path) -> list[str]:
