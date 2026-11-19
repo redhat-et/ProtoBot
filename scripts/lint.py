@@ -374,17 +374,21 @@ def _staged_repository_rejection(
     stored: object,
     staging: Path,
     cache_root: Path,
+    *,
+    require_manifest: bool = True,
 ) -> str | None:
     """Return why a staged repository row cannot be used, or None.
 
     The stored value must be an absolute path string without ``..``
     components inside the cache root used at build time — ``cache_root``
     under the path contract — and the staged tree must hold that
-    directory with a ``.pre-commit-hooks.yaml``, or pre-commit later
-    fails to load the repository's hook manifest. Both sides are
-    compared lexically with ``os.path.normpath``: resolving would
-    follow symlinks in the live cache and inspect the wrong staging
-    directory.
+    directory. Cloned repositories must also hold a
+    ``.pre-commit-hooks.yaml``, or pre-commit later fails to load the
+    repository's hook manifest; rows for ``local``, ``local:`` keys,
+    and ``meta`` carry no manifest, so *require_manifest* is False for
+    them. Both sides are compared lexically with ``os.path.normpath``:
+    resolving would follow symlinks in the live cache and inspect the
+    wrong staging directory.
     """
     if not isinstance(stored, str) or not stored or not os.path.isabs(stored):
         return f"the stored path {stored!r} is not an absolute path"
@@ -403,7 +407,7 @@ def _staged_repository_rejection(
     staged_dir = staging / normalized_stored.relative_to(normalized_root)
     if not staged_dir.is_dir():
         return f"the repository directory {staged_dir} is missing from the archive"
-    if not (staged_dir / ".pre-commit-hooks.yaml").is_file():
+    if require_manifest and not (staged_dir / ".pre-commit-hooks.yaml").is_file():
         return f"{staged_dir} has no .pre-commit-hooks.yaml"
     return None
 
@@ -812,20 +816,19 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
             return False
         # Every required and retained revision needs its payload, so a
         # retained row without a repository directory cannot be promoted.
-        # pre-commit never clones local or meta repositories, and it
-        # stores local environments with additional dependencies under
-        # ``local:`` keys that carry no hook manifest, so those rows get
-        # the key check only.
-        to_validate = {
-            (repo, ref)
-            for repo, ref in required | live
-            if repo not in _NON_CLONED_REPOS and not repo.startswith("local:")
-        }
-        for repo, rev in sorted(to_validate):
+        # pre-commit stores local environments with additional
+        # dependencies under ``local:`` keys without a hook manifest,
+        # and never clones local or meta repositories, so those rows
+        # need a valid stored path and directory but no manifest.
+        for repo, rev in sorted(required | live):
+            require_manifest = repo not in _NON_CLONED_REPOS and not repo.startswith(
+                "local:"
+            )
             rejection = _staged_repository_rejection(
                 staged_paths.get((repo, rev), ""),
                 staging,
                 pre_commit_home,
+                require_manifest=require_manifest,
             )
             if rejection:
                 print(

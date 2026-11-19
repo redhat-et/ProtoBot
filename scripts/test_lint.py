@@ -1067,10 +1067,10 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("py_env-emptybase", message)
         self.assertIn("base-executable is empty", message)
 
-    def test_local_dependency_rows_are_retained_without_payloads(self) -> None:
-        # pre-commit stores local environments with additional
-        # dependencies under local: keys with no hook manifest; a
-        # retained row of that shape must not block promotion.
+    def test_local_row_without_a_staged_directory_is_rejected(self) -> None:
+        # A retained local: row still needs its staged directory; an
+        # archive with only the row would discard a usable live
+        # environment.
         local_dep = ("local:dep", "rev1")
         _make_db(
             self.home / "db.db",
@@ -1079,6 +1079,36 @@ class PreflightRestoreTests(unittest.TestCase):
         self._build_tarball(
             [*self._config_rows(), local_dep],
             stored_paths={local_dep: str(self.home / "repo-absent")},
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("local:dep @ rev1", message)
+        self.assertIn("is missing from the archive", message)
+        self.assertTrue(self.tarball.exists())
+        # The live cache keeps its rows.
+        self.assertIn(local_dep, checker._cached_repos(self.home))
+
+    def test_local_row_without_a_manifest_is_promoted(self) -> None:
+        # A retained local: row whose staged directory exists but holds
+        # no hook manifest is promoted; pre-commit stores those
+        # environments without a manifest.
+        local_dep = ("local:dep", "rev1")
+        _make_db(
+            self.home / "db.db",
+            [("https://example.invalid/foo", "aaaa"), local_dep],
+        )
+        # repodir exists in every fixture archive and holds no manifest.
+        self._build_tarball(
+            [*self._config_rows(), local_dep],
+            stored_paths={local_dep: str(self.home / "repodir")},
         )
         stdout, stderr = io.StringIO(), io.StringIO()
         with (
@@ -1093,6 +1123,54 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
         # The local: row survived the promotion.
         self.assertIn(local_dep, checker._cached_repos(self.home))
+
+    def test_planted_predictable_temporary_name_is_ignored(self) -> None:
+        # The rewrite creates its temporary file with mkstemp; a symlink
+        # planted at the old predictable name must not redirect it.
+        outside = self.root / "outside-tmp.cfg"
+        outside.write_text("do not touch\n", encoding="utf-8")
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        _make_db(packed / "db.db", rows, paths)
+        env_dir = packed / "repodir" / f"py_env-python{self._current_interpreter()}"
+        (env_dir / "bin").mkdir(parents=True)
+        (env_dir / "pyvenv.cfg").write_text(
+            f"version_info = {self._stale_patch_version()}\n", encoding="utf-8"
+        )
+        os.symlink(sys.executable, env_dir / "bin" / "python")
+        os.symlink(outside, env_dir / f".pyvenv.cfg.{os.getpid()}.tmp")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        # The restore succeeded and rewrote version_info through mkstemp.
+        self.assertEqual(0, rc)
+        self.assertEqual("", stderr.getvalue())
+        promoted_cfg = (
+            self.home
+            / "repodir"
+            / f"py_env-python{self._current_interpreter()}"
+            / "pyvenv.cfg"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f"version_info = {self._current_python()}", promoted_cfg)
+        # The external file is unchanged.
+        self.assertEqual("do not touch\n", outside.read_text(encoding="utf-8"))
 
     def test_blob_stored_path_is_rejected(self) -> None:
         # A BLOB in the path column must produce a normal rejection,
