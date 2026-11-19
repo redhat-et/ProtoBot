@@ -40,19 +40,21 @@ type treeEntry struct {
 }
 
 // parseRevisionOption accepts only a full 40-character hexadecimal commit
-// hash, so a short hash, a branch name, or a tag never selects a read
-// revision. The hash is returned in lowercase.
-func parseRevisionOption(value string) (string, *commandFailure) {
+// hash, so a short hash, a branch name, or a tag never selects a revision
+// through the option named optionName, and a value that begins with "-" is
+// refused before it can reach Git as an option. The hash is returned in
+// lowercase.
+func parseRevisionOption(optionName, value string) (string, *commandFailure) {
 	value = strings.TrimSpace(value)
 	if !fullCommitID(value) {
-		return "", validationFailure("revision.invalid", "Option --at must be a full 40-character hexadecimal commit hash.", nil)
+		return "", validationFailure("revision.invalid", fmt.Sprintf("Option --%s must be a full 40-character hexadecimal commit hash.", optionName), nil)
 	}
 	return strings.ToLower(value), nil
 }
 
-// requireRevisionCommit refuses a parsed --at hash that names no commit in
-// the local repository. commitExists refuses an annotated tag too, although
-// Git would peel it to the commit it tags.
+// requireRevisionCommit refuses a hash that parseRevisionOption accepted but
+// that names no commit in the local repository. commitExists refuses an
+// annotated tag too, although Git would peel it to the commit it tags.
 func requireRevisionCommit(root, commit string) *commandFailure {
 	if !commitExists(root, commit) {
 		return validationFailure("revision.not_found", fmt.Sprintf("Commit %s is not present in the local repository.", commit), nil)

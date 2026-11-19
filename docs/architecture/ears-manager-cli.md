@@ -68,7 +68,7 @@ The same binary serves these callers:
 | Caller | Reads | Writes |
 | --- | --- | --- |
 | Drafting Table through the Specification Toolkit | Proposed and approved specification state, comparison, impact candidates, validation results | Proposed specification records and change-set manifests on the active change-set branch, which `change-set create` cuts |
-| CI | Registered records and artifacts at the checked-out revision | None |
+| CI | Registered records and artifacts at the checked-out revision, and the comparison base commit's project configuration and registered artifacts during `check --base-ref` | None |
 | Job Site Materializer | The approved manifest and requirements at an immutable specification commit | None; it passes lifecycle state to the WMS Adapter |
 | [Source Control Manager](source-control-manager.md) | A change set's paths, comparison, impact candidates, and validation result, and a change set's manifest, status, and manifest path at a commit | None; it stages, commits, and publishes what `ears-manager` wrote |
 | Human maintainer | All data exposed by the read commands | The same proposed changes as the Toolkit, subject to the same validation |
@@ -85,10 +85,12 @@ and records. It resolves the project from the Git working tree containing
 path does not override that identity. Nor does Git's environment: the CLI
 runs every Git command without the variables that name another repository,
 index, or configuration, such as `GIT_DIR`, `GIT_WORK_TREE`, and
-`GIT_CONFIG_PARAMETERS`. There are two exceptions. The
-initialization command resolves the Git working-tree root before
-`.protobot/project.yaml` exists, and a read at a commit with `--at` takes
-`.protobot/project.yaml` from that commit, as described below.
+`GIT_CONFIG_PARAMETERS`. There are three exceptions. The initialization
+command resolves the Git working-tree root before `.protobot/project.yaml`
+exists. A read at a commit with `--at` takes `.protobot/project.yaml` from that
+commit, as described below. For the artifact delta only, `check --base-ref`
+reads the project configuration and registered artifacts from the tree of the
+specified base commit, while keeping `check` read-only over the working tree.
 
 Reads are root-relative and deterministic:
 
@@ -413,16 +415,18 @@ change-set list [--status STATUS] [--interface ID] [--scope SCOPE] \
 change-set show --change-set CS-ID [--at FULL-SHA]
 change-set compare --change-set CS-ID [--against FULL-SHA]
 
-check [--change-set CS-ID]
+check [--change-set CS-ID] [--base-ref FULL-SHA]
 impact --change-set CS-ID [--at FULL-SHA]
 ```
 
 `--id` identifies a requirement, interface, or artifact. `--change-set`
 identifies a change set in every command that operates on an existing change
-set. `--at` selects the immutable read revision; `--against` selects the
-comparison baseline. `change-set show` and `artifact list` accept `--at`;
-`check` takes no `--at` and validates the working-tree project; `--at` on the
-other commands and `--against` remain deferred to follow-on scope.
+set. `--at` selects the immutable read revision. `--against` selects the
+comparison baseline. `--base-ref` selects only the artifact comparison
+base for `check`, not a project read. `change-set show` and
+`artifact list` accept `--at`. `check` takes no `--at` and validates the
+working-tree project. `--at` on the other commands and `--against` remain
+deferred to follow-on scope.
 
 ---
 
@@ -962,7 +966,7 @@ same result as a working tree without the manifest.
 ### `check`
 
 ```text
-ears-manager check [--change-set CS-ID]
+ears-manager check [--change-set CS-ID] [--base-ref FULL-SHA]
 ```
 
 `check` is read-only and validates the working-tree project; immutable `--at`
@@ -971,37 +975,53 @@ the complete project store, registry, projection classification, all records,
 and all referential, relationship, and EARS rules, plus artifact-digest,
 structured-store-integrity, and change-set rules. This includes
 artifact-operation consistency, impact completeness, and default-branch
-freshness for every proposed change set. For
-each artifact registered on the default-branch project configuration, `check`
-requires the artifact to remain registered. A registered artifact whose path
-or canonical text differs from the default-branch tree requires an
-`artifact_operations[]` entry with the same `artifact_id` in any proposed
-change set; operations in approved manifests do not count. A new registry
-entry for a file already present at the same path with identical canonical
-text is not a delta. Metadata-only changes to `kind`, `owner`, or `validator`
-are outside this operation check; `path` changes and unregistration are not.
-A default-branch project configuration that
-exists but is not a regular, decodable file fails closed. The check verifies
-that the delta is represented in a proposed manifest; it does not prove that
-`ears-manager artifact put` was invoked or prevent coordinated manual edits.
-`artifact.digest_mismatch` remains a separate diagnostic for content that does
-not match its registered digest.
+freshness for every proposed change set.
 
-Every full or scoped `check` requires a resolvable default-branch head for the
-artifact comparison, even when the project has no change sets. Change-set
-status and freshness checks also consume that head when change sets exist.
+By default, the artifact-operation check compares registered artifact paths,
+canonical text, and continued registration against the default-branch tree.
+When `--base-ref FULL-SHA` is supplied, only this artifact-operation check
+compares against the tree of the specified commit. `--base-ref` requires a
+full 40-character hexadecimal commit hash. A malformed value fails with
+status `4` and `revision.invalid`. A hash that names no commit in the local
+repository fails with status `4` and `revision.not_found`. Supplying
+`--base-ref` does not alter change-set approval classification or proposed
+`base_commit` freshness checks; those checks always read the default-branch
+head. Every full or scoped `check` requires a resolvable default-branch head,
+with or without `--base-ref`, even when the project has zero change sets.
 
-During project initialization, the default-branch tree may have no
+For each artifact registered in the comparison base project configuration
+(the default-branch tree by default, or the commit named by `--base-ref`),
+`check` requires the artifact to remain registered. An artifact registered
+on that base that is absent from the current registry fails with
+`artifact.unregistered`. A registered artifact whose path or canonical text
+differs from the comparison base tree requires an `artifact_operations[]`
+entry with the same `artifact_id` in any proposed change set; operations in
+approved manifests do not count. A missing operation fails with
+`artifact.operation_missing`. When `--base-ref` is omitted, the diagnostic
+message states that the artifact differs from the default branch. When
+`--base-ref` is supplied, the diagnostic message states that the artifact
+differs from the specified base commit. A new registry entry for a file
+already present at the same path with identical canonical text is not a delta.
+Metadata-only changes to `kind`, `owner`, or `validator` are outside this
+operation check; `path` changes and unregistration are not. A comparison base
+project configuration that exists but is not a regular, decodable file fails
+closed. The check verifies that the delta is represented in a proposed
+manifest; it does not prove that `ears-manager artifact put` was invoked or
+prevent coordinated manual edits. `artifact.digest_mismatch` remains a
+separate diagnostic for content that does not match its registered digest.
+
+During project initialization, the comparison base tree may have no
 `.protobot/project.yaml`. In that case its base artifact registry is empty,
 but `check` still compares each currently registered artifact path and
-canonical content with the default-branch tree. An unchanged file already
+canonical content with that comparison base tree. An unchanged file already
 present at the same path needs no artifact operation; a file absent from the
-default-branch tree or with changed canonical content does.
+comparison base tree or with changed canonical content does.
 
 The artifact-operation check runs for full `check` and `check --change-set`;
 `--change-set` narrows only the impact and freshness checks described below.
-Freshness and artifact comparison use the local default branch when it
-resolves, otherwise a resolved remote-tracking ref of a canonical remote; CI
+`--base-ref` combines with `--change-set CS-ID`.
+Freshness checks and default-branch resolution use the local default branch when
+it resolves, otherwise a resolved remote-tracking ref of a canonical remote; CI
 fetches `repository.default_branch` from `repository.canonical_remote` into
 that local ref first
 ([Gates and labels](git-integration.md#gates-and-labels)). Because
@@ -1096,8 +1116,8 @@ carries no diagnostics. A diagnostic arrives in `error.diagnostics`.
 | `project.not_initialized` | `error.code` | The Git working tree has no `.protobot/project.yaml` | `3` |
 | `project.configuration_unreadable` | `error.code` | `.protobot/project.yaml` cannot be inspected for a reason other than its absence, for example because `.protobot` is a regular file | `6` |
 | `project.load_failed` | `error.code` | With `--change-set` only: the project does not load, and validation names no diagnostic | `3` |
-| `project.default_branch_unresolved` | `error.code` | The default branch does not resolve to a commit; every `check` needs it for artifact comparison, including with zero change sets, and change-set status/freshness checks need it when change sets exist | `3` |
-| `project.default_configuration_invalid` | `error.code` | The default-branch project configuration exists but is not a regular, decodable file | `3` |
+| `project.default_branch_unresolved` | `error.code` | The default branch does not resolve to a commit; every `check` needs it (including with `--base-ref` or zero change sets), and change-set status/freshness checks need it when change sets exist | `3` |
+| `project.default_configuration_invalid` | `error.code` | The comparison base project configuration (the default-branch tree, or the commit named by `--base-ref`) exists but is not a regular, decodable file | `3` |
 | `project.invalid_configuration` | Both | The review mode, default branch, or branch prefix is invalid, or the canonical remote is not a supported form. It is also the `error.code` of every status `3` result that carries diagnostics | `3` |
 | `schema.unsupported_version` | Diagnostic | A schema version is missing or is not the supported version | `3` |
 | `project.invalid_path` | Diagnostic | `.protobot/` is a symlink, or a configured store path is not a project-relative directory | `3` |
@@ -1108,8 +1128,10 @@ carries no diagnostics. A diagnostic arrives in `error.diagnostics`.
 | `project.store_digest_unreadable` | Diagnostic | A visible entry of a structured store is a symlink, a subdirectory, or not a `.yaml` file, or the store cannot be read | `4` |
 | `project.store_digest_mismatch` | Diagnostic | The visible YAML file set of a structured store does not match its recorded digest | `4` |
 | `artifact.digest_mismatch` | Diagnostic | Registered artifact content does not match its canonical digest | `4` |
-| `artifact.operation_missing` | Diagnostic | A registered artifact path or canonical text delta has no matching `artifact_id` in any proposed change set's `artifact_operations[]` | `4` |
-| `artifact.unregistered` | Diagnostic | An artifact registered on the default branch is absent from the current registry | `4` |
+| `artifact.operation_missing` | Diagnostic | A registered artifact path or canonical text delta against the comparison base (the default branch, or the commit named by `--base-ref`) has no matching `artifact_id` in any proposed change set's `artifact_operations[]` | `4` |
+| `artifact.unregistered` | Diagnostic | An artifact registered on the comparison base (the default branch, or the commit named by `--base-ref`) is absent from the current registry | `4` |
+| `revision.invalid` | `error.code` | Option `--base-ref` is not a full 40-character hexadecimal commit hash | `4` |
+| `revision.not_found` | `error.code` | The commit named by `--base-ref` is not present in the local repository | `4` |
 | `BASE_NOT_ON_DEFAULT` | Both | A proposed manifest's `base_commit` is not a full commit ID reachable from the default-branch head | `4` |
 | `DEFAULT_MOVED` | Both | The default-branch head is not reachable from `HEAD` | `5` |
 | `BASE_COMMIT_STALE` | Both | The default-branch head is reachable from `HEAD`, but the normalized `base_commit` differs from that head | `5` |

@@ -148,6 +148,21 @@ jobs:
           git checkout --detach HEAD
           git update-ref refs/heads/main FETCH_HEAD
 
+      # The artifact-operation delta must not blame this PR for registered
+      # artifact changes that the default branch made after this PR forked,
+      # so its baseline is the merge base of the default branch and HEAD.
+      # Change-set approval and proposed-base freshness still compare with
+      # the default-branch tip above; --base-ref narrows only the artifact
+      # delta.
+      - name: Compute artifact comparison base
+        id: artifact-base
+        run: |
+          if ! base=$(git merge-base refs/heads/main HEAD) || [ -z "$base" ]; then
+            echo "::error::Could not compute the merge base of refs/heads/main and HEAD for the artifact comparison"
+            exit 1
+          fi
+          printf 'commit=%s\n' "$base" >> "$GITHUB_OUTPUT"
+
       - name: Verify change-set store location
         id: change-set-store
         run: |
@@ -208,7 +223,9 @@ jobs:
           exit 1
 
       - name: Run ears-manager check
-        run: ./ears-manager/ears-manager --output json check
+        env:
+          ARTIFACT_BASE: ${{ steps.artifact-base.outputs.commit }}
+        run: ./ears-manager/ears-manager --output json check --base-ref "$ARTIFACT_BASE"
 
   validator:
     name: V2 specification validator
