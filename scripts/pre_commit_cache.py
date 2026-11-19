@@ -101,11 +101,13 @@ def _sanitize_workflow_command(text: str) -> str:
 
     Removes control characters (including CR, LF, and ESC), collapses
     whitespace runs so nothing can start a new command, escapes ``%`` as
-    ``%25`` so GitHub cannot expand encoded data, and caps the length.
+    ``%25`` so GitHub cannot expand encoded data, breaks the legacy
+    ``##[`` command marker with a zero-width space, and caps the length.
     """
     without_controls = _CONTROL_CHARACTERS.sub(" ", text)
     collapsed = _WHITESPACE_RUNS.sub(" ", without_controls).strip()
-    return collapsed.replace("%", "%25")[:_WORKFLOW_COMMAND_CAP]
+    escaped = collapsed.replace("%", "%25")
+    return escaped.replace("##[", "##\u200b[")[:_WORKFLOW_COMMAND_CAP]
 
 
 class UpstreamScriptError(OSError):
@@ -437,7 +439,7 @@ def _python_env_rejection(env_dir: Path, sandbox_python: str) -> str | None:
     """
     try:
         values = _read_pyvenv_cfg(env_dir)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return "pyvenv.cfg is missing or unreadable"
     version_info = values.get("version_info")
     if not version_info:

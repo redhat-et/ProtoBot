@@ -47,12 +47,12 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import shutil
 import sqlite3
 import subprocess
 import sys
 import tarfile
+import zlib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -75,10 +75,6 @@ _TARBALL_DELETE_ROOT = Path("/tmp")
 # The warm cache is about 1 GB; 4 GiB bounds a corrupt or hostile
 # tarball's extraction.
 _MAX_EXTRACTED_BYTES = 4 * 1024 * 1024 * 1024
-
-# ``repo*/py_env-python3.X`` directories hold per-hook virtualenvs for one
-# interpreter; a cache built for another interpreter cannot run them.
-_PY_ENV_NAME = re.compile(r"^py_env-python(?P<version>[0-9]+\.[0-9]+)$")
 
 # ``repo:`` values pre-commit never clones over the network.
 _NON_CLONED_REPOS = {"local", "meta"}
@@ -350,24 +346,203 @@ def _extract_tarball(tar: tarfile.TarFile, destination: Path) -> _MemberFilter:
     return members
 
 
+def _cached_repo_paths(cache_root: Path) -> dict[tuple[str, str], str]:
+    """Return ``{(repo, ref): stored repository path}`` from a db.db.
+
+    Reads the same ``repos`` table as ``_cached_repos``, keeping the
+    absolute ``path`` column that records where the repository
+    directory lived when the cache was built.
+    """
+    db_path = cache_root / "db.db"
+    if not db_path.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            rows = conn.execute("SELECT repo, ref, path FROM repos").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return {}
+    return {(repo, ref): path for repo, ref, path in rows}
+
+
+def _staged_repository_rejection(
+    stored: str,
+    staging: Path,
+    cache_root: Path,
+) -> str | None:
+    """Return why a staged repository row cannot be used, or None.
+
+    The stored path must name a directory inside the cache root used at
+    build time — ``cache_root`` under the path contract — and the
+    staged tree must hold that directory with a
+    ``.pre-commit-hooks.yaml``, or pre-commit later fails to load the
+    repository's hook manifest.
+    """
+    resolved = Path(stored).resolve()
+    if resolved != cache_root and cache_root not in resolved.parents:
+        return f"the stored path {stored} is outside the cache root {cache_root}"
+    staged_dir = staging / resolved.relative_to(cache_root)
+    if not staged_dir.is_dir():
+        return f"the repository directory {staged_dir} is missing from the archive"
+    if not (staged_dir / ".pre-commit-hooks.yaml").is_file():
+        return f"{staged_dir} has no .pre-commit-hooks.yaml"
+    return None
+
+
+def _python_env_dirs(cache_root: Path) -> list[Path]:
+    """Return every ``py_env`` or ``py_env-*`` directory under a cache root."""
+    if not cache_root.is_dir():
+        return []
+    directories: list[Path] = []
+    for repo_dir in cache_root.iterdir():
+        if not repo_dir.is_dir():
+            continue
+        for env_dir in repo_dir.iterdir():
+            if not env_dir.is_dir():
+                continue
+            if env_dir.name == "py_env" or env_dir.name.startswith("py_env-"):
+                directories.append(env_dir)
+    return sorted(directories)
+
+
+def _pyvenv_version_info(env_dir: Path) -> str | None:
+    """Return the ``version_info`` recorded in *env_dir*'s ``pyvenv.cfg``."""
+    try:
+        content = env_dir.joinpath("pyvenv.cfg").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in content.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "version_info":
+            return value.strip()
+    return None
+
+
+def _pyvenv_major_minor(version_info: str) -> str | None:
+    """Return the ``major.minor`` of a ``version_info`` string, or None."""
+    parts = version_info.split(".")
+    if len(parts) < 2:
+        return None
+    return f"{parts[0]}.{parts[1]}"
+
+
 def _warn_on_interpreter_mismatch(pre_commit_home: Path) -> None:
-    """Warn when the restored cache was built for another interpreter."""
+    """Warn when the restored cache was built for another interpreter.
+
+    Every python environment is judged by its ``pyvenv.cfg``
+    ``version_info``, not by its directory name: pre-commit names the
+    directory after the hook's ``language_version``, which carries no
+    interpreter information for names such as ``py_env-python3``,
+    ``py_env-default``, or plain ``py_env``.
+    """
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
-    others = sorted(
-        {
-            match.group("version")
-            for entry in pre_commit_home.glob("*/py_env-python*")
-            if (match := _PY_ENV_NAME.match(entry.name))
-            and match.group("version") != current
-        }
+    mismatched = []
+    unreadable = []
+    for env_dir in _python_env_dirs(pre_commit_home):
+        version_info = _pyvenv_version_info(env_dir)
+        if version_info is None:
+            unreadable.append(env_dir)
+        elif _pyvenv_major_minor(version_info) != current:
+            mismatched.append(env_dir)
+    if not mismatched and not unreadable:
+        return
+    details = []
+    if mismatched:
+        listing = ", ".join(str(directory) for directory in mismatched)
+        details.append(f"built for another interpreter: {listing}")
+    if unreadable:
+        listing = ", ".join(str(directory) for directory in unreadable)
+        details.append(f"pyvenv.cfg missing or unreadable: {listing}")
+    print(
+        f"WARNING: the restored pre-commit cache has python hook "
+        f"environments {' and '.join(details)}; this interpreter is Python "
+        f"{current}. Hooks that use the python language will fail until the "
+        f"cache is rebuilt on this interpreter.",
+        file=sys.stderr,
     )
-    if others:
-        found = ", ".join(f"py_env-python{version}" for version in others)
+
+
+def _rewrite_version_info(env_dir: Path, version_info: str) -> None:
+    """Replace the ``version_info`` line, preserving every other line."""
+    cfg = env_dir / "pyvenv.cfg"
+    lines = cfg.read_text(encoding="utf-8").splitlines()
+    rewritten = []
+    replaced = False
+    for line in lines:
+        key, separator, _ = line.partition("=")
+        if separator and key.strip() == "version_info":
+            rewritten.append(f"version_info = {version_info}")
+            replaced = True
+        else:
+            rewritten.append(line)
+    if not replaced:
+        rewritten.append(f"version_info = {version_info}")
+    cfg.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+
+def _normalize_pyvenv_patch_versions(pre_commit_home: Path) -> None:
+    """Rewrite each python environment's recorded patch version.
+
+    The runner cannot know the sandbox image's Python patch version, so
+    a ``pyvenv.cfg`` built with, for example, 3.12.4 fails pre-commit's
+    own health check against a sandbox that has 3.12.3, and pre-commit
+    then tries an offline reinstall. For every environment whose
+    recorded ``major.minor`` matches this interpreter, the
+    environment's ``bin/python`` is asked for its version — the same
+    interpreter that pre-commit will run — and the ``version_info``
+    line is rewritten to the reported ``major.minor.micro`` followed by
+    ``.final.0``, the form virtualenv writes. When the interpreter
+    cannot run, or its ``major.minor`` differs, the file is left
+    unchanged and the restore warning reports the environment. An
+    environment whose ``pyvenv.cfg`` cannot be read or rewritten is
+    skipped with a warning, because pre-commit may then try to reinstall
+    it; the restore itself still succeeds. No other metadata is
+    changed.
+    """
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    unnormalized: list[Path] = []
+    for env_dir in _python_env_dirs(pre_commit_home):
+        try:
+            version_info = _pyvenv_version_info(env_dir)
+            if version_info is None or _pyvenv_major_minor(version_info) != current:
+                continue
+            interpreter = env_dir / "bin" / "python"
+            try:
+                result = subprocess.run(
+                    [
+                        str(interpreter),
+                        "-S",
+                        "-c",
+                        "import sys;print('.'.join(str(p) for p in sys.version_info))",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if result.returncode != 0:
+                continue
+            reported = result.stdout.strip()
+            reported_parts = reported.split(".")
+            if len(reported_parts) < 3 or _pyvenv_major_minor(reported) != current:
+                continue
+            # A real interpreter reports five components, for example
+            # ``3.12.4.final.0``; keep major.minor.micro and normalize the
+            # tail to the form virtualenv writes.
+            rewritten = f"{'.'.join(reported_parts[:3])}.final.0"
+            if rewritten != version_info:
+                _rewrite_version_info(env_dir, rewritten)
+        except (OSError, UnicodeDecodeError):
+            unnormalized.append(env_dir)
+    if unnormalized:
+        listing = ", ".join(str(directory) for directory in unnormalized)
         print(
-            f"WARNING: the restored pre-commit cache was built for another "
-            f"interpreter: found {found}, this interpreter is Python "
-            f"{current}. Hooks that use the python language will fail "
-            f"until the cache is rebuilt on this interpreter.",
+            f"WARNING: could not normalize the version_info of {listing}; "
+            f"pre-commit may try to reinstall these environments.",
             file=sys.stderr,
         )
 
@@ -388,7 +563,9 @@ def _swap_cache_home(staging: Path, pre_commit_home: Path) -> None:
 
     The live cache moves aside first, so a failed promotion can move it
     back instead of losing it. The backup is removed only after the
-    staged cache is in place.
+    staged cache is in place. When the rollback itself fails, the
+    backup is left in place and the error names it and the recovery
+    command.
     """
     if not staging.is_dir():
         raise OSError(f"the staged cache {staging} is not a directory")
@@ -400,9 +577,19 @@ def _swap_cache_home(staging: Path, pre_commit_home: Path) -> None:
         moved_aside = True
     try:
         os.replace(staging, pre_commit_home)
-    except OSError:
-        if moved_aside:
+    except OSError as promotion_error:
+        if not moved_aside:
+            raise
+        try:
             os.replace(backup, pre_commit_home)
+        except OSError as rollback_error:
+            # Keep the promotion error as the primary cause and tell the
+            # operator where the live cache is and how to recover it.
+            raise OSError(
+                f"{promotion_error}; the live cache was moved to {backup} "
+                f"and could not be moved back ({rollback_error}); recover "
+                f"it with: mv {backup} {pre_commit_home}"
+            ) from promotion_error
         raise
     if moved_aside:
         _remove_quietly(backup)
@@ -450,28 +637,43 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
             )
         if members.skipped_members or members.size_capped:
             return False
-        staged = _cached_repos(staging)
-        if not required <= staged:
+        staged_paths = _cached_repo_paths(staging)
+        if not required <= set(staged_paths):
             print(
                 f"WARNING: the archive {tarball} does not cover every "
                 f"configured hook repository revision "
-                f"({_format_revisions(required - staged)}); keeping the tarball "
-                f"and the existing cache.",
+                f"({_format_revisions(required - set(staged_paths))}); keeping "
+                f"the tarball and the existing cache.",
                 file=sys.stderr,
             )
             return False
+        cache_root = pre_commit_home.resolve()
+        for repo, rev in sorted(required):
+            rejection = _staged_repository_rejection(
+                staged_paths.get((repo, rev), ""),
+                staging,
+                cache_root,
+            )
+            if rejection:
+                print(
+                    f"WARNING: the archive {tarball} cannot provide "
+                    f"{repo} @ {rev}: {rejection}; keeping the tarball and "
+                    f"the existing cache.",
+                    file=sys.stderr,
+                )
+                return False
         live = _cached_repos(pre_commit_home)
-        if not live <= staged:
+        if not live <= set(staged_paths):
             print(
                 f"WARNING: promoting the archive {tarball} would drop cached "
                 f"revisions that the live cache {pre_commit_home} already "
-                f"holds ({_format_revisions(live - staged)}); keeping the "
-                f"tarball and the live cache.",
+                f"holds ({_format_revisions(live - set(staged_paths))}); "
+                f"keeping the tarball and the live cache.",
                 file=sys.stderr,
             )
             return False
         _swap_cache_home(staging, pre_commit_home)
-    except (tarfile.TarError, EOFError, OSError) as error:
+    except (tarfile.TarError, EOFError, OSError, zlib.error) as error:
         print(
             f"WARNING: cannot restore the pre-commit cache from {tarball}: {error}",
             file=sys.stderr,
@@ -479,6 +681,7 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
         return False
     finally:
         _remove_quietly(staging)
+    _normalize_pyvenv_patch_versions(pre_commit_home)
     print(
         f"Restored the offline pre-commit cache from {tarball} into {pre_commit_home}."
     )

@@ -469,6 +469,22 @@ class PythonEnvironmentTests(unittest.TestCase):
         self.assertIn("pyvenv.cfg is missing or unreadable", str(ctx.exception))
         self.assertFalse(tarball.exists())
 
+    def test_unreadable_pyvenv_cfg_rejects(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        env_dir = cache_home / "repodir" / "py_env"
+        env_dir.mkdir(parents=True)
+        # Invalid UTF-8 must not escape the fail-soft handler.
+        (env_dir / "pyvenv.cfg").write_bytes(b"\xff\xfe\xff\xfe")
+        with (
+            patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertIn("pyvenv.cfg is missing or unreadable", str(ctx.exception))
+        self.assertFalse(tarball.exists())
+
     def test_base_executable_outside_usr_bin_rejects(self) -> None:
         root = self._temporary_root()
         cache_home = root / "cache"
@@ -625,6 +641,13 @@ class WorkflowCommandTests(unittest.TestCase):
     def test_sanitize_workflow_command_caps_the_length(self) -> None:
         clean = bootstrap._sanitize_workflow_command("x" * 600)
         self.assertLessEqual(len(clean), bootstrap._WORKFLOW_COMMAND_CAP)
+
+    def test_sanitize_workflow_command_breaks_legacy_markers(self) -> None:
+        clean = bootstrap._sanitize_workflow_command("##[error]x")
+        # The zero-width space keeps the runner's legacy ##[ marker from
+        # matching anywhere in the line.
+        self.assertNotIn("##[", clean)
+        self.assertIn("##\u200b[", clean)
 
     def test_fail_soft_warning_is_sanitized_with_inert_detail(self) -> None:
         failure = RuntimeError("boom\nsecond line ::error:: 100% done")

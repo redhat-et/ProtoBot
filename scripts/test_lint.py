@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,8 +38,16 @@ def _init_repo(repo: Path) -> None:
     _git(repo, "config", "commit.gpgsign", "false")
 
 
-def _make_db(db_path: Path, rows: list[tuple[str, str]]) -> None:
-    """Create a pre-commit-style ``db.db`` with *rows* of ``(repo, ref)``."""
+def _make_db(
+    db_path: Path,
+    rows: list[tuple[str, str]],
+    paths: dict[tuple[str, str], str] | None = None,
+) -> None:
+    """Create a pre-commit-style ``db.db`` with *rows* of ``(repo, ref)``.
+
+    *paths* maps a row to its build-time repository directory; rows
+    without an entry store ``unused``.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
@@ -51,8 +60,11 @@ def _make_db(db_path: Path, rows: list[tuple[str, str]]) -> None:
             ");",
         )
         conn.executemany(
-            "INSERT INTO repos (repo, ref, path) VALUES (?, ?, 'unused')",
-            rows,
+            "INSERT INTO repos (repo, ref, path) VALUES (?, ?, ?)",
+            [
+                (repo, ref, (paths or {}).get((repo, ref), "unused"))
+                for repo, ref in rows
+            ],
         )
         conn.commit()
     finally:
@@ -257,25 +269,73 @@ class PreflightRestoreTests(unittest.TestCase):
     def _current_interpreter(self) -> str:
         return f"{sys.version_info.major}.{sys.version_info.minor}"
 
+    def _current_python(self) -> str:
+        """The five-part form a real interpreter prints for sys.version_info."""
+        return (
+            f"{sys.version_info.major}.{sys.version_info.minor}."
+            f"{sys.version_info.micro}.final.0"
+        )
+
     def _build_tarball(
         self,
         rows: list[tuple[str, str]],
         *,
         other_interpreters: tuple[str, ...] = (),
+        env_specs: tuple[tuple[str, str | None, str | None], ...] = (),
+        include_repo_dirs: bool = True,
+        stored_paths: dict[tuple[str, str], str] | None = None,
     ) -> None:
         """Write a bootstrap tarball holding a cache with *rows* cached.
 
-        The fixture mirrors the real layout: a ``db.db`` at the archive
-        root and per-repo ``py_env-python<X.Y>`` virtualenvs whose
-        ``bin/python`` is an absolute symlink.
+        The fixture mirrors the real layout: a ``db.db`` whose rows store
+        the build-time repository paths, one repository directory per
+        row with a ``.pre-commit-hooks.yaml``, and python environments
+        described by ``pyvenv.cfg`` metadata. ``env_specs`` adds
+        environments as ``(name, version_info, stub_version)``; a
+        ``stub_version`` also installs a ``bin/python`` script that
+        prints it. ``stored_paths`` overrides the row paths.
         """
         packed = self.root / "packed"
-        _make_db(packed / "db.db", rows)
-        versions = (self._current_interpreter(), *other_interpreters)
-        for version in versions:
-            bin_directory = packed / "repodir" / f"py_env-python{version}" / "bin"
-            bin_directory.mkdir(parents=True, exist_ok=True)
-            os.symlink("/usr/bin/python3", bin_directory / "python")
+        paths: dict[tuple[str, str], str] = {}
+        if include_repo_dirs:
+            for index, row in enumerate(rows):
+                repo_dir = packed / f"repo{index}"
+                repo_dir.mkdir(parents=True, exist_ok=True)
+                (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                    "hooks: []\n", encoding="utf-8"
+                )
+                paths[row] = str(self.home / f"repo{index}")
+        paths.update(stored_paths or {})
+        _make_db(packed / "db.db", rows, paths)
+        default_env = packed / "repodir" / f"py_env-python{self._current_interpreter()}"
+        (default_env / "bin").mkdir(parents=True, exist_ok=True)
+        (default_env / "pyvenv.cfg").write_text(
+            f"version_info = {self._current_interpreter()}.0.final.0\n",
+            encoding="utf-8",
+        )
+        # A real virtualenv's bin/python is an absolute link to the base
+        # interpreter; the restore must keep it.
+        os.symlink("/usr/bin/python3", default_env / "bin" / "python")
+        for version in other_interpreters:
+            env_dir = packed / "repodir" / f"py_env-python{version}"
+            env_dir.mkdir(parents=True, exist_ok=True)
+            (env_dir / "pyvenv.cfg").write_text(
+                f"version_info = {version}.0.final.0\n", encoding="utf-8"
+            )
+        for name, version_info, stub_version in env_specs:
+            env_dir = packed / "repodir" / name
+            (env_dir / "bin").mkdir(parents=True, exist_ok=True)
+            if version_info is not None:
+                (env_dir / "pyvenv.cfg").write_text(
+                    f"version_info = {version_info}\n", encoding="utf-8"
+                )
+            if stub_version is not None:
+                stub = env_dir / "bin" / "python"
+                stub.write_text(
+                    f"#!/bin/sh\nprintf '%s\\n' '{stub_version}'\n",
+                    encoding="utf-8",
+                )
+                stub.chmod(0o755)
         with tarfile.open(self.tarball, "w:gz") as tar:
             for path in sorted(packed.rglob("*")):
                 # recursive=False: rglob already lists every entry, and
@@ -292,6 +352,7 @@ class PreflightRestoreTests(unittest.TestCase):
         self._build_tarball(self._config_rows())
         stdout, stderr = io.StringIO(), io.StringIO()
         with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):
@@ -369,6 +430,7 @@ class PreflightRestoreTests(unittest.TestCase):
         self._build_tarball(self._config_rows(), other_interpreters=("1.2",))
         stdout, stderr = io.StringIO(), io.StringIO()
         with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):
@@ -379,6 +441,130 @@ class PreflightRestoreTests(unittest.TestCase):
         message = stderr.getvalue()
         self.assertIn("built for another interpreter", message)
         self.assertIn("py_env-python1.2", message)
+
+    def test_unrecognized_env_name_with_mismatched_metadata_warns(self) -> None:
+        # Directory names carry no interpreter information; the warning
+        # must come from the pyvenv.cfg metadata.
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(
+                ("py_env-default", "9.9.1.final.0", None),
+                ("py_env-nocfg", None, None),
+            ),
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("built for another interpreter", message)
+        self.assertIn("py_env-default", message)
+        self.assertIn("pyvenv.cfg missing or unreadable", message)
+        self.assertIn("py_env-nocfg", message)
+
+    def test_stale_patch_version_is_normalized_from_the_env_interpreter(self) -> None:
+        # The runner cannot know the sandbox's patch version; the
+        # environment's own bin/python supplies it and the restore
+        # rewrites version_info so pre-commit's health check passes.
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(
+                (
+                    "py_env-stale",
+                    f"{self._current_interpreter()}.0.final.0",
+                    self._current_python(),
+                ),
+            ),
+        )
+        stdout = io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        cfg = (self.home / "repodir" / "py_env-stale" / "pyvenv.cfg").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(f"version_info = {self._current_python()}", cfg)
+
+    def test_unwritable_pyvenv_cfg_does_not_fail_the_restore(self) -> None:
+        # A pyvenv.cfg that cannot be rewritten must not crash the
+        # restore; the environment is skipped with a warning.
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(
+                (
+                    "py_env-stale",
+                    f"{self._current_interpreter()}.0.final.0",
+                    self._current_python(),
+                ),
+            ),
+        )
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            patch.object(
+                checker, "_rewrite_version_info", side_effect=OSError("read-only")
+            ),
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        # The restore succeeded and no traceback escaped.
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("py_env-stale", message)
+        self.assertIn("reinstall", message)
+
+    def test_env_reporting_another_major_minor_is_left_unchanged(self) -> None:
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=(("py_env-other", "3.11.9.final.0", "3.11.9"),),
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        cfg = (self.home / "repodir" / "py_env-other" / "pyvenv.cfg").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("version_info = 3.11.9.final.0", cfg)
+        self.assertIn("built for another interpreter", stderr.getvalue())
+
+    def test_rewrite_version_info_preserves_other_lines(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        env_dir = Path(temporary_directory.name)
+        (env_dir / "pyvenv.cfg").write_text(
+            "home = /usr/bin\nversion_info = 3.12.0.final.0\nbinary = x\n",
+            encoding="utf-8",
+        )
+        checker._rewrite_version_info(env_dir, "3.12.9.final.0")
+        self.assertEqual(
+            "home = /usr/bin\nversion_info = 3.12.9.final.0\nbinary = x\n",
+            (env_dir / "pyvenv.cfg").read_text(encoding="utf-8"),
+        )
 
     def test_members_that_escape_the_destination_are_skipped(self) -> None:
         payload = io.BytesIO(b"data")
@@ -497,11 +683,99 @@ class PreflightRestoreTests(unittest.TestCase):
         )
         self.assertEqual([], list(self.root.glob(f".{self.home.name}.restore-*")))
 
+    def test_row_without_a_repository_directory_is_rejected(self) -> None:
+        # db.db covers the configured revisions, but the archive does
+        # not carry the repository directory for one of them.
+        inside = {
+            ("https://example.invalid/foo", "aaaa"): str(self.home / "repo0"),
+            ("https://example.invalid/bar", "bbbb"): str(self.home / "repo1"),
+        }
+        self._build_tarball(
+            self._config_rows(), include_repo_dirs=False, stored_paths=inside
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("https://example.invalid/foo @ aaaa", message)
+        self.assertIn("is missing from the archive", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_row_with_a_path_outside_the_cache_root_is_rejected(self) -> None:
+        self._build_tarball(
+            self._config_rows(),
+            stored_paths={("https://example.invalid/foo", "aaaa"): "/elsewhere/repo0"},
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("https://example.invalid/foo @ aaaa", message)
+        self.assertIn("the stored path /elsewhere/repo0 is outside", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_corrupt_deflate_payload_fails_gracefully(self) -> None:
+        self._build_tarball(self._config_rows())
+        raw = bytearray(self.tarball.read_bytes())
+        # A valid gzip header with a corrupted DEFLATE payload; the
+        # exception type differs by Python version, but the restore must
+        # never traceback.
+        raw[20:28] = b"\x00\xff\x00\xff\x00\xff\x00\xff"
+        self.tarball.write_bytes(bytes(raw))
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        self.assertIn("cannot restore the pre-commit cache", stderr.getvalue())
+        self.assertTrue(self.tarball.exists())
+
+    def test_zlib_error_is_caught(self) -> None:
+        self._build_tarball(self._config_rows())
+        with patch.object(
+            tarfile, "open", side_effect=zlib.error("Error -3 while decompressing")
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(1, rc)
+        self.assertIn("cannot restore the pre-commit cache", stderr.getvalue())
+        self.assertIn("Error -3", stderr.getvalue())
+        self.assertTrue(self.tarball.exists())
+
     def test_complete_archive_is_promoted_over_a_partial_live_cache(self) -> None:
         _make_db(self.home / "db.db", [("https://example.invalid/foo", "aaaa")])
         self._build_tarball(self._config_rows())
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+        ):
             rc = checker._preflight_with_restore(
                 False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
             )
@@ -634,6 +908,7 @@ class PreflightRestoreTests(unittest.TestCase):
         stdout = io.StringIO()
         with (
             patch.object(tarfile.TarFile, "extractall", extractall_without_filter),
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
             contextlib.redirect_stdout(stdout),
         ):
             rc = checker._preflight_with_restore(
@@ -721,6 +996,38 @@ class SwapCacheHomeTests(unittest.TestCase):
             checker._cached_repos(self.home),
         )
         self.assertEqual([], list(self.root.glob(f".{self.home.name}.backup-*")))
+
+    def test_double_failure_reports_the_backup_and_recovery_command(self) -> None:
+        self._seed_live_cache()
+        staging = self.root / "staging"
+        staging.mkdir()
+        original_replace = os.replace
+        calls = {"count": 0}
+
+        def replace_failing_on_promotion_and_rollback(source, destination):
+            calls["count"] += 1
+            if calls["count"] in (2, 3):
+                raise OSError("replace refused")
+            return original_replace(source, destination)
+
+        with (
+            patch("os.replace", side_effect=replace_failing_on_promotion_and_rollback),
+            self.assertRaises(OSError) as ctx,
+        ):
+            checker._swap_cache_home(staging, self.home)
+        backup = self.root / f".{self.home.name}.backup-{os.getpid()}"
+        message = str(ctx.exception)
+        # The promotion error stays the primary cause.
+        self.assertIn("replace refused", message)
+        # The backup location and the recovery command are named.
+        self.assertIn(str(backup), message)
+        self.assertIn(f"mv {backup} {self.home}", message)
+        # The backup with the live cache is still there.
+        self.assertTrue(backup.is_dir())
+        self.assertEqual(
+            {("https://example.invalid/foo", "aaaa")},
+            checker._cached_repos(backup),
+        )
 
     def test_successful_promotion_removes_the_backup(self) -> None:
         self._seed_live_cache()
@@ -977,7 +1284,15 @@ class MainCheckParityTests(unittest.TestCase):
         ]
         tarball = self.root / "pre-commit-cache.tar.gz"
         packed = self.root / "packed"
-        _make_db(packed / "db.db", rows)
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        _make_db(packed / "db.db", rows, paths)
         with tarfile.open(tarball, "w:gz") as tar:
             for path in sorted(packed.rglob("*")):
                 tar.add(path, arcname=path.relative_to(packed), recursive=False)
@@ -992,6 +1307,7 @@ class MainCheckParityTests(unittest.TestCase):
                 "_load_config",
                 return_value=_CONFIG_TWO_REMOTE_ONE_LOCAL,
             ),
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
