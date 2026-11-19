@@ -293,7 +293,15 @@ def _ceiling_number(value: object, file_path: str, source: str) -> int:
 def ceiling_values(
     data: dict[str, Any], source: str
 ) -> dict[tuple[str, str], list[int]]:
-    """Index ceiling entries as ``(file_path, rule_id) -> [values]``."""
+    """Index ceiling entries as ``(file_path, rule_id) -> [values]``.
+
+    ``file_path`` must be a repo-relative path without parent directory (``..``)
+    segments. It is normalized with ``os.path.normpath`` and converted to a
+    POSIX-style string before it is used as part of the index key, so
+    alternate representations of the same path (``./AGENTS.md``,
+    ``docs//vision.md``, Windows backslashes) match the canonical form used
+    elsewhere. Absolute paths and paths containing ``..`` segments are rejected.
+    """
     index: dict[tuple[str, str], list[int]] = {}
     clean_source = sanitize_log_string(source)
     for entry in data.get("violations", []):
@@ -305,7 +313,7 @@ def ceiling_values(
             continue
         file_path = entry.get("file_path")
         rule_id = entry.get("rule_id")
-        if not isinstance(file_path, str) or not file_path:
+        if not isinstance(file_path, str) or not file_path.strip():
             raise BaselineRatchetError(
                 f"ERROR: {clean_source} ceiling entry is missing file_path"
             )
@@ -319,7 +327,21 @@ def ceiling_values(
                 f"ERROR: {clean_source} ceiling for {clean_path} is missing a value"
             )
         number = _ceiling_number(entry["value"], file_path, source)
-        index.setdefault((file_path, rule_id), []).append(number)
+        raw_path = file_path.strip().replace("\\", "/")
+        if (
+            raw_path.startswith("/")
+            or re.match(r"^[a-zA-Z]:", raw_path) is not None
+            or ".." in raw_path.split("/")
+        ):
+            raise BaselineRatchetError(
+                f"ERROR: {clean_source} ceiling for {clean_path} has an invalid file_path"
+            )
+        normalized_path = Path(os.path.normpath(raw_path)).as_posix()
+        if normalized_path == "." or normalized_path.startswith(("/", "..")):
+            raise BaselineRatchetError(
+                f"ERROR: {clean_source} ceiling for {clean_path} has an invalid file_path"
+            )
+        index.setdefault((normalized_path, rule_id), []).append(number)
     return index
 
 

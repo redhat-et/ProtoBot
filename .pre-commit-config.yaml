@@ -149,7 +149,13 @@ repos:
         entry: python3 scripts/check_harness_integrity.py --online-if-ci
         language: system
         pass_filenames: false
-        files: ^\.fullsend/harness/[^/]+\.yaml$
+        files: ^\.fullsend/harness/[^/]+\.ya?ml$
+      - id: test-harness-integrity
+        name: test-harness-integrity
+        entry: python3 scripts/test_check_harness_integrity.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_harness_integrity|test_check_harness_integrity)\.py$
       - id: baseline-ratchet
         name: baseline-ratchet
         entry: python3 scripts/check_baseline_ratchet.py
@@ -162,6 +168,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$
+      - id: test-lint-wrapper
+        name: test-lint-wrapper
+        entry: python3 scripts/test_lint.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(lint|test_lint)\.py$
       - id: adr-amendments
         name: adr-amendments
         entry: python3 scripts/check_adr_amendments.py
@@ -175,3 +187,15 @@ repos:
         # are passed either way.
         always_run: true
         files: ^docs/decisions/.*\.md$
+      - id: validator-spec-parity
+        name: validator-spec-parity
+        entry: python3 scripts/check_validator_spec_parity.py
+        language: system
+        pass_filenames: false
+        files: ^(validator/internal/.+|validator/README\.md|docs/architecture/ProtoBotV2\.md|scripts/check_validator_spec_parity\.py)$
+      - id: test-validator-spec-parity
+        name: test-validator-spec-parity
+        entry: python3 scripts/test_check_validator_spec_parity.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_validator_spec_parity|test_check_validator_spec_parity)\.py$

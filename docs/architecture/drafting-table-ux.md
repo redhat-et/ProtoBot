@@ -143,11 +143,11 @@ the conversation.
 
 However, the session emits structured trace data (replayable inputs, outputs,
 and decision records) for component-level evaluability, as required by the
-Architecture ([`docs/architecture.md`](../architecture.md#specification-toolkit)
+Architecture ([`docs/architecture.md`][v1-arch-specification-toolkit]
 and [`overview.md`](overview.md#build-for-evaluability-from-day-one)).
 Traces are a record of what happened, not a resumption mechanism. The trace
 format is an open design question
-([`docs/architecture.md`](../architecture.md#specification-toolkit)).
+([`docs/architecture.md`][v1-arch-specification-toolkit]).
 Whether the user is informed that their session is recorded is a UX decision
 deferred to the Specification Toolkit adapter (#33).
 
@@ -1008,3 +1008,5 @@ OAuth tokens, hosted session manager, or live cloud services.
   storage format
 
 [project-init-grammar]: ears-manager-cli.md#project-initialization-grammar
+
+[v1-arch-specification-toolkit]: https://github.com/redhat-et/ProtoBot/blob/66870f479af8b52653bab6d7ea3265fef57763ea/docs/architecture.md#specification-toolkit

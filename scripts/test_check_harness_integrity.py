@@ -57,6 +57,18 @@ class HarnessIntegrityTests(unittest.TestCase):
 
         build_opener.assert_not_called()
 
+    def test_prerelease_and_build_pin_is_accepted_by_parser(self) -> None:
+        """Accept prerelease and build metadata in a pinned base URL."""
+        base = (
+            "https://raw.githubusercontent.com/fullsend-ai/agents/"
+            "v1.2.3-rc.1+build.2/harness/review.yaml#sha256=" + "a" * 64
+        )
+
+        pinned = checker.parse_pinned_base(base)
+
+        self.assertEqual(base.rsplit("#", maxsplit=1)[0], pinned.fetch_url)
+        self.assertEqual("a" * 64, pinned.expected_sha256)
+
     def test_harness_read_failure_reports_exception_type_only(self) -> None:
         """Distinguish local read failures without exposing their details."""
         errors = (
@@ -405,14 +417,16 @@ class HarnessIntegrityTests(unittest.TestCase):
         self.assertIn("base must be", diagnostic)
         build_opener.assert_not_called()
 
-    def test_cli_scans_yaml_files_and_defaults_to_offline(self) -> None:
-        """Validate discovered YAML files offline by default."""
+    def test_cli_scans_yaml_and_yml_files_and_defaults_to_offline(self) -> None:
+        """Validate discovered YAML and YML files offline by default."""
         base = (
             "https://raw.githubusercontent.com/fullsend-ai/agents/v1.2.3/"
             "harness/review.yaml#sha256=" + "a" * 64
         )
         self.write_harness(f'base: "{base}"\n')
-        (self.harness_dir / "ignored.yml").write_text("not YAML config\n")
+        (self.harness_dir / "included.yml").write_text(
+            f'base: "{base}"\n', encoding="utf-8"
+        )
 
         stdout = io.StringIO()
         with (
@@ -424,7 +438,7 @@ class HarnessIntegrityTests(unittest.TestCase):
             result = checker.main([])
 
         self.assertEqual(0, result)
-        self.assertIn("Validated 1 harness file(s)", stdout.getvalue())
+        self.assertIn("Validated 2 harness file(s)", stdout.getvalue())
         self.assertIn("offline structure", stdout.getvalue())
         build_opener.assert_not_called()
 

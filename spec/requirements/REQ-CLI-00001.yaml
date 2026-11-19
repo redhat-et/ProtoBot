@@ -1,0 +1,13 @@
+---
+id: REQ-CLI-00001
+type: event-driven
+text: >-
+  When a contributor requests a specification check, the CLI shall
+  validate the registered artifacts and structured records.
+applies_to:
+  interfaces:
+    - protobot-cli
+  scopes:
+    - ears-manager
+relationships: []
+status: active

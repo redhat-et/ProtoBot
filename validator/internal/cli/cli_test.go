@@ -12,13 +12,19 @@ import (
 	"github.com/redhat-et/protobot/validator/internal/gitcmd"
 	"github.com/redhat-et/protobot/validator/internal/immutability"
 	"github.com/redhat-et/protobot/validator/internal/layout"
+	"github.com/redhat-et/protobot/validator/internal/records"
+	"github.com/redhat-et/protobot/validator/internal/revision"
+	"github.com/redhat-et/protobot/validator/internal/testutil"
 )
 
 func TestRunValidTargetAndBase(t *testing.T) {
 	target := gitRepo(t)
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
-	if code != exitOK || stderr != "" {
+	if code != exitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("stderr %q omitted empty-base note", stderr)
 	}
 	if !strings.Contains(stdout, "validator: ok") {
 		t.Fatalf("stdout %q does not report ok", stdout)
@@ -34,8 +40,11 @@ func TestRunValidTargetAndBase(t *testing.T) {
 func TestRunEqualsForm(t *testing.T) {
 	target := gitRepo(t)
 	code, stdout, stderr := runCLI("--target="+target, "--base=main")
-	if code != exitOK || stderr != "" {
+	if code != exitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("stderr %q omitted empty-base note", stderr)
 	}
 	if !strings.Contains(stdout, "base: main") {
 		t.Fatalf("stdout %q does not include equals-form base", stdout)
@@ -108,6 +117,7 @@ func TestRunMalformedFlags(t *testing.T) {
 		{name: "empty base", args: []string{"--target", target, "--base="}, want: "--base takes a comparison-base argument"},
 		{name: "duplicate target", args: []string{"--target", target, "--target", target, "--base", "main"}, want: "--target may be specified once"},
 		{name: "duplicate base", args: []string{"--target", target, "--base", "main", "--base", "other"}, want: "--base may be specified once"},
+		{name: "duplicate self-comparison", args: []string{"--target", target, "--base", "main", "--allow-self-comparison", "--allow-self-comparison"}, want: "--allow-self-comparison may be specified once"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,8 +217,11 @@ func TestRunAcceptedTargetForms(t *testing.T) {
 				t.Chdir(tc.chdir)
 			}
 			code, stdout, stderr := runCLI(tc.args...)
-			if code != exitOK || stderr != "" {
+			if code != exitOK {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if !strings.Contains(stderr, revision.CodeEmptyBase) {
+				t.Fatalf("stderr %q omitted empty-base note", stderr)
 			}
 			if !strings.Contains(stdout, "target: "+tc.target) {
 				t.Fatalf("stdout %q does not include target %q", stdout, tc.target)
@@ -294,48 +307,23 @@ func TestRunValidSpecRecords(t *testing.T) {
 
 func TestRunAcceptsAllowedRelationshipTypes(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00000.yaml", `id: REQ-API-00000
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: retired
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall log requests.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
-type: ubiquitous
-text: The service shall expose metrics.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: depends-on
-    target: REQ-API-00001
-  - type: supersedes
-    target: REQ-API-00000
-  - type: related-to
-    target: REQ-API-00003
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00000.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00000"),
+		testutil.WithStatus(records.StatusRetired),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00003"),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithRelationships(
+			records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+			records.Relationship{Type: records.RelSupersedes, Target: "REQ-API-00000"},
+			records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00003"},
+		),
+	))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "spec")
 
@@ -350,27 +338,15 @@ status: active
 
 func TestRunAcceptsResolvedReferences(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\nkind: http\ndescription: Health check HTTP API.\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: retired
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  interfaces:
-    - health-api
-relationships:
-  - type: supersedes
-    target: REQ-API-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", testutil.ValidInterfaceYAML())
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+		testutil.WithStatus(records.StatusRetired),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}}),
+		testutil.WithRelationships(records.Relationship{Type: records.RelSupersedes, Target: "REQ-API-00001"}),
+	))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "spec")
 
@@ -385,17 +361,10 @@ status: active
 
 func TestRunRejectsDanglingReferences(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  interfaces:
-    - undeclared-api
-relationships:
-  - type: depends-on
-    target: REQ-MISSING-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"undeclared-api"}}),
+		testutil.WithRelationships(records.Relationship{Type: records.RelDependsOn, Target: "REQ-MISSING-00001"}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -415,14 +384,9 @@ status: active
 func TestRunSuppressesReferenceDiagnosticWhenTargetFailsToParse(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-relationships:
-  - type: depends-on
-    target: REQ-API-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithRelationships(records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -440,17 +404,10 @@ func TestRunCrossStoreParseFailureDoesNotSuppressReferenceDiagnostic(t *testing.
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/health-api.yaml", "id: [\n")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", "id: [\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  interfaces:
-    - health-api
-relationships:
-  - type: depends-on
-    target: REQ-API-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}}),
+		testutil.WithRelationships(records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -472,16 +429,11 @@ status: active
 
 func TestRunRejectsAmbiguousInterfaceReference(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/interfaces/api-a.yaml", "name: health-api\nkind: http\ndescription: Health check.\n")
-	writeSpecFile(t, target, "spec/interfaces/api-b.yaml", "name: health-api\nkind: http\ndescription: Duplicate health check.\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  interfaces:
-    - health-api
-status: active
-`)
+	writeSpecFile(t, target, "spec/interfaces/api-a.yaml", testutil.ValidInterfaceYAML(testutil.WithName("health-api")))
+	writeSpecFile(t, target, "spec/interfaces/api-b.yaml", testutil.ValidInterfaceYAML(testutil.WithName("health-api")))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithAppliesTo(records.Applicability{Interfaces: []string{"health-api"}}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -502,29 +454,44 @@ func TestRunEARSShapeDiagnostics(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "zero shall",
-			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service must return HTTP 200.\nstatus: active\n",
-			want:    "contains 0 occurrences",
+			name: "zero shall",
+			content: testutil.ValidRequirementYAML(
+				testutil.WithType(records.TypeUbiquitous),
+				testutil.WithText("The service must return HTTP 200."),
+			),
+			want: "contains 0 occurrences",
 		},
 		{
-			name:    "multiple shall",
-			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: The service shall start and shall stop.\nstatus: active\n",
-			want:    "contains 2 occurrences",
+			name: "multiple shall",
+			content: testutil.ValidRequirementYAML(
+				testutil.WithType(records.TypeUbiquitous),
+				testutil.WithText("The service shall start and shall stop."),
+			),
+			want: "contains 2 occurrences",
 		},
 		{
-			name:    "type mismatch",
-			content: "id: REQ-API-00002\ntype: ubiquitous\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n",
-			want:    "ubiquitous",
+			name: "type mismatch",
+			content: testutil.ValidRequirementYAML(
+				testutil.WithType(records.TypeUbiquitous),
+				testutil.WithText("When a client sends GET /health, the service shall return HTTP 200."),
+			),
+			want: "ubiquitous",
 		},
 		{
-			name:    "state-driven During alias",
-			content: "id: REQ-API-00002\ntype: state-driven\ntext: During maintenance, the service shall reject writes.\nstatus: active\n",
-			want:    "state-driven",
+			name: "state-driven During alias",
+			content: testutil.ValidRequirementYAML(
+				testutil.WithType(records.TypeStateDriven),
+				testutil.WithText("During maintenance, the service shall reject writes."),
+			),
+			want: "state-driven",
 		},
 		{
-			name:    "unrecognized type",
-			content: "id: REQ-API-00002\ntype: feature\ntext: The service shall return HTTP 200.\nstatus: active\n",
-			want:    "feature",
+			name: "unrecognized type",
+			content: testutil.ValidRequirementYAML(
+				testutil.WithType("feature"),
+				testutil.WithText("The service shall return HTTP 200."),
+			),
+			want: "feature",
 		},
 	}
 	for _, tc := range cases {
@@ -547,60 +514,36 @@ func TestRunEARSShapeDiagnostics(t *testing.T) {
 
 func TestRunValidEARSTypes(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-UBI-00001.yaml", `id: REQ-UBI-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-EVT-00001.yaml", `id: REQ-EVT-00001
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-STA-00001.yaml", `id: REQ-STA-00001
-type: state-driven
-text: While maintenance mode is active, the service shall reject writes.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-UNW-00001.yaml", `id: REQ-UNW-00001
-type: unwanted-behavior
-text: If a token expires, then the service shall reject the request.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-OPT-00001.yaml", `id: REQ-OPT-00001
-type: optional-feature
-text: Where caching is enabled, the service shall use a cache.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-CPX-00001.yaml", `id: REQ-CPX-00001
-type: complex
-text: While maintenance mode is active, when a user writes, the service shall reject the request.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-UBI-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-UBI-00001"),
+		testutil.WithType(records.TypeUbiquitous),
+		testutil.WithText("The service shall exist."),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-EVT-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-EVT-00001"),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-STA-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-STA-00001"),
+		testutil.WithType(records.TypeStateDriven),
+		testutil.WithText("While maintenance mode is active, the service shall reject writes."),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-UNW-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-UNW-00001"),
+		testutil.WithType(records.TypeUnwantedBehavior),
+		testutil.WithText("If a token expires, then the service shall reject the request."),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-OPT-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-OPT-00001"),
+		testutil.WithType(records.TypeOptionalFeature),
+		testutil.WithText("Where caching is enabled, the service shall use a cache."),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-CPX-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-CPX-00001"),
+		testutil.WithType(records.TypeComplex),
+		testutil.WithText("While maintenance mode is active, when a user writes, the service shall reject the request."),
+	))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -613,15 +556,12 @@ status: active
 
 func TestRunValidatesRetiredRequirementsEARSShape(t *testing.T) {
 	target := t.TempDir()
-	writeSpecFile(t, target, "spec/requirements/REQ-RET-00001.yaml", `id: REQ-RET-00001
-type: ubiquitous
-text: Invalid text without any obligation.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: retired
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-RET-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-RET-00001"),
+		testutil.WithType(records.TypeUbiquitous),
+		testutil.WithText("Invalid text without any obligation."),
+		testutil.WithStatus(records.StatusRetired),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -637,43 +577,18 @@ status: retired
 
 func TestRunRejectsUnsupportedRelationshipTypes(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall log requests.
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", `id: REQ-API-00003
-type: ubiquitous
-text: The service shall expose metrics.
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", `id: REQ-API-00004
-type: ubiquitous
-text: The service shall rate-limit clients.
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00005.yaml", `id: REQ-API-00005
-type: ubiquitous
-text: The service shall record audit events.
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: depends-on
-    target: REQ-API-00001
-  - type: conflicts-with
-    target: REQ-API-00004
-  - type: related-to
-    target: REQ-API-00003
-  - type: blocks
-    target: REQ-API-00005
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00001")))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00003.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00003")))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00004")))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00005.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00005")))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithRelationships(
+			records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"},
+			records.Relationship{Type: "conflicts-with", Target: "REQ-API-00004"},
+			records.Relationship{Type: records.RelRelatedTo, Target: "REQ-API-00003"},
+			records.Relationship{Type: "blocks", Target: "REQ-API-00005"},
+		),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -697,7 +612,10 @@ status: active
 func TestRunLayoutAndEARSDiagnosticsTogether(t *testing.T) {
 	target := t.TempDir()
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", "id: REQ-API-00002\ntype: ubiquitous\ntext: When a client sends GET /health, the service shall return HTTP 200.\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithType(records.TypeUbiquitous),
+		testutil.WithText("When a client sends GET /health, the service shall return HTTP 200."),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -788,28 +706,15 @@ func TestRunDoesNotTreatNonCanonicalFailedRequirementAsKnownID(t *testing.T) {
 
 func TestRunRejectsRelationshipCycles(t *testing.T) {
 	target := t.TempDir()
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: depends-on
-    target: REQ-API-00002
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /ready, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: depends-on
-    target: REQ-API-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+		testutil.WithRelationships(records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00002"}),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00002"),
+		testutil.WithText("When a client sends GET /ready, the service shall return HTTP 200."),
+		testutil.WithRelationships(records.Relationship{Type: records.RelDependsOn, Target: "REQ-API-00001"}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -846,22 +751,10 @@ func TestRunLayoutDiagnostics(t *testing.T) {
 func TestRunReportsBothLayoutAndRelationshipDiagnostics(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", `id: REQ-API-00004
-type: ubiquitous
-text: The service shall rate-limit clients.
-status: active
-`)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: conflicts-with
-    target: REQ-API-00004
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00004.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00004")))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithRelationships(records.Relationship{Type: "conflicts-with", Target: "REQ-API-00004"}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -888,17 +781,8 @@ status: active
 
 func TestRunRejectsForgedNestedPathKey(t *testing.T) {
 	target := t.TempDir()
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-relationships[0].type: depends-on
-status: active
-`)
-	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", "name: health-api\nkind: http\ndescription: Health endpoint\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00001"))+"relationships[0].type: depends-on\n")
+	writeSpecFile(t, target, "spec/interfaces/health-api.yaml", testutil.ValidInterfaceYAML())
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -931,13 +815,16 @@ func TestRunLayoutDiagnosticsMultilineYAMLFlattened(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("stderr had %d lines, want 1: %q", len(lines), stderr)
+	diagLines, noteLines := splitStderrNotes(stderr)
+	if len(diagLines) != 1 {
+		t.Fatalf("stderr had %d diagnostic lines, want 1: %q", len(diagLines), stderr)
 	}
 	wantPrefix := "validator: layout.parse_failed: spec/requirements/REQ-API-00001.yaml:"
-	if !strings.HasPrefix(lines[0], wantPrefix) {
-		t.Fatalf("stderr line %q omitted %q", lines[0], wantPrefix)
+	if !strings.HasPrefix(diagLines[0], wantPrefix) {
+		t.Fatalf("stderr line %q omitted %q", diagLines[0], wantPrefix)
+	}
+	if len(noteLines) != 1 || !strings.Contains(noteLines[0], revision.CodeEmptyBase) {
+		t.Fatalf("stderr missing empty-base note: %q", stderr)
 	}
 }
 
@@ -957,9 +844,13 @@ func TestRunLayoutDiagnosticsFilenameWithControlChar(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantStderr := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name\n"
-	if stderr != wantStderr {
-		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	wantLine := "validator: layout.unexpected_file: spec/requirements/\"a\\n::error::injected.yaml\": has an unsafe name"
+	diagLines, noteLines := splitStderrNotes(stderr)
+	if len(diagLines) != 1 || diagLines[0] != wantLine {
+		t.Fatalf("diagnostic lines = %q, want [%q]", diagLines, wantLine)
+	}
+	if len(noteLines) != 1 || !strings.Contains(noteLines[0], revision.CodeEmptyBase) {
+		t.Fatalf("stderr missing empty-base note: %q", stderr)
 	}
 }
 
@@ -979,9 +870,13 @@ func TestRunTestTagDiagnosticsFilenameWithControlChar(t *testing.T) {
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantStderr := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\"\n"
-	if stderr != wantStderr {
-		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	wantLine := "validator: testtags.unresolved: tests/a ::error::injected.feature:1: @req tag references unknown requirement ID \"REQ-UNKNOWN\""
+	diagLines, noteLines := splitStderrNotes(stderr)
+	if len(diagLines) != 1 || diagLines[0] != wantLine {
+		t.Fatalf("diagnostic lines = %q, want [%q]", diagLines, wantLine)
+	}
+	if len(noteLines) != 1 || !strings.Contains(noteLines[0], revision.CodeEmptyBase) {
+		t.Fatalf("stderr missing empty-base note: %q", stderr)
 	}
 }
 
@@ -1025,8 +920,16 @@ func TestRunIsDeterministic(t *testing.T) {
 
 func TestRunEARSDiagnosticsAreDeterministic(t *testing.T) {
 	target := t.TempDir()
-	writeSpecFile(t, target, "spec/requirements/REQ-Z-00001.yaml", "id: REQ-Z-00001\ntype: ubiquitous\ntext: When a client acts, the service shall respond.\nstatus: active\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-A-00001.yaml", "id: REQ-A-00001\ntype: feature\ntext: no obligation\nstatus: active\n")
+	writeSpecFile(t, target, "spec/requirements/REQ-Z-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-Z-00001"),
+		testutil.WithType(records.TypeUbiquitous),
+		testutil.WithText("When a client acts, the service shall respond."),
+	))
+	writeSpecFile(t, target, "spec/requirements/REQ-A-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-A-00001"),
+		testutil.WithType("feature"),
+		testutil.WithText("no obligation"),
+	))
 
 	code1, stdout1, stderr1 := runCLI("--target", target, "--base", "main")
 	code2, stdout2, stderr2 := runCLI("--target", target, "--base", "main")
@@ -1057,28 +960,21 @@ func TestRunUnchangedTextPasses(t *testing.T) {
 
 func TestRunYAMLFormattingVariationPasses(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
+	baseYAML := testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00001"))
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", baseYAML)
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "base")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: event-driven
-text: >-
-  When a client sends GET /health, the service
-  shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
+
+	foldedYAML := strings.Replace(
+		baseYAML,
+		"text: When a client sends GET /health, the service shall return HTTP 200.",
+		"text: >-\n  When a client sends GET /health, the service\n  shall return HTTP 200.",
+		1,
+	)
+	if foldedYAML == baseYAML {
+		t.Fatal("failed to reflow text scalar into folded form")
+	}
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", foldedYAML)
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
 	if code != exitOK || stderr != "" {
@@ -1144,26 +1040,13 @@ func TestReportDiagnosticsDelegatesToPrintDiagnostic(t *testing.T) {
 
 func TestRunMetadataOnlyTransitionPasses(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(testutil.WithID("REQ-API-00001")))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "base")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: retired
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+		testutil.WithStatus(records.StatusRetired),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitOK || stderr != "" {
@@ -1203,9 +1086,53 @@ func TestModuleDoesNotDependOnNetworkPackages(t *testing.T) {
 }
 
 func runCLI(args ...string) (int, string, string) {
+	// Existing tests compare a working tree against the checkout HEAD
+	// commit. That is self-comparison under the SHA rule and requires
+	// the opt-in; dedicated tests below exercise the default rejection.
+	// Help and usage-error cases must not receive the extra flag, because
+	// --help short-circuits only when it appears in the original argv.
+	if !needsSelfComparisonOptIn(args) {
+		return runCLIRaw(args...)
+	}
+	return runCLIRaw(append(append([]string{}, args...), "--allow-self-comparison")...)
+}
+
+func needsSelfComparisonOptIn(args []string) bool {
+	hasTarget := false
+	hasBase := false
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" || arg == "--allow-self-comparison" {
+			return false
+		}
+		if arg == "--target" || strings.HasPrefix(arg, "--target=") {
+			hasTarget = true
+		}
+		if arg == "--base" || strings.HasPrefix(arg, "--base=") {
+			hasBase = true
+		}
+	}
+	return hasTarget && hasBase
+}
+
+func runCLIRaw(args ...string) (int, string, string) {
 	var stdout, stderr bytes.Buffer
 	code := Run(args, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
+}
+
+func splitStderrNotes(stderr string) (diagLines, noteLines []string) {
+	trimmed := strings.TrimRight(stderr, "\n")
+	if trimmed == "" {
+		return nil, nil
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		if strings.HasPrefix(line, "validator: note:") {
+			noteLines = append(noteLines, line)
+		} else {
+			diagLines = append(diagLines, line)
+		}
+	}
+	return diagLines, noteLines
 }
 
 func moduleRoot(t *testing.T) string {
@@ -1235,15 +1162,9 @@ func TestRunRejectsMissingRequiredFields(t *testing.T) {
 
 func TestRunRejectsInvalidStatus(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: implemented
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithStatus("implemented"),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -1279,15 +1200,9 @@ created: "2026-01-01T00:00:00Z"
 func TestRunReportsBothLayoutAndSchemaDiagnostics(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/notes.txt", "not yaml\n")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-status: draft
-applies_to:
-  scopes:
-    - api
-relationships: []
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithStatus("draft"),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -1337,7 +1252,10 @@ func TestRunRejectsRequirementIDBasenameMismatch(t *testing.T) {
 
 func TestRunRejectsInterfaceBasenameMismatch(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/interfaces/service.yaml", "name: billing-api\nkind: http\ndescription: Billing API.\n")
+	writeSpecFile(t, target, "spec/interfaces/service.yaml", testutil.ValidInterfaceYAML(
+		testutil.WithName("billing-api"),
+		testutil.WithDescription("Billing API."),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -1355,7 +1273,7 @@ func TestRunRejectsInterfaceBasenameMismatch(t *testing.T) {
 func TestRunAcceptsHyphenatedRequirementScopeBasename(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-CORE-X-00001.yaml", requirementYAML("REQ-CORE-X-00001"))
-	writeSpecFile(t, target, "spec/interfaces/billing-api.yaml", "name: billing-api\nkind: http\ndescription: Billing API.\n")
+	writeSpecFile(t, target, "spec/interfaces/billing-api.yaml", testutil.ValidInterfaceYAML(testutil.WithName("billing-api")))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "spec")
 
@@ -1370,15 +1288,9 @@ func TestRunAcceptsHyphenatedRequirementScopeBasename(t *testing.T) {
 
 func TestRunRejectsMalformedRequirementID(t *testing.T) {
 	target := gitRepo(t)
-	writeSpecFile(t, target, "spec/requirements/bad.yaml", `id: REQ-api-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/bad.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-api-00001"),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "main")
 	if code != exitFailure || stdout != "" {
@@ -1432,15 +1344,10 @@ func TestRunAllowsRetiredRequirementID(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "base")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", `id: REQ-API-00001
-type: ubiquitous
-text: The service shall exist.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: retired
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00001"),
+		testutil.WithStatus(records.StatusRetired),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
 	if code != exitOK || stderr != "" {
@@ -1451,17 +1358,10 @@ status: retired
 func TestRunRejectsActiveSupersedesTarget(t *testing.T) {
 	target := gitRepo(t)
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: ubiquitous
-text: The service shall log requests.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: supersedes
-    target: REQ-API-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00002"),
+		testutil.WithRelationships(records.Relationship{Type: records.RelSupersedes, Target: "REQ-API-00001"}),
+	))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "spec")
 
@@ -1484,17 +1384,10 @@ func TestRunAcceptsReplacementThatRetiresPredecessor(t *testing.T) {
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "base")
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "retired"))
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: ubiquitous
-text: The service shall log requests.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: supersedes
-    target: REQ-API-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00002"),
+		testutil.WithRelationships(records.Relationship{Type: records.RelSupersedes, Target: "REQ-API-00001"}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
 	if code != exitOK || stderr != "" {
@@ -1510,23 +1403,16 @@ func TestRunRejectsReplacementOfAlreadyRetiredPredecessor(t *testing.T) {
 	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001", "retired"))
 	git(t, target, "add", ".")
 	git(t, target, "commit", "-m", "base")
-	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", `id: REQ-API-00002
-type: ubiquitous
-text: The service shall log requests.
-applies_to:
-  scopes:
-    - api
-relationships:
-  - type: supersedes
-    target: REQ-API-00001
-status: active
-`)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00002.yaml", testutil.ValidRequirementYAML(
+		testutil.WithID("REQ-API-00002"),
+		testutil.WithRelationships(records.Relationship{Type: records.RelSupersedes, Target: "REQ-API-00001"}),
+	))
 
 	code, stdout, stderr := runCLI("--target", target, "--base", "HEAD")
 	if code != exitFailure || stdout != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	wantPrefix := "validator: relationship.superseded_requirement_not_in_change: spec/requirements/REQ-API-00002.yaml:"
+	wantPrefix := "validator: relationship.superseded_requirement_not_retired_in_change: spec/requirements/REQ-API-00002.yaml:"
 	if !strings.Contains(stderr, wantPrefix) {
 		t.Fatalf("stderr %q omitted %q", stderr, wantPrefix)
 	}
@@ -1566,6 +1452,99 @@ func TestRunUnknownBaseFails(t *testing.T) {
 	if !strings.Contains(stderr, "not-a-ref") {
 		t.Fatalf("stderr %q omitted unknown base", stderr)
 	}
+}
+
+func TestRunRejectsSelfComparisonAgainstHEAD(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", "HEAD")
+	if code != exitFailure || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, revision.CodeSelfComparison) {
+		t.Fatalf("stderr %q omitted %s", stderr, revision.CodeSelfComparison)
+	}
+	if !strings.Contains(stderr, "distinct revision required") {
+		t.Fatalf("stderr %q omitted distinct-revision guidance", stderr)
+	}
+}
+
+func TestRunAllowSelfComparisonAcceptsHEAD(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", "HEAD", "--allow-self-comparison")
+	if code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+}
+
+func TestRunEmptyBaseTreeEmitsNote(t *testing.T) {
+	target := gitRepo(t)
+	emptyBase := gitRevParse(t, target, "HEAD")
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", emptyBase)
+	if code != exitOK {
+		t.Fatalf("expected exit 0 for valid tree with empty base, got %d; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+	if !strings.Contains(stderr, "validator: note: comparison base") ||
+		!strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("expected note diagnostic on stderr, got: %s", stderr)
+	}
+}
+
+func TestRunRequirementsTreeWithOnlyGitkeepEmitsNote(t *testing.T) {
+	target := gitRepo(t)
+	writeSpecFile(t, target, "spec/requirements/.gitkeep", "")
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "scaffolded with gitkeep")
+	base := gitRevParse(t, target, "HEAD")
+
+	if err := os.Remove(filepath.Join(target, "spec", "requirements", ".gitkeep")); err != nil {
+		t.Fatal(err)
+	}
+	writeSpecFile(t, target, "spec/requirements/REQ-API-00001.yaml", requirementYAML("REQ-API-00001"))
+	git(t, target, "add", ".")
+	git(t, target, "commit", "-m", "spec")
+
+	code, stdout, stderr := runCLIRaw("--target", target, "--base", base)
+	if code != exitOK {
+		t.Fatalf("expected exit 0 for valid tree with gitkeep base, got %d; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "validator: ok") {
+		t.Fatalf("stdout %q does not report ok", stdout)
+	}
+	if !strings.Contains(stderr, "validator: note: comparison base") ||
+		!strings.Contains(stderr, revision.CodeEmptyBase) {
+		t.Fatalf("expected note diagnostic on stderr, got: %s", stderr)
+	}
+	if !strings.Contains(stderr, "contains no requirement records") {
+		t.Fatalf("expected accurate empty base note on stderr, got: %s", stderr)
+	}
+}
+
+func gitRevParse(t *testing.T, root, ref string) string {
+	t.Helper()
+	command := gitcmd.Command("-C", root, "rev-parse", ref)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("rev-parse %s failed: %v", ref, err)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func TestRunRepairedBaseMalformedYAMLExitsZero(t *testing.T) {
@@ -1735,19 +1714,15 @@ func TestRunNonGitCheckoutFails(t *testing.T) {
 }
 
 func completeRequirementYAML() string {
-	return `id: REQ-API-00002
-type: event-driven
-text: When a client sends GET /health, the service shall return HTTP 200.
-applies_to:
-  scopes:
-    - api
-relationships: []
-status: active
-`
+	return testutil.ValidRequirementYAML()
 }
 
 func completeInterfaceYAML() string {
-	return "name: cli\nkind: cli\ndescription: Validator command line.\n"
+	return testutil.ValidInterfaceYAML(
+		testutil.WithName("cli"),
+		testutil.WithKind("cli"),
+		testutil.WithDescription("Validator command line."),
+	)
 }
 func writeSpecFile(t *testing.T, root, rel, content string) {
 	t.Helper()
@@ -1786,13 +1761,20 @@ func git(t *testing.T, root string, args ...string) {
 }
 
 func requirementYAML(id string, status ...string) string {
-	st := "active"
+	st := records.StatusActive
 	if len(status) > 0 && status[0] != "" {
 		st = status[0]
 	}
-	return "id: " + id + "\ntype: ubiquitous\ntext: The service shall exist.\napplies_to:\n  scopes:\n    - api\nrelationships: []\nstatus: " + st + "\n"
+	return testutil.ValidRequirementYAML(
+		testutil.WithID(id),
+		testutil.WithStatus(st),
+	)
 }
 
 func requirementYAMLWithText(id, text string) string {
-	return "id: " + id + "\ntype: ubiquitous\ntext: " + text + "\napplies_to:\n  scopes:\n    - api\nrelationships: []\nstatus: active\n"
+	return testutil.ValidRequirementYAML(
+		testutil.WithID(id),
+		testutil.WithType(records.TypeUbiquitous),
+		testutil.WithText(text),
+	)
 }

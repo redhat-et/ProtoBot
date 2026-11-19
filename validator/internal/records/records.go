@@ -63,9 +63,11 @@ type InterfaceRecord struct {
 }
 
 // requirementIDPattern is REQ-<SCOPE>-<NNNNN>: an uppercase scope tag
-// and a five-digit sequence. The same rule is in ADR-0002 and the V2
-// requirement record.
-var requirementIDPattern = regexp.MustCompile(`^REQ-[A-Z][A-Z0-9-]*-[0-9]{5}$`)
+// of alphanumeric segments separated by single hyphens, and a
+// five-digit sequence. Consecutive or trailing hyphens in the scope
+// are rejected. The same rule is in ADR-0002 and the V2 requirement
+// record.
+var requirementIDPattern = regexp.MustCompile(`^REQ-[A-Z][A-Z0-9]*(-[A-Z0-9]+)*-[0-9]{5}$`)
 
 // ValidateRequirementID returns an error if id does not match REQ-<SCOPE>-<NNNNN>.
 func ValidateRequirementID(id string) error {

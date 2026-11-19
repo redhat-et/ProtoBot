@@ -9,6 +9,8 @@ func TestValidateRequirementID(t *testing.T) {
 		"REQ-A-00000",
 		"REQ-A1-00001",
 		"REQ-A-B-00001",
+		"REQ-CLI-MAIN-00001",
+		"REQ-API-V2-00005",
 	}
 	for _, id := range valid {
 		if err := ValidateRequirementID(id); err != nil {
@@ -19,13 +21,19 @@ func TestValidateRequirementID(t *testing.T) {
 	invalid := []string{
 		"",
 		"REQ-api-00001",
+		"REQ-core-00001",
 		"REQ-API-1",
 		"REQ-API-0001",
 		"REQ-API-000001",
 		"API-00001",
 		"req-API-00001",
 		"REQ--00001",
+		"REQ--A-00001",
 		"REQ-00001",
+		"REQ-A--00001",
+		"REQ-CORE--00001",
+		"REQ-A---00001",
+		"REQ-A-B--00001",
 		"REQ-API-0000A",
 		"REQ-API-00001.yaml",
 		"REQ-API-00001 ",

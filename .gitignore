@@ -1,11 +1,13 @@
 /.worktrees/
 /review-*.md
+/.fullsend/.fullsend-cache/
 
 # Leftover test fixtures from tests/lint/test_violations.sh
 # (cleanup trap handles normal exit, but SIGKILL can leave these behind)
 _test_lint_*
 .github/workflows/_test_lint_*
 tests/lint/fixtures/linttest_*.go
+tests/lint/fixtures/lint_wrapper_*
 wms/linttest_*.go
 ears-manager/linttest_*.go
 __pycache__/

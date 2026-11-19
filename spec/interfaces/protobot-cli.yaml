@@ -1,0 +1,6 @@
+---
+name: protobot-cli
+kind: cli
+description: >-
+  Command-line interface for project governance and specification
+  validation.
