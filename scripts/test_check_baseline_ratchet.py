@@ -1139,9 +1139,7 @@ class ExtractWarnLimitTests(unittest.TestCase):
 
     def test_whole_file_nested_warn_mapping(self) -> None:
         """Extract warn limit from file mapping with nested warn key."""
-        self.assertEqual(
-            3000, checker.extract_warn_limit({"file": {"warn": 3000}})
-        )
+        self.assertEqual(3000, checker.extract_warn_limit({"file": {"warn": 3000}}))
 
     def test_non_numeric_and_empty_entries_return_none(self) -> None:
         """Return None for non-numeric, empty, or unparseable limit entries."""
