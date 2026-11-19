@@ -330,7 +330,9 @@ class BuildValidatorTests(unittest.TestCase):
         env = run.call_args.kwargs["env"]
         self.assertEqual("off", env["GOPROXY"])
         self.assertEqual("off", env["GOWORK"])
-        self.assertEqual("-mod=readonly", env["GOFLAGS"])
+        # validator/vendor/ holds the vendored module dependencies, so the
+        # real repository builds with -mod=vendor rather than -mod=readonly.
+        self.assertEqual("-mod=vendor", env["GOFLAGS"])
 
     def test_dependency_failure_is_reported_as_offline_problem(self) -> None:
         """Report unresolved module dependencies as an offline problem."""
