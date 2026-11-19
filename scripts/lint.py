@@ -377,19 +377,47 @@ def _repository_relative(stored: str, cache_root: Path) -> Path:
     )
 
 
-def _environment_dirs(repo_dir: Path) -> set[str]:
-    """Return the environment directory names under *repo_dir*.
+# The environment directory names pre-commit uses, matched exactly or
+# with a version suffix (``py_env``, ``py_env-python3.12``).
+_ENVIRONMENT_DIR_NAMES = frozenset(
+    {
+        "py_env",
+        "node_env",
+        "rbenv",
+        "rust_env",
+        "golang_env",
+        "dotnetenv",
+        "swift_env",
+        "r_env",
+        "conda_env",
+        "perl_env",
+        "dart_env",
+        "lua_env",
+    }
+)
 
-    pre-commit names hook environments ``py_env``, ``node_env``,
-    ``rust_env``, ``golang_env``, and so on, so a child directory whose
-    name contains ``_env`` is treated as an environment.
+
+def _is_environment_dir(name: str) -> bool:
+    """Report whether *name* is a pre-commit environment directory name.
+
+    pre-commit names environments exactly (``py_env``, ``rbenv``) or
+    with a version suffix (``py_env-python3.12``); names such as
+    ``build_env_scripts`` are not environments.
     """
+    if name in _ENVIRONMENT_DIR_NAMES:
+        return True
+    head, separator, _ = name.partition("-")
+    return separator == "-" and head in _ENVIRONMENT_DIR_NAMES
+
+
+def _environment_dirs(repo_dir: Path) -> set[str]:
+    """Return the environment directory names under *repo_dir*."""
     if not repo_dir.is_dir():
         return set()
     return {
         entry.name
         for entry in repo_dir.iterdir()
-        if entry.is_dir() and "_env" in entry.name
+        if entry.is_dir() and _is_environment_dir(entry.name)
     }
 
 

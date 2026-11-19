@@ -1647,6 +1647,21 @@ class PreflightRestoreTests(unittest.TestCase):
         )
 
 
+class EnvironmentDirTests(unittest.TestCase):
+    """Environment directories match pre-commit's exact names."""
+
+    def test_environment_dir_names(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        repo_dir = Path(temporary_directory.name)
+        for name in ("build_env_scripts", "rbenv", "py_env-python3.12", "hooks"):
+            (repo_dir / name).mkdir()
+        (repo_dir / "manifest.yaml").write_text("hooks: []\n", encoding="utf-8")
+        self.assertEqual(
+            {"rbenv", "py_env-python3.12"}, checker._environment_dirs(repo_dir)
+        )
+
+
 class SwapCacheHomeTests(unittest.TestCase):
     """A failed promotion keeps the live cache."""
 

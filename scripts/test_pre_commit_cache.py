@@ -248,6 +248,7 @@ class UpstreamDelegationTests(unittest.TestCase):
         self.assertIn("did not finish within", message)
         self.assertIn(str(bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS), message)
         self.assertIn(bootstrap._upstream_url("code"), message)
+        self.assertIn("UPSTREAM_SCRIPT_TIMEOUT_SECONDS", message)
 
     def test_upstream_process_returns_the_exit_code(self) -> None:
         class _FinishedProcess:
