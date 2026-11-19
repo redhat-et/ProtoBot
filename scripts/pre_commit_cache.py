@@ -87,6 +87,7 @@ VERSION_TIMEOUT_SECONDS = 60
 PIP_TIMEOUT_SECONDS = 10 * 60
 INSTALL_HOOKS_TIMEOUT_SECONDS = 15 * 60
 SUDO_TIMEOUT_SECONDS = 60
+UPSTREAM_SCRIPT_TIMEOUT_SECONDS = 20 * 60
 MAX_SCRIPT_BYTES = 2 * 1024 * 1024
 
 # A GitHub Actions workflow command must stay on one line, cannot carry
@@ -260,7 +261,22 @@ def _run_upstream_script(upstream: str) -> int:
             # The inherited environment and working directory carry
             # FULLSEND_PRESCRIPT_OUTPUT and the env.runner variables to
             # the upstream script unchanged.
-            return _run(["bash", str(script)]).returncode
+            return _run(
+                ["bash", str(script)], timeout=UPSTREAM_SCRIPT_TIMEOUT_SECONDS
+            ).returncode
+        except subprocess.TimeoutExpired:
+            # A timeout is a hard failure: the upstream input validation
+            # did not finish, so the run must stop rather than proceed
+            # with unvalidated inputs.
+            print(
+                f"ERROR: the pinned upstream pre-script {url} did not finish "
+                f"within {UPSTREAM_SCRIPT_TIMEOUT_SECONDS} seconds and was "
+                f"terminated. The agent's input validation did not complete. "
+                f"Check the script, or raise UPSTREAM_SCRIPT_TIMEOUT_SECONDS "
+                f"in scripts/pre_commit_cache.py.",
+                file=sys.stderr,
+            )
+            return 1
         except OSError as error:
             print(
                 f"ERROR: cannot run the upstream pre-script: {error}", file=sys.stderr

@@ -198,6 +198,32 @@ class UpstreamDelegationTests(unittest.TestCase):
                 # warm phase must not run.
                 self.assertEqual(code == 0, warm.called)
 
+    def test_upstream_script_timeout_is_a_hard_failure(self) -> None:
+        # A stalled upstream script must not block the runner phase
+        # indefinitely; the timeout kills it and fails the run.
+        with (
+            patch.object(bootstrap, "_download_upstream_script"),
+            patch.object(
+                bootstrap,
+                "_run",
+                side_effect=subprocess.TimeoutExpired(
+                    cmd=["bash"], timeout=bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS
+                ),
+            ),
+        ):
+            stderr, stdout = io.StringIO(), io.StringIO()
+            with (
+                contextlib.redirect_stderr(stderr),
+                contextlib.redirect_stdout(stdout),
+            ):
+                rc = bootstrap.main(["--upstream", "code"])
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("did not finish within", message)
+        self.assertIn(str(bootstrap.UPSTREAM_SCRIPT_TIMEOUT_SECONDS), message)
+        self.assertIn(bootstrap._upstream_url("code"), message)
+        self.assertIn("UPSTREAM_SCRIPT_TIMEOUT_SECONDS", message)
+
     def test_unverifiable_upstream_script_is_a_hard_failure(self) -> None:
         for side_effect in (
             OSError("no route to host"),
