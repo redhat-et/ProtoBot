@@ -902,18 +902,18 @@ simply never staged by the Drafting Table.
 
 CI runs the same digest and operation checks inside `ears-manager check`.
 Therefore, a digest-rewritten artifact edit without a matching proposed
-operation is caught before merge, as is unregistration of a default-branch
-artifact. A matching operation proves only that the delta is represented in
-the manifest; it does not prove `ears-manager artifact put` ran or prevent
-coordinated manual edits to artifact content, its registry digest, and the
-manifest. Nor does it prevent hand edits to `repository.default_branch`, or to
-`repository.canonical_remote` when the remote-tracking fallback is used, that
-retarget the baseline. These two escape paths are outside the operation-record
-guarantee. Rule 5 prohibits hand-editing registered specification artifacts
-and `.protobot/project.yaml`; Rule 6 requires reviewers to inspect them and
-flag hand edits. Path ownership in CI remains a separate layer. File-source
-provenance is still not established by these checks
-([File-source arguments][fail-open]).
+operation is caught before merge, as is unregistration of an artifact
+registered on the comparison base. A matching operation proves only that the
+delta is represented in the manifest; it does not prove `ears-manager artifact
+put` ran or prevent coordinated manual edits to artifact content, its registry
+digest, and the manifest. Nor does it prevent hand edits to
+`repository.default_branch`, or to `repository.canonical_remote` when the
+remote-tracking fallback is used, that retarget the baseline. These two escape
+paths are outside the operation-record guarantee. Rule 5 prohibits
+hand-editing registered specification artifacts and `.protobot/project.yaml`;
+Rule 6 requires reviewers to inspect them and flag hand edits. Path ownership in
+CI remains a separate layer. File-source provenance is still not established by
+these checks ([File-source arguments][fail-open]).
 
 ---
 

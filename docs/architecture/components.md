@@ -1922,8 +1922,9 @@ sequenceDiagram
    protection rules, CODEOWNERS, and required reviews all apply.
    CI runs `ears-manager check` as a merge gate to validate spec
    well-formedness, registered artifact path/canonical-content deltas against
-   proposed `artifact_operations[]`, continued registration of default-branch
-   artifacts, and proposed `base_commit` freshness.
+   proposed `artifact_operations[]`, continued registration of artifacts
+   registered on the comparison base (`--base-ref` in CI), and proposed
+   `base_commit` freshness.
 3. **The change set lands on main.** A registration hook calls the Job
    Site materializer with the change-set ID, resulting merge commit, stable
    materialization key, and the distinct deterministic registration
