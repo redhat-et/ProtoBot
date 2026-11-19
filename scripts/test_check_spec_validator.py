@@ -4,7 +4,6 @@ import contextlib
 import io
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,6 +80,13 @@ def _run_check(repo: Path, env: dict[str, str] | None = None) -> tuple[int, str]
 
 @unittest.skipUnless(shutil.which("go") and shutil.which("git"), "go and git required")
 class CheckEndToEndTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, message = checker.build_validator(Path(tmp) / "validator", REAL_REPO)
+        if not ok:
+            raise unittest.SkipTest(f"validator cannot be built offline: {message}")
+
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -135,6 +141,104 @@ class CheckEndToEndTests(unittest.TestCase):
         self.assertEqual(1, rc)
         self.assertIn("requirement.text_immutable", err)
 
+    def test_option_like_override_is_rejected(self) -> None:
+        """Reject an override such as ``-h`` instead of passing it to the validator."""
+        self.req.write_text(_NO_SHALL)
+        for value in ("-h", "--help"):
+            rc, err = _run_check(self.repo, {checker.BASE_ENV: value})
+            self.assertEqual(1, rc, value)
+            self.assertIn("must not start with", err)
+
+    def test_fallback_to_head_prints_note(self) -> None:
+        """Print a note when no default-branch ref resolves."""
+        _git(self.repo, "branch", "-m", "trunk")
+        rc, err = _run_check(self.repo)
+        self.assertEqual(0, rc, err)
+        self.assertIn(checker.FALLBACK_NOTE, err)
+
+    def test_self_comparison_flag_only_when_base_is_head(self) -> None:
+        """Pass ``--allow-self-comparison`` only when the base equals HEAD."""
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with (
+            patch.object(checker, "build_validator", return_value=(True, "")),
+            patch.object(checker.subprocess, "run", side_effect=fake_run),
+        ):
+            with patch.object(checker, "resolve_base", return_value=("abc", False)):
+                _run_check(self.repo)
+            with patch.object(checker, "resolve_base", return_value=("abc", True)):
+                _run_check(self.repo)
+        self.assertNotIn("--allow-self-comparison", calls[0])
+        self.assertIn("--allow-self-comparison", calls[1])
+        self.assertIn("--base=abc", calls[0])
+
+    def test_failure_message_includes_status(self) -> None:
+        """Include the validator exit status in the failure message."""
+        self.req.write_text(_NO_SHALL)
+        _, err = _run_check(self.repo)
+        self.assertIn("status 1", err)
+
+    def test_staged_deletion_with_file_on_disk_is_not_detected(self) -> None:
+        """Document that the working tree, not the index, is validated."""
+        _git(self.repo, "rm", "-q", "--cached", "spec/requirements/REQ-CLI-00001.yaml")
+        rc, err = _run_check(self.repo)
+        self.assertEqual(0, rc, err)
+
+    def test_untracked_invalid_draft_fails(self) -> None:
+        """Document that an untracked invalid record fails the check."""
+        draft = self.repo / "spec" / "requirements" / "REQ-CLI-00002.yaml"
+        draft.write_text(_NO_SHALL.replace("00001", "00002"))
+        rc, err = _run_check(self.repo)
+        self.assertEqual(1, rc)
+        self.assertIn("REQ-CLI-00002.yaml", err)
+
+
+@unittest.skipUnless(
+    shutil.which("go") and shutil.which("git") and shutil.which("pre-commit"),
+    "go, git and pre-commit required",
+)
+class PreCommitHookTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, message = checker.build_validator(Path(tmp) / "validator", REAL_REPO)
+        if not ok:
+            raise unittest.SkipTest(f"validator cannot be built offline: {message}")
+
+    def test_hook_blocks_invalid_staged_change(self) -> None:
+        """Run the real hook through pre-commit against a scratch clone."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _make_repo(Path(tmp))
+            shutil.copytree(
+                REAL_REPO / "scripts",
+                repo / "scripts",
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+            (repo / ".pre-commit-config.yaml").write_text(
+                "repos:\n  - repo: local\n    hooks:\n"
+                "      - id: spec-validator\n        name: spec-validator\n"
+                "        entry: python3 scripts/check_spec_validator.py\n        language: system\n"
+                "        pass_filenames: false\n        always_run: true\n"
+            )
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-q", "-m", "hook")
+            req = repo / "spec" / "requirements" / "REQ-CLI-00001.yaml"
+            req.write_text(_NO_SHALL)
+            _git(repo, "add", "-A")
+            result = subprocess.run(
+                ["pre-commit", "run", "spec-validator", "--all-files"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(0, result.returncode, result.stdout)
+            self.assertIn("ears.shall_count", result.stdout + result.stderr)
+
 
 @unittest.skipUnless(shutil.which("git"), "git required")
 class ResolveBaseTests(unittest.TestCase):
@@ -186,6 +290,21 @@ class ResolveBaseTests(unittest.TestCase):
         self.assertEqual(
             ("HEAD", True),
             checker.resolve_base(self.repo, {checker.BASE_ENV: "HEAD"}),
+        )
+
+    def test_github_base_ref_is_honoured(self) -> None:
+        """Use origin/$GITHUB_BASE_REF when set and resolvable."""
+        _git(self.repo, "update-ref", "refs/remotes/origin/release", self.head)
+        self.assertEqual(
+            (self.head, True),
+            checker.resolve_base(self.repo, {"GITHUB_BASE_REF": "release"}),
+        )
+
+    def test_github_base_sha_is_honoured(self) -> None:
+        """Use GITHUB_BASE_SHA when it resolves."""
+        self.assertEqual(
+            (self.head, True),
+            checker.resolve_base(self.repo, {"GITHUB_BASE_SHA": self.head}),
         )
 
     def test_unresolvable_override_is_passed_through(self) -> None:
@@ -257,4 +376,4 @@ class MainTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    sys.exit(unittest.main())
+    unittest.main()

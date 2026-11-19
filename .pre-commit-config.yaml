@@ -210,10 +210,10 @@ repos:
         # makes pre-commit run it anyway; files: stays as scope
         # documentation.
         always_run: true
-        files: ^(spec/.+|tests/.+\.feature|validator/.+|scripts/(check_spec_validator|test_check_spec_validator)\.py)$
+        files: ^(spec/.+|tests/.+\.feature|validator/.+|scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py)$
       - id: test-spec-validator
         name: test-spec-validator
         entry: python3 scripts/test_check_spec_validator.py
         language: system
         pass_filenames: false
-        files: ^scripts/(check_spec_validator|test_check_spec_validator)\.py$
+        files: ^scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py$

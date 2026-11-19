@@ -6,10 +6,19 @@ Used as the ``spec-validator`` local pre-commit hook (and via
 module downloads disabled, so the check needs no network access and no
 credentials; the Go module cache (or a vendor directory) must already
 hold the dependencies. The working tree is compared against the default
-base: the merge base of ``HEAD`` with the first of ``upstream/main``,
-``origin/main``, or ``main`` that resolves, or ``HEAD`` when none does.
-Set ``PROTOBOT_VALIDATOR_BASE`` to compare against another revision.
+base: the merge base of ``HEAD`` with the first of ``GITHUB_BASE_SHA``,
+``origin/$GITHUB_BASE_REF``, ``upstream/main``, ``origin/main``, or
+``main`` that resolves. When none resolves the tree is compared with
+``HEAD`` itself, the base-relative checks (text immutability, deletion,
+replacement) cannot fire, and a note says so on stderr.
+Set ``PROTOBOT_VALIDATOR_BASE`` to compare against another revision; a
+value starting with ``-`` is rejected.
 Validator diagnostics are printed unchanged and fail the hook.
+
+Limitations: the validator reads the working tree, not the index. A
+staged deletion (``git rm --cached``) whose file stays on disk is not seen
+as a deletion, and an untracked draft under ``spec/`` is validated and can
+fail a commit that does not touch it.
 """
 
 from __future__ import annotations
@@ -22,23 +31,21 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
+try:
+    from go_dependency_errors import is_dependency_error as _is_dependency_error
+except ImportError:  # imported as ``scripts.<module>``
+    from scripts.go_dependency_errors import (
+        is_dependency_error as _is_dependency_error,
+    )
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR_MODULE = Path("validator")
 VALIDATOR_PACKAGE = "./cmd/validator"
 BASE_ENV = "PROTOBOT_VALIDATOR_BASE"
 DEFAULT_BASE_CANDIDATES = ("upstream/main", "origin/main", "main")
-
-_DEPENDENCY_ERROR_INDICATORS = (
-    "module lookup disabled",
-    "cannot find module providing package",
-    "no required module provides package",
-    "missing go.sum entry",
-    "dial tcp",
-    "connection refused",
-    "no such host",
-    "i/o timeout",
-    "tls handshake timeout",
-    "server response:",
+FALLBACK_NOTE = (
+    "note: no default-branch ref resolved; comparing the working tree with "
+    "HEAD, so base-relative checks are skipped"
 )
 
 
@@ -76,22 +83,21 @@ def resolve_base(
     if override:
         resolved = _git(repo_root, "rev-parse", "--verify", f"{override}^{{commit}}")
         return override, resolved is not None and resolved == head
-    for candidate in DEFAULT_BASE_CANDIDATES:
+    candidates = []
+    if environ.get("GITHUB_BASE_SHA"):
+        candidates.append(environ["GITHUB_BASE_SHA"])
+    if environ.get("GITHUB_BASE_REF"):
+        candidates.append(f"origin/{environ['GITHUB_BASE_REF']}")
+    candidates.extend(DEFAULT_BASE_CANDIDATES)
+    for candidate in candidates:
+        if candidate.startswith("-"):
+            continue
         if _git(repo_root, "rev-parse", "--verify", f"{candidate}^{{commit}}") is None:
             continue
         merge_base = _git(repo_root, "merge-base", "HEAD", candidate)
         if merge_base:
             return merge_base, merge_base == head
     return "HEAD", True
-
-
-def _is_dependency_error(output: str) -> bool:
-    lower = output.lower()
-    if any(indicator in lower for indicator in _DEPENDENCY_ERROR_INDICATORS):
-        return True
-    return "go: downloading" in output and any(
-        kw in lower for kw in ("error", "timeout", "failed")
-    )
 
 
 def build_validator(
@@ -130,14 +136,21 @@ def build_validator(
 
 def check(repo_root: Path = REPO_ROOT, env: dict[str, str] | None = None) -> int:
     """Build the validator and run it on *repo_root*. Returns an exit code."""
+    environ = os.environ if env is None else env
+    override = environ.get(BASE_ENV, "").strip()
+    if override.startswith("-"):
+        print(f"{BASE_ENV} must not start with '-': {override!r}", file=sys.stderr)
+        return 1
     base, base_is_head = resolve_base(repo_root, env)
+    if base == "HEAD" and base_is_head and not override:
+        print(FALLBACK_NOTE, file=sys.stderr)
     with tempfile.TemporaryDirectory(prefix="protobot-validator-") as tmp:
         binary = Path(tmp) / "validator"
         ok, message = build_validator(binary, repo_root)
         if not ok:
             print(message, file=sys.stderr)
             return 1
-        cmd = [str(binary), "--target", str(repo_root), "--base", base]
+        cmd = [str(binary), f"--target={repo_root}", f"--base={base}"]
         if base_is_head:
             cmd.append("--allow-self-comparison")
         result = subprocess.run(
@@ -149,7 +162,10 @@ def check(repo_root: Path = REPO_ROOT, env: dict[str, str] | None = None) -> int
         )
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
-        print(f"spec validator failed (base {base}):", file=sys.stderr)
+        print(
+            f"spec validator failed (base {base}, status {result.returncode}):",
+            file=sys.stderr,
+        )
         if output:
             print(output, file=sys.stderr)
         return 1
