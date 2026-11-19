@@ -47,6 +47,14 @@ class IsExemptPathTests(unittest.TestCase):
         self.assertTrue(is_exempt_path("validator/internal/testutil/fixtures.go"))
         self.assertTrue(is_exempt_path("validator/internal/testutil/fixtures_test.go"))
 
+    def test_exempts_records_package_files(self) -> None:
+        """Treat files under validator/internal/records/ as exempt."""
+        self.assertTrue(is_exempt_path("validator/internal/records/records_test.go"))
+
+    def test_exempts_layout_package_files(self) -> None:
+        """Treat files under validator/internal/layout/ as exempt."""
+        self.assertTrue(is_exempt_path("validator/internal/layout/reader_test.go"))
+
     def test_does_not_exempt_sibling_packages(self) -> None:
         """Leave non-testutil packages subject to the check."""
         self.assertFalse(
@@ -56,6 +64,8 @@ class IsExemptPathTests(unittest.TestCase):
     def test_windows_style_separators_are_normalized(self) -> None:
         """Normalize backslash separators before matching the prefix."""
         self.assertTrue(is_exempt_path("validator\\internal\\testutil\\fixtures.go"))
+        self.assertTrue(is_exempt_path("validator\\internal\\records\\records_test.go"))
+        self.assertTrue(is_exempt_path("validator\\internal\\layout\\reader_test.go"))
 
 
 class FindViolationsTests(unittest.TestCase):
@@ -96,6 +106,60 @@ class FindViolationsTests(unittest.TestCase):
         violations = find_violations("validator/internal/example_test.go", code)
         self.assertEqual([], violations)
 
+    def test_slice_element_literal_is_flagged_single_line(self) -> None:
+        """A slice-typed Document literal containing bare element literals is flagged."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{{
+        Path: "spec/requirements/REQ-00001.yaml",
+        Record: req,
+    }}
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+        self.assertEqual("Requirement", violations[0].type_name)
+
+    def test_slice_element_literal_is_flagged_multiline(self) -> None:
+        """A multiline slice-typed Document literal with bare element literals is flagged."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{
+        {
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+        self.assertEqual("Requirement", violations[0].type_name)
+
+    def test_slice_element_literal_interface_is_flagged(self) -> None:
+        """A slice-typed Document literal for InterfaceRecord with bare element literals is flagged."""
+        code = """
+    ifaces := []layout.Document[records.InterfaceRecord]{{
+        Path: "spec/interfaces/api.yaml",
+        Record: iface,
+    }}
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+        self.assertEqual("document_literal", violations[0].kind)
+        self.assertEqual("InterfaceRecord", violations[0].type_name)
+
+    def test_slice_element_annotated_with_nolint_is_exempt(self) -> None:
+        """A slice-typed Document literal with nolint annotation on the slice is exempt."""
+        code = """
+    reqs := []layout.Document[records.Requirement]{ // nolint:fixtures
+        {
+            Path: "spec/requirements/REQ-00001.yaml",
+            Record: req,
+        },
+    }
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual([], violations)
+
     def test_exempts_testutil_package_and_nolint_comments(self) -> None:
         """Verify builder package and explicit nolint annotations are exempted."""
         annotated = """
@@ -110,6 +174,15 @@ class FindViolationsTests(unittest.TestCase):
         )
         self.assertTrue(is_exempt_path("validator/internal/testutil/fixtures.go"))
 
+    def test_prose_containing_nolint_on_previous_line_does_not_exempt(self) -> None:
+        """Prose mentioning nolint:fixtures on the preceding line does not exempt the literal."""
+        code = """
+    // do not write nolint:fixtures here
+    req := records.Requirement{}
+    """
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+
     def test_trailing_nolint_comment_exempts_the_line(self) -> None:
         """A trailing nolint marker on the violating line is also honored."""
         code = "req := records.Requirement{} // nolint:fixtures\n"
@@ -117,6 +190,30 @@ class FindViolationsTests(unittest.TestCase):
             "validator/internal/specvalidation/edge_test.go", code
         )
         self.assertEqual([], violations)
+
+    def test_inline_block_comment_nolint_exempts_the_line(self) -> None:
+        """An inline block-comment nolint marker on the violating line is honored."""
+        code = "req := records.Requirement{} /* nolint:fixtures */\n"
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual([], violations)
+
+    def test_trailing_prose_comment_does_not_exempt(self) -> None:
+        """Trailing prose mentioning nolint:fixtures does not exempt the literal."""
+        code = "req := records.Requirement{} // do not write nolint:fixtures here\n"
+        violations = find_violations("validator/internal/example_test.go", code)
+        self.assertEqual(1, len(violations))
+
+    def test_exempts_records_and_layout_packages(self) -> None:
+        """Package records and package layout tests are exempt from the check."""
+        code = "req := records.Requirement{}\n"
+        self.assertEqual(
+            [],
+            find_violations("validator/internal/records/records_test.go", code),
+        )
+        self.assertEqual(
+            [],
+            find_violations("validator/internal/layout/reader_test.go", code),
+        )
 
     def test_passes_conforming_builder_usage(self) -> None:
         """Verify calls to testutil.ValidRequirementDocument pass without violations."""
@@ -264,6 +361,21 @@ class CollectViolationsTests(unittest.TestCase):
         self.assertEqual([], violations)
         self.assertEqual([], errors)
 
+    def test_skips_records_and_layout_directories(self) -> None:
+        """Never scan files under validator/internal/records/ or layout/."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for pkg_name in ("records", "layout"):
+                pkg_dir = root / "validator" / "internal" / pkg_name
+                pkg_dir.mkdir(parents=True)
+                (pkg_dir / "pkg_test.go").write_text(
+                    'package pkg\nvar _ = records.Requirement{ID: "x"}\n',
+                    encoding="utf-8",
+                )
+            violations, errors = checker.collect_violations(root)
+        self.assertEqual([], violations)
+        self.assertEqual([], errors)
+
     def test_finds_violation_in_scanned_tree(self) -> None:
         """Detect a bare literal in a non-exempt test file under the tree."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -370,6 +482,25 @@ class CheckAndMainTests(unittest.TestCase):
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             self.assertEqual(0, checker.main([]))
+
+    def test_main_accepts_and_ignores_positional_files(self) -> None:
+        """Positional file arguments are accepted and ignored for CLI compatibility."""
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            rc = checker.main(["validator/internal/specvalidation/references_test.go"])
+        self.assertEqual(0, rc)
+        self.assertIn("No prohibited", stdout.getvalue())
+
+    def test_help_describes_positional_files(self) -> None:
+        """Check that --help output mentions accepted positional files."""
+        stdout = io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            checker.main(["--help"])
+        self.assertEqual(0, raised.exception.code)
+        self.assertIn("positional file arguments", stdout.getvalue())
 
     def test_module_entrypoint_invokes_main(self) -> None:
         """Running the script as a program exits 0 on the live repository."""

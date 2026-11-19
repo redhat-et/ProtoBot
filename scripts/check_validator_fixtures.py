@@ -10,15 +10,20 @@ check registered in ``specvalidation.Validate``. Test files under
 ``validator/internal/`` that instead construct ``records.Requirement{``
 or ``records.InterfaceRecord{`` directly -- or build a synthetic
 ``layout.Document[records.Requirement]{`` /
-``layout.Document[records.InterfaceRecord]{`` outside a slice of
-builder calls -- regress to one-off fixtures that break the first time
-a new check is registered.
+``layout.Document[records.InterfaceRecord]{`` (either as a single
+literal or as a slice element literal) outside a slice of builder calls
+-- regress to one-off fixtures that break the first time a new check is
+registered.
 
 A line is exempt when it (or the standalone comment line immediately
-above it) carries a ``// nolint:fixtures`` marker, which is reserved
-for tests that intentionally exercise a synthetic or malformed
-document. ``validator/internal/testutil/**`` itself is always exempt,
-since that package is where the literals legitimately live.
+above it) carries a ``// nolint:fixtures`` or ``/* nolint:fixtures */``
+marker, which is reserved for tests that intentionally exercise a
+synthetic or malformed document. ``validator/internal/testutil/**``,
+``validator/internal/records/**``, and
+``validator/internal/layout/**`` are exempt (testutil is where the
+canonical fixtures live; records and layout cannot import testutil
+without creating an import cycle). Positional file arguments are accepted
+and ignored for CLI compatibility with sibling check scripts.
 """
 
 from __future__ import annotations
@@ -31,12 +36,23 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR_INTERNAL = Path("validator") / "internal"
-TESTUTIL_PREFIX = "validator/internal/testutil/"
-TESTUTIL_DIR_POSIX = "validator/internal/testutil"
+EXEMPT_DIRS_POSIX = (
+    "validator/internal/testutil",
+    "validator/internal/records",
+    "validator/internal/layout",
+)
+EXEMPT_PREFIXES = tuple(f"{d}/" for d in EXEMPT_DIRS_POSIX)
 
-_NOLINT_MARKER = "nolint:fixtures"
+_NOLINT_STANDALONE = re.compile(r"^\s*(?://|/\*)\s*nolint:fixtures\b")
+_NOLINT_CURRENT = re.compile(r"(?://|/\*)\s*nolint:fixtures\b")
 _DOCUMENT_LITERAL = re.compile(
     r"(?<!\[\])\blayout\.Document\[records\.(Requirement|InterfaceRecord)\]\{"
+)
+_DOCUMENT_SLICE_LITERAL = re.compile(
+    r"\[\]layout\.Document\[records\.(Requirement|InterfaceRecord)\]\{\s*\{"
+)
+_DOCUMENT_SLICE_START = re.compile(
+    r"\[\]layout\.Document\[records\.(Requirement|InterfaceRecord)\]\{"
 )
 _RECORD_LITERAL = re.compile(r"\brecords\.(Requirement|InterfaceRecord)\{")
 
@@ -85,9 +101,17 @@ def strip_block_comments(text: str) -> str:
 
 
 def is_exempt_path(rel_path: str) -> bool:
-    """Return True when *rel_path* is the builder package itself."""
+    """Return True when *rel_path* is exempt from fixture builder enforcement.
+
+    Exempt packages are:
+    - ``validator/internal/testutil/``: where the canonical fixtures live.
+    - ``validator/internal/records/``: low-level types; cannot import testutil.
+    - ``validator/internal/layout/``: low-level layout types; cannot import testutil.
+    """
     posix = rel_path.replace("\\", "/")
-    return posix == TESTUTIL_DIR_POSIX or posix.startswith(TESTUTIL_PREFIX)
+    return posix in EXEMPT_DIRS_POSIX or any(
+        posix.startswith(prefix) for prefix in EXEMPT_PREFIXES
+    )
 
 
 def _remediation(type_name: str) -> str:
@@ -98,21 +122,24 @@ def _remediation(type_name: str) -> str:
         f"{yaml_builder}) instead of constructing records.{type_name}{{}} "
         "directly in test code; annotate the line with `// nolint:fixtures` "
         "only when the test intentionally exercises a synthetic or "
-        "malformed document."
+        "malformed document (or where importing testutil would create an "
+        "import cycle)."
     )
 
 
-def _line_is_exempt(raw_lines: list[str], index: int, comment_part: str) -> bool:
+def _line_is_exempt(raw_lines: list[str], index: int, comment_part: str = "") -> bool:
     """Return True when the match at *index* carries a nolint marker.
 
-    The marker may trail the matched line itself, or stand alone on the
-    line immediately above it.
+    The marker may appear on the matched line itself (as a ``//`` or
+    ``/* ... */`` comment), or stand alone on the line immediately above it.
     """
-    if _NOLINT_MARKER in comment_part:
-        return True
+    if 0 <= index < len(raw_lines):
+        current = raw_lines[index].strip()
+        if _NOLINT_CURRENT.search(current):
+            return True
     if index > 0:
-        previous = raw_lines[index - 1].strip()
-        if previous.startswith("//") and _NOLINT_MARKER in previous:
+        previous = raw_lines[index - 1]
+        if _NOLINT_STANDALONE.search(previous):
             return True
     return False
 
@@ -120,8 +147,8 @@ def _line_is_exempt(raw_lines: list[str], index: int, comment_part: str) -> bool
 def find_violations(rel_path: str, text: str) -> list[Violation]:
     """Return prohibited literal violations in *text* at *rel_path*.
 
-    *rel_path* is used only to decide exemption (the builder package)
-    and file selection (``*_test.go``); it need not exist on disk.
+    *rel_path* is used only to decide exemption (builder and low-level
+    packages) and file selection (``*_test.go``); it need not exist on disk.
     """
     if is_exempt_path(rel_path) or not rel_path.endswith("_test.go"):
         return []
@@ -136,13 +163,31 @@ def find_violations(rel_path: str, text: str) -> list[Violation]:
         matches: list[tuple[str, str]] = []
         for match in _DOCUMENT_LITERAL.finditer(code_part):
             matches.append(("document_literal", match.group(1)))
+        for match in _DOCUMENT_SLICE_LITERAL.finditer(code_part):
+            matches.append(("document_literal", match.group(1)))
+        for match in _DOCUMENT_SLICE_START.finditer(code_part):
+            remainder = code_part[match.end() :].strip()
+            if remainder:
+                continue
+            for next_idx in range(index + 1, len(stripped_lines)):
+                next_code, _, _ = stripped_lines[next_idx].partition("//")
+                next_stripped = next_code.strip()
+                if not next_stripped:
+                    continue
+                if next_stripped.startswith("{"):
+                    matches.append(("document_literal", match.group(1)))
+                break
         for match in _RECORD_LITERAL.finditer(code_part):
             matches.append(("record_literal", match.group(1)))
         if not matches:
             continue
         if _line_is_exempt(raw_lines, index, comment_part):
             continue
-        for kind, type_name in matches:
+        unique_matches: list[tuple[str, str]] = []
+        for m in matches:
+            if m not in unique_matches:
+                unique_matches.append(m)
+        for kind, type_name in unique_matches:
             violations.append(
                 Violation(
                     rel_path=rel_path,
@@ -243,6 +288,11 @@ def check(repo_root: Path = REPO_ROOT) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI arguments and check validator test fixture usage."""
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="positional file arguments are accepted and ignored for CLI compatibility with sibling check scripts",
+    )
     parser.add_argument(
         "--repo-root",
         type=Path,
