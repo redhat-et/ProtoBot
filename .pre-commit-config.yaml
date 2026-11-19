@@ -187,6 +187,12 @@ repos:
         # are passed either way.
         always_run: true
         files: ^docs/decisions/.*\.md$
+      - id: test-adr-amendments
+        name: test-adr-amendments
+        entry: python3 scripts/test_check_adr_amendments.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_adr_amendments|test_check_adr_amendments)\.py$
       - id: validator-spec-parity
         name: validator-spec-parity
         entry: python3 scripts/check_validator_spec_parity.py
