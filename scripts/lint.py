@@ -48,13 +48,14 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
 import tarfile
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
@@ -251,15 +252,18 @@ class _MemberFilter:
 
     Skips members whose path would escape the destination and members
     that are not files, directories, symlinks, or hard links, counting
-    every rejection in ``skipped_members``. Stops yielding once the
-    extracted bytes would exceed ``_MAX_EXTRACTED_BYTES`` and records
-    that in ``size_capped``. The check runs lazily, one member at a
-    time, so it also sees symlinks that earlier members of the same
-    archive created. It is the safety net for Python versions whose
-    ``extractall`` takes no ``filter`` argument; with ``filter="tar"``
-    it is defence in depth. Symlink targets are not restricted: the
-    cache legitimately contains absolute links such as
-    ``py_env-*/bin/python`` -> ``/usr/bin/python3``.
+    every rejection in ``skipped_members``. A hard link member is also
+    rejected when its target resolves outside the destination: the
+    ``tar`` filter does not check link targets, and a hard link followed
+    by a regular file of the same name would write through it. Stops
+    yielding once the extracted bytes would exceed
+    ``_MAX_EXTRACTED_BYTES`` and records that in ``size_capped``. The
+    check runs lazily, one member at a time, so it also sees links that
+    earlier members of the same archive created. It is the safety net
+    for Python versions whose ``extractall`` takes no ``filter``
+    argument; with ``filter="tar"`` it is defence in depth. Symlink
+    targets are not restricted: the cache legitimately contains
+    absolute links such as ``py_env-*/bin/python`` -> ``/usr/bin/python3``.
     """
 
     def __init__(self, tar: tarfile.TarFile, destination: Path) -> None:
@@ -269,6 +273,12 @@ class _MemberFilter:
         self.extracted_bytes = 0
         self.size_capped = False
 
+    def _inside_destination(self, candidate: Path, resolved_destination: Path) -> bool:
+        return (
+            candidate == resolved_destination
+            or resolved_destination in candidate.parents
+        )
+
     def __iter__(self) -> Iterator[tarfile.TarInfo]:
         resolved_destination = self._destination.resolve()
         for member in self._tar:
@@ -277,12 +287,15 @@ class _MemberFilter:
             ):
                 self.skipped_members += 1
                 continue
+            if member.islnk():
+                # Hard link targets are archive-root relative and are not
+                # checked by the ``tar`` filter.
+                target = (self._destination / member.linkname).resolve()
+                if not self._inside_destination(target, resolved_destination):
+                    self.skipped_members += 1
+                    continue
             candidate = (self._destination / member.name).resolve()
-            inside = (
-                candidate == resolved_destination
-                or resolved_destination in candidate.parents
-            )
-            if not inside:
+            if not self._inside_destination(candidate, resolved_destination):
                 self.skipped_members += 1
                 continue
             if self.extracted_bytes + member.size > _MAX_EXTRACTED_BYTES:
@@ -335,55 +348,78 @@ def _warn_on_interpreter_mismatch(pre_commit_home: Path) -> None:
         )
 
 
-class _RestoreResult(NamedTuple):
-    """Outcome of one bootstrap-tarball restore attempt."""
+def _remove_quietly(path: Path) -> None:
+    """Remove *path* (file, symlink, or directory tree), ignoring errors."""
+    try:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+    except OSError:
+        pass
 
-    restored: bool
-    skipped_members: int = 0
-    size_capped: bool = False
+
+def _swap_cache_home(staging: Path, pre_commit_home: Path) -> None:
+    """Move the staged cache into place as *pre_commit_home*."""
+    if pre_commit_home.is_symlink() or (
+        pre_commit_home.exists() and not pre_commit_home.is_dir()
+    ):
+        pre_commit_home.unlink()
+    elif pre_commit_home.is_dir():
+        shutil.rmtree(pre_commit_home)
+    os.replace(staging, pre_commit_home)
 
 
-def _restore_cache(pre_commit_home: Path) -> _RestoreResult:
+def _restore_cache(pre_commit_home: Path) -> bool:
     """Restore ``PRE_COMMIT_HOME`` from the bootstrap tarball, if present.
 
-    Reports whether a restore happened and whether it was complete. The
-    tarball itself is left in place; ``_preflight_with_restore`` deletes
-    it only after a complete restore passes the pre-flight. A corrupt or
-    unreadable tarball only warns; the pre-flight then reports its usual
-    missing-revision error.
+    Extraction goes to a staging directory beside ``pre_commit_home``,
+    and only a complete extraction is swapped in. A partial cache must
+    never publish a ``db.db`` that lists revisions whose files are
+    missing; a failed restore leaves ``pre_commit_home`` untouched so a
+    later run retries. The tarball itself is left in place;
+    ``_preflight_with_restore`` deletes it only after the restored
+    cache passes the pre-flight. A corrupt or unreadable tarball only
+    warns; the pre-flight then reports its usual missing-revision
+    error.
     """
     tarball = _cache_tarball()
     if not tarball.is_file():
-        return _RestoreResult(False)
+        return False
+    staging = pre_commit_home.parent / f".{pre_commit_home.name}.restore-{os.getpid()}"
+    _remove_quietly(staging)
     try:
         with tarfile.open(tarball) as tar:
-            members = _extract_tarball(tar, pre_commit_home)
+            members = _extract_tarball(tar, staging)
+        if members.skipped_members:
+            print(
+                f"WARNING: skipped {members.skipped_members} tarball member(s) "
+                f"that would escape {pre_commit_home} or are not files, "
+                f"directories, or links; keeping {tarball}.",
+                file=sys.stderr,
+            )
+        if members.size_capped:
+            print(
+                f"WARNING: the tarball holds more than {_MAX_EXTRACTED_BYTES} "
+                f"bytes; extraction stopped early and {tarball} was kept.",
+                file=sys.stderr,
+            )
+        if members.skipped_members or members.size_capped:
+            return False
+        _swap_cache_home(staging, pre_commit_home)
     except (tarfile.TarError, EOFError, OSError) as error:
         print(
             f"WARNING: cannot restore the pre-commit cache from {tarball}: {error}",
             file=sys.stderr,
         )
-        return _RestoreResult(False)
-    if members.skipped_members:
-        print(
-            f"WARNING: skipped {members.skipped_members} tarball member(s) "
-            f"that would escape {pre_commit_home} or are not files, "
-            f"directories, or links; keeping {tarball}.",
-            file=sys.stderr,
-        )
-    if members.size_capped:
-        print(
-            f"WARNING: the tarball holds more than {_MAX_EXTRACTED_BYTES} "
-            f"bytes; extraction stopped early and {tarball} was kept.",
-            file=sys.stderr,
-        )
-    if not members.skipped_members and not members.size_capped:
-        print(
-            f"Restored the offline pre-commit cache from {tarball} into "
-            f"{pre_commit_home}."
-        )
+        return False
+    finally:
+        _remove_quietly(staging)
+    print(
+        f"Restored the offline pre-commit cache from {tarball} into {pre_commit_home}."
+    )
     _warn_on_interpreter_mismatch(pre_commit_home)
-    return _RestoreResult(True, members.skipped_members, members.size_capped)
+    return True
 
 
 def _delete_tarball() -> None:
@@ -420,19 +456,17 @@ def _preflight_with_restore(
     cache and the tarball is never unpacked. The missing-revision error
     is reported only when no restore fixed the cache, so a successful
     restore prints no spurious error. The tarball is deleted only after
-    a complete restore passes the pre-flight.
+    a restored cache passes the pre-flight.
     """
     if not online:
         missing = _missing_repos(
             _configured_repos(config), _cached_repos(pre_commit_home)
         )
-        if missing:
-            result = _restore_cache(pre_commit_home)
-            if result.restored:
-                rc = _preflight(online, pre_commit_home, config)
-                if rc == 0 and not result.skipped_members and not result.size_capped:
-                    _delete_tarball()
-                return rc
+        if missing and _restore_cache(pre_commit_home):
+            rc = _preflight(online, pre_commit_home, config)
+            if rc == 0:
+                _delete_tarball()
+            return rc
     return _preflight(online, pre_commit_home, config)
 
 

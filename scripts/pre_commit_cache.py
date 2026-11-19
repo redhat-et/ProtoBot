@@ -30,7 +30,10 @@ equal ``PRECOMMIT_VERSION`` in fullsend's ``images/sandbox/Containerfile``
 cache, because hook environments and ``db.db`` record exact versions.
 ``UPSTREAM_SCRIPT_SHA256`` pins the exact bytes of each upstream
 pre-script at ``AGENTS_REF``; a moved tag or a changed file is a hard
-failure, never unverified script content.
+failure, never unverified script content. ``SANDBOX_PYTHON_VERSION`` is
+the sandbox image's interpreter; the bootstrap refuses to publish an
+archive whose python hook environments were built for another
+interpreter.
 
 Step 2 is fail-soft: a bootstrap failure prints a GitHub Actions warning
 and exits 0, so it never blocks the agent run. ``scripts/lint.py``
@@ -42,6 +45,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -70,6 +74,15 @@ UPSTREAM_SCRIPT_SHA256 = {
 # Must equal PRECOMMIT_VERSION in fullsend's images/sandbox/Containerfile.
 PRECOMMIT_VERSION = "4.5.1"
 
+# The Ubuntu Noble interpreter in the Fullsend sandbox image. Python
+# hook environments embed the interpreter's path, so the cache must be
+# built for this version or the sandbox cannot run them.
+SANDBOX_PYTHON_VERSION = "3.12"
+
+# ``repo*/py_env-pythonX.Y`` directories hold one virtualenv per Python
+# hook environment, named after the interpreter that built it.
+_PY_ENV_NAME = re.compile(r"^py_env-python(?P<version>[0-9]+\.[0-9]+)$")
+
 DEFAULT_CACHE_HOME = "/sandbox/.cache/pre-commit"
 DEFAULT_TARBALL = "/tmp/workspace/pre-commit-cache.tar.gz"
 
@@ -79,6 +92,24 @@ PIP_TIMEOUT_SECONDS = 10 * 60
 INSTALL_HOOKS_TIMEOUT_SECONDS = 15 * 60
 SUDO_TIMEOUT_SECONDS = 60
 MAX_SCRIPT_BYTES = 2 * 1024 * 1024
+
+# A GitHub Actions workflow command must stay on one line, cannot carry
+# control characters, and must not expand ``%``-encoded data.
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+_WHITESPACE_RUNS = re.compile(r"\s+")
+_WORKFLOW_COMMAND_CAP = 500
+
+
+def _sanitize_workflow_command(text: str) -> str:
+    """Make *text* safe for one GitHub Actions workflow command line.
+
+    Removes control characters (including CR, LF, and ESC), collapses
+    whitespace runs so nothing can start a new command, escapes ``%`` as
+    ``%25`` so GitHub cannot expand encoded data, and caps the length.
+    """
+    without_controls = _CONTROL_CHARACTERS.sub(" ", text)
+    collapsed = _WHITESPACE_RUNS.sub(" ", without_controls).strip()
+    return collapsed.replace("%", "%25")[:_WORKFLOW_COMMAND_CAP]
 
 
 class UpstreamScriptError(OSError):
@@ -239,6 +270,24 @@ def _run_upstream_script(upstream: str) -> int:
             return 1
 
 
+def _upstream_requested_skip() -> bool:
+    """Report whether the upstream pre-script wrote ``skipped=true``.
+
+    Fullsend's pre-script output protocol lets a script that exits 0
+    request a skip by writing ``skipped=true`` to the file named by
+    ``FULLSEND_PRESCRIPT_OUTPUT``. When the variable is unset (an older
+    CLI), there is nothing to read and the run proceeds.
+    """
+    output_path = os.environ.get("FULLSEND_PRESCRIPT_OUTPUT", "")
+    if not output_path:
+        return False
+    try:
+        content = Path(output_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(line.strip() == "skipped=true" for line in content.splitlines())
+
+
 # ── Step 2: warm the cache (fail-soft) ───────────────────────────
 
 
@@ -371,7 +420,62 @@ def _ensure_cache_home(cache_home: Path) -> None:
         )
 
 
-def _warm_cache(cache_home: Path, tarball: Path) -> None:
+def _verify_python_envs(cache_home: Path, sandbox_python: str) -> None:
+    """Refuse a cache whose python hook environments use another interpreter.
+
+    Python hook environments embed the interpreter's path, so a cache
+    built for another interpreter cannot run in the sandbox. Node
+    environments are not checked: they bundle their own node binary or
+    use the sandbox PATH, so they are portable.
+    """
+    found = {
+        match.group("version")
+        for entry in cache_home.glob("*/py_env-python*")
+        if (match := _PY_ENV_NAME.match(entry.name))
+    }
+    others = sorted(found - {sandbox_python})
+    if others:
+        listing = ", ".join(f"py_env-python{version}" for version in others)
+        raise RuntimeError(
+            f"the cache holds python hook environments for {listing}, but the "
+            f"sandbox uses Python {sandbox_python}; no archive was written. "
+            f"Pass --sandbox-python <X.Y> to override when building locally."
+        )
+
+
+def _remove_file(path: Path) -> None:
+    """Unlink *path* when it exists; ignore errors."""
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _write_tarball_atomically(cache_home: Path, tarball: Path) -> None:
+    """Archive the cache to *tarball* through a staging file and one rename.
+
+    A reader of *tarball* therefore sees either no archive or a complete
+    one, never a partially written file.
+    """
+    tarball.parent.mkdir(parents=True, exist_ok=True)
+    staging = tarball.parent / f".{tarball.name}.{os.getpid()}.tmp"
+    tar = os.environ.get("TAR", "tar")
+    try:
+        _run_or_raise(
+            [tar, "-czf", str(staging), "-C", str(cache_home), "."],
+            description=f"cannot write the cache tarball {tarball}",
+        )
+        _run_or_raise(
+            ["chmod", "0644", str(staging)],
+            description=f"cannot make {staging} readable",
+        )
+        os.replace(staging, tarball)
+    except (RuntimeError, OSError):
+        _remove_file(staging)
+        raise
+
+
+def _warm_cache(cache_home: Path, tarball: Path, sandbox_python: str) -> None:
     """Warm the hook cache and write the transport tarball.
 
     Raises on any failure; ``main`` makes this phase fail-soft.
@@ -380,6 +484,9 @@ def _warm_cache(cache_home: Path, tarball: Path) -> None:
     config = repo / ".pre-commit-config.yaml"
     if not config.is_file():
         raise RuntimeError(f"no .pre-commit-config.yaml in {repo}")
+    # A failed run must never leave a stale archive at the advertised
+    # path: the sandbox would restore it and trust its contents.
+    _remove_file(tarball)
     binary = _resolve_pre_commit()
     _ensure_cache_home(cache_home)
     env = dict(os.environ)
@@ -391,20 +498,12 @@ def _warm_cache(cache_home: Path, tarball: Path) -> None:
         timeout=INSTALL_HOOKS_TIMEOUT_SECONDS,
         cwd=str(repo),
     )
+    _verify_python_envs(cache_home, sandbox_python)
     _run_or_raise(
         ["chmod", "-R", "a+rX", str(cache_home)],
         description=f"cannot make {cache_home} world-readable",
     )
-    tarball.parent.mkdir(parents=True, exist_ok=True)
-    tar = os.environ.get("TAR", "tar")
-    _run_or_raise(
-        [tar, "-czf", str(tarball), "-C", str(cache_home), "."],
-        description=f"cannot write the cache tarball {tarball}",
-    )
-    _run_or_raise(
-        ["chmod", "0644", str(tarball)],
-        description=f"cannot make {tarball} readable",
-    )
+    _write_tarball_atomically(cache_home, tarball)
 
 
 # ── Entrypoint ───────────────────────────────────────────────────
@@ -436,6 +535,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=os.environ.get("PROTOBOT_CACHE_TARBALL", DEFAULT_TARBALL),
         help=f"tarball to write (default: {DEFAULT_TARBALL})",
     )
+    parser.add_argument(
+        "--sandbox-python",
+        default=os.environ.get(
+            "PROTOBOT_SANDBOX_PYTHON_VERSION", SANDBOX_PYTHON_VERSION
+        ),
+        help=(
+            f"Python X.Y version the sandbox uses (default: {SANDBOX_PYTHON_VERSION})"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -447,19 +555,29 @@ def main(argv: list[str] | None = None) -> int:
             # The upstream script skipped (78) or failed the run. No
             # sandbox is created, so warming the cache would be wasted.
             return upstream_rc
+        if _upstream_requested_skip():
+            # The upstream script asked fullsend to skip the run. No
+            # sandbox is created, so warming the cache would be wasted.
+            return 0
     try:
-        _warm_cache(Path(args.cache_home), Path(args.tarball))
+        _warm_cache(Path(args.cache_home), Path(args.tarball), args.sandbox_python)
     except (RuntimeError, OSError, subprocess.SubprocessError) as error:
         # Fail-soft: a bootstrap failure must not block the agent run.
         # scripts/lint.py still reports its actionable cache-miss error.
+        # A failed run must leave no archive at the advertised path.
+        _remove_file(Path(args.tarball))
         manual = (
             f"PRE_COMMIT_HOME={args.cache_home} "
             f"pre-commit install-hooks --config {_target_repo() / '.pre-commit-config.yaml'}"
         )
-        print(
-            f"::warning::pre-commit cache bootstrap failed: {error}. "
-            f"Warm it manually: {manual}"
+        message = (
+            f"pre-commit cache bootstrap failed: {error}. Warm it manually: {manual}"
         )
+        # One sanitized workflow command, then the unsanitized detail so
+        # the diagnostic survives.
+        print(f"::warning::{_sanitize_workflow_command(message)}")
+        for line in message.splitlines():
+            print(f"  {line}")
     return 0
 
 

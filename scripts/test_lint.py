@@ -305,6 +305,8 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn(str(self.home), message)
         # The tarball is deleted after a successful restore.
         self.assertFalse(self.tarball.exists())
+        # No staging directory leaked beside the cache home.
+        self.assertEqual([], list(self.root.glob(f".{self.home.name}.restore-*")))
         # The restored db.db satisfies the pre-flight.
         self.assertTrue((self.home / "db.db").is_file())
         # The cache's absolute symlink survives the restore.
@@ -425,9 +427,48 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("missing 2 hook repository revisions", stderr.getvalue())
         self.assertTrue(self.tarball.exists())
 
-    def test_extraction_over_the_size_cap_stops_and_keeps_the_tarball(self) -> None:
-        self._build_tarball(self._config_rows())
-        with patch.object(checker, "_MAX_EXTRACTED_BYTES", 10):
+    def test_hardlink_with_escaping_target_is_skipped(self) -> None:
+        # A hard link whose target escapes the destination is not checked
+        # by the tar filter. Extracted, a later regular file of the same
+        # name would write through it and modify the outside file.
+        outside = self.root / "outside-target"
+        outside.write_bytes(b"original")
+        payload = io.BytesIO(b"attacker data")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            link = tarfile.TarInfo("shared")
+            link.type = tarfile.LNKTYPE
+            link.linkname = "../outside-target"
+            tar.addfile(link)
+            member = tarfile.TarInfo("shared")
+            member.size = len(payload.getbuffer())
+            tar.addfile(member, payload)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        # The outside file is unchanged and the skip is counted.
+        self.assertEqual(b"original", outside.read_bytes())
+        self.assertIn("skipped 1 tarball member(s)", stderr.getvalue())
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+
+    def test_size_cap_after_db_leaves_no_readable_db(self) -> None:
+        # db.db must not survive a size-capped extraction: a later run
+        # must retry the restore instead of trusting a partial cache.
+        packed = self.root / "packed"
+        _make_db(packed / "db.db", self._config_rows())
+        (packed / "filler.bin").write_bytes(b"x" * 1024)
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                # recursive=False: rglob already lists every entry.
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        db_size = (packed / "db.db").stat().st_size
+        with patch.object(checker, "_MAX_EXTRACTED_BYTES", db_size):
             stdout, stderr = io.StringIO(), io.StringIO()
             with (
                 contextlib.redirect_stdout(stdout),
@@ -438,10 +479,11 @@ class PreflightRestoreTests(unittest.TestCase):
                 )
         self.assertEqual(1, rc)
         self.assertIn("extraction stopped early", stderr.getvalue())
-        self.assertNotIn("Restored", stdout.getvalue())
         self.assertTrue(self.tarball.exists())
-        # The very first member already exceeded the cap: nothing extracted.
+        # No partial cache was published and no staging directory leaked.
         self.assertFalse((self.home / "db.db").exists())
+        self.assertEqual(set(), checker._cached_repos(self.home))
+        self.assertEqual([], list(self.root.glob(f".{self.home.name}.restore-*")))
 
     def test_tarball_outside_the_delete_root_is_never_deleted(self) -> None:
         self._build_tarball(self._config_rows())

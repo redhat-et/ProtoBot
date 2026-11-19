@@ -33,6 +33,15 @@ set as `PRE_COMMIT_HOME` in `env.sandbox` of `harness/code.yaml` and
 the sandbox image (Ubuntu Noble, `/usr/bin/python3` 3.12), or the hook
 environments will not run there.
 
+Before the archive is written, the bootstrap scans the warmed python hook
+environments and refuses to publish an archive that was built for another
+interpreter; it names the found versions and writes no archive. Use
+`--sandbox-python <X.Y>` (or `$PROTOBOT_SANDBOX_PYTHON_VERSION`) to
+override the expected version for local runs on another interpreter.
+This makes a wrong-interpreter cache fail loudly during verification of
+a pin update (Step 6 of the upgrade-fullsend skill) instead of failing
+later inside the sandbox.
+
 The cache is about 250-400 MB as a `.tar.gz` (1.1-1.6 GB on disk),
 depending on the platform. The tarball is copied per run and deleted
 after the restore, so the sandbox never carries both copies.
@@ -65,6 +74,9 @@ When Fullsend is upgraded:
    `AGENTS_REF` differ.
 3. Update `PRECOMMIT_VERSION` in `scripts/pre_commit_cache.py` to the
    `PRECOMMIT_VERSION` of fullsend's `images/sandbox/Containerfile`.
+4. Update `SANDBOX_PYTHON_VERSION` in `scripts/pre_commit_cache.py` when
+   the sandbox image's interpreter changes (Ubuntu Noble `/usr/bin/python3`
+   3.12 today).
 
 ## Running the bootstrap by hand
 

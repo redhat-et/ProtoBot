@@ -43,9 +43,15 @@ def _completed(
 
 
 def _fake_run_succeeds(argv, *, env=None, timeout=None, capture=False, cwd=None):
-    """Stand-in for ``_run``: version probes match the pin, all else is 0."""
+    """Stand-in for ``_run``: version probes match the pin, all else is 0.
+
+    A ``tar`` invocation writes a real file so the atomic publish
+    (``os.replace``) has something to rename.
+    """
     if "--version" in argv:
         return _completed(stdout=f"pre-commit {bootstrap.PRECOMMIT_VERSION}\n")
+    if argv and argv[0] == "tar":
+        Path(argv[2]).write_bytes(b"tarball")
     return _completed()
 
 
@@ -109,7 +115,7 @@ class DownloadVerificationTests(unittest.TestCase):
         self.addCleanup(temporary_directory.cleanup)
         self.destination = Path(temporary_directory.name) / "script.sh"
 
-    def _patch_opener(self, data: bytes, url: str = _URL) -> None:
+    def _patch_opener(self, data: bytes, url: str = _URL) -> patch:
         opener = Mock()
         opener.open = Mock(return_value=_FakeResponse(data, url))
         return patch("urllib.request.build_opener", return_value=opener)
@@ -235,17 +241,47 @@ class WarmPhaseTests(unittest.TestCase):
         root = Path(temporary_directory.name)
         cache_home = root / "cache"
         tarball = root / "out" / "pre-commit-cache.tar.gz"
+        staging = tarball.parent / f".{tarball.name}.{os.getpid()}.tmp"
         # ``-C <cache home> .`` archives the cache home's contents, so the
-        # restore unpacks them directly into PRE_COMMIT_HOME.
+        # restore unpacks them directly into PRE_COMMIT_HOME. The archive
+        # is written to a staging file and renamed into place.
         with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds) as run:
-            bootstrap._warm_cache(cache_home, tarball)
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
         tar_calls = [
             call.args[0] for call in run.call_args_list if call.args[0][0] == "tar"
         ]
         self.assertEqual(
-            [["tar", "-czf", str(tarball), "-C", str(cache_home), "."]],
+            [["tar", "-czf", str(staging), "-C", str(cache_home), "."]],
             tar_calls,
         )
+        self.assertTrue(tarball.is_file())
+        self.assertEqual([], list(tarball.parent.glob(f".{tarball.name}.*")))
+
+    def test_tar_failure_leaves_no_advertised_archive_and_no_staging(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        root = Path(temporary_directory.name)
+        cache_home = root / "cache"
+        tarball = root / "out" / "pre-commit-cache.tar.gz"
+        tarball.parent.mkdir(parents=True)
+        # A stale archive from an earlier run must not survive a failure.
+        tarball.write_bytes(b"stale")
+
+        def failing_tar(argv, *, env=None, timeout=None, capture=False, cwd=None):
+            if argv[0] == "tar":
+                return _completed(returncode=1, stderr="tar: disk full")
+            return _fake_run_succeeds(
+                argv, env=env, timeout=timeout, capture=capture, cwd=cwd
+            )
+
+        with (
+            patch.object(bootstrap, "_run", side_effect=failing_tar),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertIn("disk full", str(ctx.exception))
+        self.assertFalse(tarball.exists())
+        self.assertEqual([], list(tarball.parent.glob(f".{tarball.name}.*")))
 
     def test_install_hooks_runs_with_cache_home_env_and_repo_cwd(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
@@ -264,7 +300,7 @@ class WarmPhaseTests(unittest.TestCase):
             )
 
         with patch.object(bootstrap, "_run", side_effect=fake_run):
-            bootstrap._warm_cache(cache_home, root / "out.tar.gz")
+            bootstrap._warm_cache(cache_home, root / "out.tar.gz", "3.12")
         self.assertEqual(str(cache_home), seen["env"]["PRE_COMMIT_HOME"])
         self.assertEqual(bootstrap.INSTALL_HOOKS_TIMEOUT_SECONDS, seen["timeout"])
         # pre-commit resolves relative hook metadata from the repo root.
@@ -322,6 +358,206 @@ class WarmPhaseTests(unittest.TestCase):
             bootstrap._ensure_cache_home(Path("/tmp"))
         self.assertIn("not writable", str(ctx.exception))
         self.assertIn("sudo install -d", str(ctx.exception))
+
+
+class PythonEnvironmentTests(unittest.TestCase):
+    """The cache must match the sandbox interpreter before it publishes."""
+
+    def _temporary_root(self) -> Path:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        return Path(temporary_directory.name)
+
+    def _make_env(self, cache_home: Path, name: str) -> None:
+        (cache_home / "repodir" / name).mkdir(parents=True, exist_ok=True)
+
+    def test_matching_version_publishes_the_archive(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_env(cache_home, "py_env-python3.12")
+        with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertTrue(tarball.is_file())
+
+    def test_mismatched_version_raises_and_writes_no_archive(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_env(cache_home, "py_env-python3.11")
+        with (
+            patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds) as run,
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        message = str(ctx.exception)
+        self.assertIn("py_env-python3.11", message)
+        self.assertIn("Python 3.12", message)
+        self.assertIn("--sandbox-python", message)
+        self.assertFalse(tarball.exists())
+        # The archive step was never reached.
+        self.assertFalse(any(call.args[0][0] == "tar" for call in run.call_args_list))
+
+    def test_scan_ignores_non_python_environments(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        for name in (
+            "py_env-python3.12",
+            "node_env-default",
+            "py_env-python",  # no version suffix: not a python env name
+        ):
+            self._make_env(cache_home, name)
+        with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertTrue(tarball.is_file())
+
+    def test_sandbox_python_argument_overrides_the_default(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_env(cache_home, "py_env-python3.14")
+        with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
+            rc = bootstrap.main(
+                [
+                    "--upstream",
+                    "code",
+                    "--skip-upstream",
+                    "--sandbox-python",
+                    "3.14",
+                    "--cache-home",
+                    str(cache_home),
+                    "--tarball",
+                    str(tarball),
+                ]
+            )
+        self.assertEqual(0, rc)
+        self.assertTrue(tarball.is_file())
+
+    def test_default_refuses_a_mismatched_interpreter(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_env(cache_home, "py_env-python3.14")
+        with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = bootstrap.main(
+                    [
+                        "--upstream",
+                        "code",
+                        "--skip-upstream",
+                        "--cache-home",
+                        str(cache_home),
+                        "--tarball",
+                        str(tarball),
+                    ]
+                )
+        self.assertEqual(0, rc)
+        self.assertIn("::warning::", stdout.getvalue())
+        self.assertIn("py_env-python3.14", stdout.getvalue())
+        self.assertFalse(tarball.exists())
+
+    def test_sandbox_python_defaults(self) -> None:
+        self.assertEqual(
+            bootstrap.SANDBOX_PYTHON_VERSION,
+            bootstrap._parse_args(["--upstream", "code"]).sandbox_python,
+        )
+        with patch.dict(
+            os.environ,
+            {"PROTOBOT_SANDBOX_PYTHON_VERSION": "3.13"},
+            clear=False,
+        ):
+            self.assertEqual(
+                "3.13",
+                bootstrap._parse_args(["--upstream", "code"]).sandbox_python,
+            )
+
+
+class UpstreamSkipOutputTests(unittest.TestCase):
+    """A ``skipped=true`` output line skips the warm phase."""
+
+    def setUp(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.output_file = Path(temporary_directory.name) / "prescript-output"
+
+    def _run_main(self) -> tuple[int, object]:
+        with (
+            patch.object(bootstrap, "_run_upstream_script", return_value=0),
+            patch.object(bootstrap, "_warm_cache") as warm,
+        ):
+            rc = bootstrap.main(["--upstream", "code"])
+        return rc, warm
+
+    def test_skipped_true_returns_without_warming(self) -> None:
+        self.output_file.write_text(
+            "reason=duplicate\nskipped=true\n", encoding="utf-8"
+        )
+        with patch.dict(
+            os.environ, {"FULLSEND_PRESCRIPT_OUTPUT": str(self.output_file)}
+        ):
+            rc, warm = self._run_main()
+        self.assertEqual(0, rc)
+        warm.assert_not_called()
+
+    def test_other_output_still_warms(self) -> None:
+        self.output_file.write_text("skipped=false\nreason=nothing\n", encoding="utf-8")
+        with patch.dict(
+            os.environ, {"FULLSEND_PRESCRIPT_OUTPUT": str(self.output_file)}
+        ):
+            rc, warm = self._run_main()
+        self.assertEqual(0, rc)
+        warm.assert_called_once()
+
+    def test_unset_variable_still_warms(self) -> None:
+        env = dict(os.environ)
+        env.pop("FULLSEND_PRESCRIPT_OUTPUT", None)
+        with patch.dict(os.environ, env, clear=True):
+            rc, warm = self._run_main()
+        self.assertEqual(0, rc)
+        warm.assert_called_once()
+
+
+class WorkflowCommandTests(unittest.TestCase):
+    """The fail-soft warning is a single sanitized workflow command."""
+
+    def test_sanitize_workflow_command(self) -> None:
+        dirty = "line1\r\nline2\ttab ::error:: injected\x1b[31m 100%"
+        clean = bootstrap._sanitize_workflow_command(dirty)
+        # One line, no control characters, whitespace collapsed.
+        for control in ("\r", "\n", "\t", "\x1b"):
+            self.assertNotIn(control, clean)
+        # Percent is escaped so GitHub cannot expand encoded data.
+        self.assertTrue(clean.endswith("100%25"))
+        self.assertNotIn("%", clean.replace("%25", ""))
+        # ``::`` cannot start a new command once the line is single-line.
+        self.assertIn("::error::", clean)
+
+    def test_sanitize_workflow_command_caps_the_length(self) -> None:
+        clean = bootstrap._sanitize_workflow_command("x" * 600)
+        self.assertLessEqual(len(clean), bootstrap._WORKFLOW_COMMAND_CAP)
+
+    def test_fail_soft_warning_is_sanitized_with_plain_detail(self) -> None:
+        failure = RuntimeError("boom\nsecond line ::error:: 100% done")
+        with (
+            patch.object(bootstrap, "_run_upstream_script", return_value=0),
+            patch.object(bootstrap, "_warm_cache", side_effect=failure),
+        ):
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = bootstrap.main(["--upstream", "code"])
+        self.assertEqual(0, rc)
+        output = stdout.getvalue()
+        warning_lines = [
+            line for line in output.splitlines() if line.startswith("::warning::")
+        ]
+        self.assertEqual(1, len(warning_lines))
+        self.assertIn("100%25", warning_lines[0])
+        self.assertNotIn("%", warning_lines[0].replace("%25", ""))
+        # The unsanitized detail survives as indented plain lines.
+        self.assertIn("  pre-commit cache bootstrap failed: boom", output)
+        self.assertIn("  second line ::error:: 100% done", output)
 
 
 class ResolvePreCommitTests(unittest.TestCase):
