@@ -202,10 +202,13 @@ func TestCheckBaseDuplicateIDUsesFirstWins(t *testing.T) {
 	}
 }
 
+// document builds a minimal synthetic requirement document carrying only
+// the path, id, text, and status under test. Check only inspects those
+// fields, so the canonical testutil fixtures are intentionally not used.
 func document(path, id, text, status string) layout.Document[records.Requirement] {
-	return layout.Document[records.Requirement]{
+	return layout.Document[records.Requirement]{ // nolint:fixtures
 		Path: path,
-		Record: records.Requirement{
+		Record: records.Requirement{ // nolint:fixtures
 			ID:     id,
 			Text:   text,
 			Status: status,

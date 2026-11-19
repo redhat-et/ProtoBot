@@ -27,19 +27,23 @@ func TestValidateRecordSchema(t *testing.T) {
 			snapshot: schemaSnapshot(validRequirementDocument(), validInterfaceDocument()),
 		},
 		{
+			// nolint:fixtures: this case proves that a nil Fields map
+			// suppresses missing-field diagnostics even when every record
+			// field is empty; a canonical fixture would populate Fields
+			// and record content that this edge case must leave empty.
 			name: "synthetic requirement and interface with nil fields produce no missing field diagnostics",
 			snapshot: layout.Snapshot{
-				Requirements: []layout.Document[records.Requirement]{
+				Requirements: []layout.Document[records.Requirement]{ // nolint:fixtures
 					{
 						Path:   reqPath,
-						Record: records.Requirement{},
+						Record: records.Requirement{}, // nolint:fixtures
 						Fields: nil,
 					},
 				},
-				Interfaces: []layout.Document[records.InterfaceRecord]{
+				Interfaces: []layout.Document[records.InterfaceRecord]{ // nolint:fixtures
 					{
 						Path:   ifacePath,
-						Record: records.InterfaceRecord{},
+						Record: records.InterfaceRecord{}, // nolint:fixtures
 						Fields: nil,
 					},
 				},

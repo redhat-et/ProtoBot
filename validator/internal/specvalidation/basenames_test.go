@@ -21,32 +21,31 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "conforming requirement and interface",
 			snapshot: layout.Snapshot{
-				Requirements: []layout.Document[records.Requirement]{{
-					Path:   "spec/requirements/REQ-CORE-00001.yaml",
-					Record: records.Requirement{ID: "REQ-CORE-00001"},
-				}},
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/billing-api.yaml",
-					Record: records.InterfaceRecord{Name: "billing-api"},
-				}},
+				Requirements: []layout.Document[records.Requirement]{
+					testutil.ValidRequirementDocument(testutil.WithID("REQ-CORE-00001")),
+				},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(testutil.WithName("billing-api")),
+				},
 			},
 		},
 		{
 			name: "hyphenated requirement scope matches shared identifier pattern",
 			snapshot: layout.Snapshot{
-				Requirements: []layout.Document[records.Requirement]{{
-					Path:   "spec/requirements/REQ-CORE-X-00001.yaml",
-					Record: records.Requirement{ID: "REQ-CORE-X-00001"},
-				}},
+				Requirements: []layout.Document[records.Requirement]{
+					testutil.ValidRequirementDocument(testutil.WithID("REQ-CORE-X-00001")),
+				},
 			},
 		},
 		{
 			name: "malformed requirement basename",
 			snapshot: layout.Snapshot{
-				Requirements: []layout.Document[records.Requirement]{{
-					Path:   "spec/requirements/notes.yaml",
-					Record: records.Requirement{ID: "REQ-CORE-00001"},
-				}},
+				Requirements: []layout.Document[records.Requirement]{
+					testutil.ValidRequirementDocument(
+						testutil.WithID("REQ-CORE-00001"),
+						testutil.WithPath("spec/requirements/notes.yaml"),
+					),
+				},
 			},
 			wantCode:  CodeRequirementInvalidBasename,
 			wantPath:  "spec/requirements/notes.yaml",
@@ -55,10 +54,12 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "requirement id differs from valid basename",
 			snapshot: layout.Snapshot{
-				Requirements: []layout.Document[records.Requirement]{{
-					Path:   "spec/requirements/REQ-CORE-00001.yaml",
-					Record: records.Requirement{ID: "REQ-CORE-00002"},
-				}},
+				Requirements: []layout.Document[records.Requirement]{
+					testutil.ValidRequirementDocument(
+						testutil.WithID("REQ-CORE-00002"),
+						testutil.WithPath("spec/requirements/REQ-CORE-00001.yaml"),
+					),
+				},
 			},
 			wantCode:  CodeRequirementIDBasenameMismatch,
 			wantPath:  "spec/requirements/REQ-CORE-00001.yaml",
@@ -68,10 +69,12 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "interface name differs from basename",
 			snapshot: layout.Snapshot{
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/service.yaml",
-					Record: records.InterfaceRecord{Name: "billing-api"},
-				}},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(
+						testutil.WithName("billing-api"),
+						testutil.WithPath("spec/interfaces/service.yaml"),
+					),
+				},
 			},
 			wantCode:  CodeInterfaceNameBasenameMismatch,
 			wantPath:  "spec/interfaces/service.yaml",
@@ -81,10 +84,12 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "interface name cannot be one path segment",
 			snapshot: layout.Snapshot{
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/service.yaml",
-					Record: records.InterfaceRecord{Name: "billing/api"},
-				}},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(
+						testutil.WithName("billing/api"),
+						testutil.WithPath("spec/interfaces/service.yaml"),
+					),
+				},
 			},
 			wantCode:  CodeInterfaceNameBasenameMismatch,
 			wantPath:  "spec/interfaces/service.yaml",
@@ -94,10 +99,12 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "degenerate basename matching a degenerate name is still rejected",
 			snapshot: layout.Snapshot{
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/...yaml",
-					Record: records.InterfaceRecord{Name: ".."},
-				}},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(
+						testutil.WithName(".."),
+						testutil.WithPath("spec/interfaces/...yaml"),
+					),
+				},
 			},
 			wantCode:  CodeInterfaceInvalidBasename,
 			wantPath:  "spec/interfaces/...yaml",
@@ -106,10 +113,12 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "trailing dot basename matching a trailing dot name is still rejected",
 			snapshot: layout.Snapshot{
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/service..yaml",
-					Record: records.InterfaceRecord{Name: "service."},
-				}},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(
+						testutil.WithName("service."),
+						testutil.WithPath("spec/interfaces/service..yaml"),
+					),
+				},
 			},
 			wantCode:  CodeInterfaceInvalidBasename,
 			wantPath:  "spec/interfaces/service..yaml",
@@ -118,10 +127,12 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "invalid interface basename does not emit spurious name mismatch when name differs",
 			snapshot: layout.Snapshot{
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/...yaml",
-					Record: records.InterfaceRecord{Name: "billing-api"},
-				}},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(
+						testutil.WithName("billing-api"),
+						testutil.WithPath("spec/interfaces/...yaml"),
+					),
+				},
 			},
 			wantCode:  CodeInterfaceInvalidBasename,
 			wantPath:  "spec/interfaces/...yaml",
@@ -130,10 +141,12 @@ func TestValidateBasenames(t *testing.T) {
 		{
 			name: "invalid interface name paired with valid differing basename emits name mismatch",
 			snapshot: layout.Snapshot{
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/service.yaml",
-					Record: records.InterfaceRecord{Name: ".hidden"},
-				}},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(
+						testutil.WithName(".hidden"),
+						testutil.WithPath("spec/interfaces/service.yaml"),
+					),
+				},
 			},
 			wantCode:  CodeInterfaceNameBasenameMismatch,
 			wantPath:  "spec/interfaces/service.yaml",
@@ -184,14 +197,18 @@ func TestValidateBasenamesSkipsEmptyIdentifiers(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot := layout.Snapshot{
-				Requirements: []layout.Document[records.Requirement]{{
-					Path:   "spec/requirements/REQ-CORE-00001.yaml",
-					Record: records.Requirement{ID: tc.reqID},
-				}},
-				Interfaces: []layout.Document[records.InterfaceRecord]{{
-					Path:   "spec/interfaces/billing-api.yaml",
-					Record: records.InterfaceRecord{Name: tc.ifaceName},
-				}},
+				Requirements: []layout.Document[records.Requirement]{
+					testutil.ValidRequirementDocument(
+						testutil.WithID(tc.reqID),
+						testutil.WithPath("spec/requirements/REQ-CORE-00001.yaml"),
+					),
+				},
+				Interfaces: []layout.Document[records.InterfaceRecord]{
+					testutil.ValidInterfaceDocument(
+						testutil.WithName(tc.ifaceName),
+						testutil.WithPath("spec/interfaces/billing-api.yaml"),
+					),
+				},
 			}
 			got := basenameDiagnostics(Validate(snapshot))
 			if len(got) != 0 {

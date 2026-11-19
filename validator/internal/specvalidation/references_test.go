@@ -501,41 +501,41 @@ func TestValidatePathTraversalDoesNotSuppressReferenceNotFound(t *testing.T) {
 
 	cases := []struct {
 		name  string
-		req   records.Requirement
+		doc   layout.Document[records.Requirement]
 		field string
 		ident string
 	}{
 		{
 			name: "interface slash traversal",
-			req: testutil.ValidRequirementDocument(
+			doc: testutil.ValidRequirementDocument(
 				testutil.WithID("REQ-API-00002"),
 				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{traversal},
 				}),
-			).Record,
+			),
 			field: "applies_to.interfaces[0]",
 			ident: traversal,
 		},
 		{
 			name: "interface backslash traversal",
-			req: testutil.ValidRequirementDocument(
+			doc: testutil.ValidRequirementDocument(
 				testutil.WithID("REQ-API-00002"),
 				testutil.WithAppliesTo(records.Applicability{
 					Interfaces: []string{backslash},
 				}),
-			).Record,
+			),
 			field: "applies_to.interfaces[0]",
 			ident: "REQ-BROKEN",
 		},
 		{
 			name: "relationship slash traversal",
-			req: testutil.ValidRequirementDocument(
+			doc: testutil.ValidRequirementDocument(
 				testutil.WithID("REQ-API-00002"),
 				testutil.WithRelationships(records.Relationship{
 					Type:   records.RelDependsOn,
 					Target: traversal,
 				}),
-			).Record,
+			),
 			field: "relationships[0].target",
 			ident: traversal,
 		},
@@ -544,10 +544,7 @@ func TestValidatePathTraversalDoesNotSuppressReferenceNotFound(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot := layout.Snapshot{
-				Requirements: []layout.Document[records.Requirement]{{
-					Path:   reqPath,
-					Record: tc.req,
-				}},
+				Requirements: []layout.Document[records.Requirement]{tc.doc},
 			}
 			diagnostics := Validate(snapshot, layoutDiagnostics...)
 			if len(diagnostics) != 1 || diagnostics[0].Code != CodeReferenceNotFound {
