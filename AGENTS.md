@@ -196,28 +196,28 @@ must follow these rules:
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
-   registered specification artifact, when Rule 4 finds it stale, or
-   when a PR modifies [.protobot/project.yaml](.protobot/project.yaml),
-   inspect the affected registered specification artifact or project
-   configuration for hand edits under Rule 5. Run
+   registered specification artifact, when Rule 4 identifies staleness
+   in a registered specification artifact, or when a PR modifies
+   [.protobot/project.yaml](.protobot/project.yaml), inspect that
+   artifact or project configuration for hand edits under Rule 5. Run
    `ears-manager check --base-ref <merge-base>` on a checkout or worktree
    of the recorded PR head, where `<merge-base>` is the merge base with
-   the default branch (a check on the base branch is not evidence).
-   Require it to pass without `artifact.digest_mismatch`,
+   the default branch (a base-branch check is not evidence). Require it
+   to pass without `artifact.digest_mismatch`,
    `artifact.operation_missing`, or `artifact.unregistered`. The check
    requires each registered artifact path or canonical-content delta to
-   have a matching `artifact_id` in an `artifact_operations[]` entry in
-   any proposed change set, and rejects unregistration of an
+   match an `artifact_id` in an `artifact_operations[]` entry in any
+   proposed change set, and rejects unregistration of an
    artifact-registry entry present on the comparison base (the merge base
    in CI and review). It confirms manifest association only, not that
    `ears-manager artifact put` was invoked; metadata-only changes to an
    artifact-registry entry do not by themselves require an artifact
-   operation. Reviewers must flag hand edits they can identify, not claim
-   CLI provenance from an operation record. Findings should include each
+   operation. Reviewers must flag identified hand edits, not claim CLI
+   provenance from an operation record. Findings should include each
    listed diagnostic and any hand edit in that artifact or
    [.protobot/project.yaml](.protobot/project.yaml); and, when Rule 4
-   finds the registered specification artifact stale, a finding that
-   prescribes `ears-manager artifact put`, not a hand edit.
+   identifies staleness in a registered specification artifact, a
+   finding that prescribes `ears-manager artifact put`, not a hand edit.
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
