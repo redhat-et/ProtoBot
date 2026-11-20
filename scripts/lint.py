@@ -1232,6 +1232,10 @@ def _restore_cache(
         staged_paths = _cached_repo_paths(staging)
         live = _cached_repos(pre_commit_home)
         live_paths = _cached_repo_paths(pre_commit_home)
+        configured_local = {
+            (f"{_LOCAL_REPO}:{','.join(dependencies)}", _LOCAL_REPO_VERSION)
+            for _hook_id, dependencies in _configured_local_dependencies(config)
+        }
         # A row whose repo or ref is not text cannot be sorted or
         # compared; reject the archive instead of crashing.
         malformed = sorted(
@@ -1268,13 +1272,13 @@ def _restore_cache(
                 file=sys.stderr,
             )
             return False
-        # Every required and retained revision needs its payload, so a
-        # retained row without a repository directory cannot be promoted.
+        # Every required, configured-local, and retained revision needs its
+        # payload, so a row without a repository directory cannot be promoted.
         # pre-commit stores local environments with additional
         # dependencies under ``local:`` keys without a hook manifest,
         # and never clones local or meta repositories, so those rows
         # need a valid stored path and directory but no manifest.
-        for repo, rev in sorted(required | live):
+        for repo, rev in sorted(required | configured_local | live):
             stored = staged_paths.get((repo, rev), "")
             require_manifest = repo not in _NON_CLONED_REPOS and not repo.startswith(
                 "local:"
