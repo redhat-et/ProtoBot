@@ -9,12 +9,16 @@
 
 # yamllint disable rule:line-length
 
-# Completely exclude certain files from checks
-# exclude: |
-#   (?x)^(
-#     vendor/.**|
-#     dir2/.*
-#   )$
+# Completely exclude certain files from checks.
+# validator/vendor/ holds go mod vendor's copy of validator's module
+# dependencies (gopkg.in/yaml.v3 as of this writing) so the always-run
+# spec-validator hook (see its entry below) can build offline without a
+# populated GOMODCACHE; the vendored sources keep their upstream
+# formatting and are not ours to lint, gofmt, or vet.
+exclude: |
+  (?x)^(
+    validator/vendor/.*
+  )$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

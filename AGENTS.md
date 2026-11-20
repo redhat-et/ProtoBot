@@ -62,9 +62,9 @@ A governed scope defines a domain of applicability; a list or
 governed collection defines the sibling set within it. A
 **component README** is the top-level `README.md` of
 `drafting-table/`, `source-control-manager/`, `validator/`, or
-`wms/`. When creating or modifying any numbered rule in
-`AGENTS.md`, any specification document under `docs/`, any skill
-file under `.agents/skills/`, any component README, or an entry in
+`wms/`. When creating or modifying any `AGENTS.md` rule, any
+specification document under `docs/`, any skill file under
+`.agents/skills/`, any component README, or an entry in
 any future governed scope, agents must follow these rules:
 
 1. **Read all sibling entries first.** Read every other
