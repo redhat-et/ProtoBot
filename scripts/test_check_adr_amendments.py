@@ -128,6 +128,25 @@ class AcceptedStatusTests(unittest.TestCase):
         )
         self.assertFalse(checker.is_accepted(body))
 
+    def test_dated_accepted_status_outside_header_is_ignored(self) -> None:
+        """A canonical dated Accepted status below the header does not lock the file."""
+        body = "\n".join(
+            [
+                "# ADR-0010: Draft",
+                "",
+                "> Status: **Proposed** — November 2026",
+            ]
+            + [""] * 40
+            + ["> Status: **Accepted** — September 2026"]
+        )
+        self.assertFalse(checker.is_accepted(body))
+
+    def test_accepted_header_with_trailing_text_is_detected(self) -> None:
+        """Fails closed: trailing text after Accepted status still marks file protected."""
+        body = "# ADR-0010: Legacy\n\n> Status: **Accepted** (legacy note)\n"
+        self.assertTrue(checker.is_accepted(body))
+        self.assertTrue(checker.is_protected(body))
+
 
 class SupersededStatusTests(unittest.TestCase):
     _SUPERSEDED_ADR = """# ADR-0003: Example
@@ -161,6 +180,27 @@ Superseded by ADR-0004; see docs/decisions/0004-adopt-protobot-v2.md.
             "> Status: **Superseded by ADR-0004**",
         )
         self.assertTrue(checker.is_superseded(text))
+
+    def test_dated_superseded_status_outside_header_is_ignored(self) -> None:
+        """A dated Superseded status below the header does not lock the file."""
+        body = "\n".join(
+            [
+                "# ADR-0010: Draft",
+                "",
+                "> Status: **Proposed** — November 2026",
+            ]
+            + [""] * 40
+            + ["> Status: **Superseded by ADR-0004** — November 2026"]
+        )
+        self.assertFalse(checker.is_superseded(body))
+
+    def test_superseded_header_with_trailing_text_is_detected(self) -> None:
+        """Fails closed: trailing text after Superseded status still marks file protected."""
+        body = (
+            "# ADR-0003: Legacy\n\n> Status: **Superseded by ADR-0004** (deprecated)\n"
+        )
+        self.assertTrue(checker.is_superseded(body))
+        self.assertTrue(checker.is_protected(body))
 
     def test_is_protected_covers_accepted_and_superseded(self) -> None:
         """Both Accepted and Superseded ADRs remain protected from rewriting."""
@@ -968,6 +1008,22 @@ class GitRepoCheckTests(unittest.TestCase):
         rc, output = self._check()
         self.assertEqual(1, rc)
         self.assertIn(f"was deleted (renamed to {renamed_rel})", output)
+
+    def test_deleted_accepted_adr_with_trailing_text_fails(self) -> None:
+        """Non-canonical Accepted status in baseline still protects file from deletion."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Accepted** (legacy note)",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "baseline with legacy status")
+        path.unlink()
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("was deleted", output)
 
 
 class LiveRepoTests(unittest.TestCase):

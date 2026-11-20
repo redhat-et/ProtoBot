@@ -34,15 +34,16 @@ _MONTH_NAMES = (
     "January|February|March|April|May|June|July|August|September|"
     "October|November|December"
 )
-# Lenient (date optional): used for header detection (is_accepted,
-# is_superseded) and for scanning baseline files, which may predate the
-# dated-transition requirement below.
+# Prefix match: used for header detection (is_accepted, is_superseded)
+# and for scanning baseline files. Any line starting with the prefix is
+# treated as accepted/superseded (and therefore protected), failing closed
+# even if trailing text or an unrecognized status-line format is present.
 _ACCEPTED_STATUS = re.compile(
-    rf"^> Status:\s*\*\*Accepted\*\*(?: — (?:{_MONTH_NAMES}) \d{{4}})?$",
+    r"^> Status:\s*\*\*Accepted\*\*",
     re.MULTILINE,
 )
 _SUPERSEDED_STATUS = re.compile(
-    rf"^> Status:\s*\*\*Superseded by ADR-\d+\*\*(?: — (?:{_MONTH_NAMES}) \d{{4}})?$",
+    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*",
     re.MULTILINE,
 )
 # Strict (date required): the only status line an authorized transition may
@@ -113,9 +114,7 @@ def _fenced_code_mask(lines: list[str]) -> list[bool]:
 
 def _accepted_status_index(lines: list[str]) -> int | None:
     """Return the index of the sole line matching the Accepted status, or None."""
-    matches = [
-        idx for idx, line in enumerate(lines) if _ACCEPTED_STATUS.fullmatch(line)
-    ]
+    matches = [idx for idx, line in enumerate(lines) if _ACCEPTED_STATUS.match(line)]
     return matches[0] if len(matches) == 1 else None
 
 
@@ -197,7 +196,7 @@ def _status_line_count(lines: list[str]) -> int:
     return sum(
         1
         for line in lines
-        if _ACCEPTED_STATUS.fullmatch(line) or _SUPERSEDED_STATUS.fullmatch(line)
+        if _ACCEPTED_STATUS.match(line) or _SUPERSEDED_STATUS.match(line)
     )
 
 
@@ -243,9 +242,7 @@ def historical_mutations(
                 if authorized is not None and idx == authorized[1]:
                     continue
                 line = new_lines[idx]
-                if _ACCEPTED_STATUS.fullmatch(line) or _SUPERSEDED_STATUS.fullmatch(
-                    line
-                ):
+                if _ACCEPTED_STATUS.match(line) or _SUPERSEDED_STATUS.match(line):
                     mutations.append((None, idx + 1, line))
     return mutations
 
