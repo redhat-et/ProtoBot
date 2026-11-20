@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated_by": "skillsaw 0.23.0",
-  "generated_at": "2026-11-18T20:41:57.619393+00:00",
+  "generated_at": "2026-11-20T23:32:01.728090+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -20,7 +20,7 @@
       "severity": "info"
     },
     {
-      "fingerprint": "fd1e8fb80ad66c0f",
+      "fingerprint": "e25c8762b78421f6",
       "rule_id": "content-inconsistent-terminology",
       "file_path": "AGENTS.md",
       "line": 13,
@@ -47,7 +47,7 @@
       "fingerprint": "c82a952c176f718c",
       "rule_id": "content-negative-only",
       "file_path": "docs/architecture.md",
-      "line": 1316,
+      "line": 1318,
       "message": "Negative-only instruction without alternative: 'requirement text. Do not use historical issues, coordination metadata, old'",
       "severity": "info"
     },
@@ -55,15 +55,15 @@
       "fingerprint": "c1f31b0a7b5557ce",
       "rule_id": "content-repeated-directive",
       "file_path": "docs/architecture.md",
-      "line": 1725,
-      "message": "Directive 'Validate the composed coordinator \u2014 the prototype's caller \u2026' restates (90% similar) the directive at line 975 \u2014 state each instruction once",
+      "line": 1727,
+      "message": "Directive 'Validate the composed coordinator \u2014 the prototype's caller \u2026' restates (90% similar) the directive at line 977 \u2014 state each instruction once",
       "severity": "info"
     },
     {
       "fingerprint": "bf6aff1c1a975087",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
-      "line": 99,
+      "line": 96,
       "message": "Section 'Specification document hierarchy' is ~569 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -71,8 +71,8 @@
       "fingerprint": "4c499c070d057873",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
-      "line": 143,
-      "message": "Section 'Rules for creating or modifying specification documents' is ~1266 tokens (max recommended: 500)",
+      "line": 140,
+      "message": "Section 'Rules for creating or modifying specification documents' is ~1308 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
@@ -119,7 +119,7 @@
       "fingerprint": "16987139df812b00",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 554,
+      "line": 555,
       "message": "Section 'Source provenance' is ~514 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -127,7 +127,7 @@
       "fingerprint": "6ffb4ccda2636952",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 661,
+      "line": 662,
       "message": "Section 'Step by step' is ~855 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -135,15 +135,15 @@
       "fingerprint": "f9f0ee3a28fcea10",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 780,
-      "message": "Section 'Validator' is ~877 tokens (max recommended: 500)",
+      "line": 781,
+      "message": "Section 'Validator' is ~897 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
       "fingerprint": "d08103a88fbbf352",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 844,
+      "line": 846,
       "message": "Section 'Specification pull request check' is ~616 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -151,7 +151,7 @@
       "fingerprint": "6f87ed0579d4b643",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 889,
+      "line": 891,
       "message": "Section 'Repository-owned coordinator and Fullsend integration' is ~1816 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -159,7 +159,7 @@
       "fingerprint": "778081d9bf879672",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1025,
+      "line": 1027,
       "message": "Section 'Scoped parallel admission and assignment lifetime' is ~852 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -167,7 +167,7 @@
       "fingerprint": "7a86ee430d97d8f4",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1077,
+      "line": 1079,
       "message": "Section 'Completion and closure' is ~912 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -175,7 +175,7 @@
       "fingerprint": "b4dbe0377f4e7ec0",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1199,
+      "line": 1201,
       "message": "Section 'Evidence report' is ~516 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -183,7 +183,7 @@
       "fingerprint": "6c5dc0893ba04241",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1247,
+      "line": 1249,
       "message": "Section 'Check profiles' is ~662 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -191,7 +191,7 @@
       "fingerprint": "39b32e6b47efae97",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1286,
+      "line": 1288,
       "message": "Section 'Invariants and enforcement' is ~794 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -199,7 +199,7 @@
       "fingerprint": "d53af5eefa8e24c4",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1338,
+      "line": 1340,
       "message": "Section 'Template and instantiation' is ~515 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -207,7 +207,7 @@
       "fingerprint": "4822b38afa5f9a7f",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1376,
+      "line": 1378,
       "message": "Section 'Operating model' is ~555 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -215,7 +215,7 @@
       "fingerprint": "9e78ca1c41a15aab",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1473,
+      "line": 1475,
       "message": "Section 'Open questions' is ~946 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -223,7 +223,7 @@
       "fingerprint": "0d9d10c7e8161095",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1618,
+      "line": 1620,
       "message": "Section 'Shared agent and standalone harness' is ~513 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -231,7 +231,7 @@
       "fingerprint": "4174f8d58d245f6d",
       "rule_id": "content-section-length",
       "file_path": "docs/architecture.md",
-      "line": 1657,
+      "line": 1659,
       "message": "Section 'Trusted state and credential boundary' is ~1292 tokens (max recommended: 500)",
       "severity": "info"
     },
@@ -239,7 +239,7 @@
       "fingerprint": "47ad33e462f5231a",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 104,
+      "line": 101,
       "message": "Unlinked path reference: 'docs/vision.md' \u2014 consider wrapping in link syntax [docs/vision.md](docs/vision.md)",
       "severity": "info"
     },
@@ -247,7 +247,7 @@
       "fingerprint": "c00433faf64ec552",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 106,
+      "line": 103,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
       "severity": "info"
     },
@@ -255,7 +255,7 @@
       "fingerprint": "54f428cdc6d515d2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 108,
+      "line": 105,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -263,7 +263,7 @@
       "fingerprint": "ebe6f96b1ce209bd",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 110,
+      "line": 107,
       "message": "Unlinked path reference: 'docs/architecture/components.md' \u2014 consider wrapping in link syntax [docs/architecture/components.md](docs/architecture/components.md)",
       "severity": "info"
     },
@@ -271,7 +271,7 @@
       "fingerprint": "26f8f76319c9adfd",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 120,
+      "line": 117,
       "message": "Unlinked path reference: 'docs/architecture/user-interaction-flow.md' \u2014 consider wrapping in link syntax [docs/architecture/user-interaction-flow.md](docs/architecture/user-interaction-flow.md)",
       "severity": "info"
     },
@@ -279,7 +279,7 @@
       "fingerprint": "c4cf96f3ec3152a2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 122,
+      "line": 119,
       "message": "Unlinked path reference: 'docs/architecture/drafting-table-ux.md' \u2014 consider wrapping in link syntax [docs/architecture/drafting-table-ux.md](docs/architecture/drafting-table-ux.md)",
       "severity": "info"
     },
@@ -287,7 +287,7 @@
       "fingerprint": "dfe8e903debd7a70",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 127,
+      "line": 124,
       "message": "Unlinked path reference: 'docs/architecture/related-work.md' \u2014 consider wrapping in link syntax [docs/architecture/related-work.md](docs/architecture/related-work.md)",
       "severity": "info"
     },
@@ -295,7 +295,7 @@
       "fingerprint": "fac138a385b101b2",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 131,
+      "line": 128,
       "message": "Unlinked path reference: 'docs/architecture/open-questions.md' \u2014 consider wrapping in link syntax [docs/architecture/open-questions.md](docs/architecture/open-questions.md)",
       "severity": "info"
     },
@@ -303,7 +303,7 @@
       "fingerprint": "61dde6b158f12c87",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 151,
+      "line": 148,
       "message": "Unlinked path reference: 'docs/architecture/components.md' \u2014 consider wrapping in link syntax [docs/architecture/components.md](docs/architecture/components.md)",
       "severity": "info"
     },
@@ -311,7 +311,7 @@
       "fingerprint": "444df1e8bbf4caa6",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 152,
+      "line": 149,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -319,7 +319,7 @@
       "fingerprint": "4af689640905c6bd",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 157,
+      "line": 154,
       "message": "Unlinked path reference: 'docs/architecture/overview.md' \u2014 consider wrapping in link syntax [docs/architecture/overview.md](docs/architecture/overview.md)",
       "severity": "info"
     },
@@ -327,7 +327,7 @@
       "fingerprint": "4af689640905c6bd",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 157,
+      "line": 154,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
       "severity": "info"
     },
@@ -335,7 +335,7 @@
       "fingerprint": "38050468be7598ab",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 187,
+      "line": 184,
       "message": "Unlinked path reference: 'docs/vision.md' \u2014 consider wrapping in link syntax [docs/vision.md](docs/vision.md)",
       "severity": "info"
     },
@@ -343,7 +343,7 @@
       "fingerprint": "38050468be7598ab",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 187,
+      "line": 184,
       "message": "Unlinked path reference: 'docs/architecture.md' \u2014 consider wrapping in link syntax [docs/architecture.md](docs/architecture.md)",
       "severity": "info"
     },
@@ -351,7 +351,7 @@
       "fingerprint": "d05f1179de1e0c41",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 188,
+      "line": 185,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
@@ -359,7 +359,7 @@
       "fingerprint": "fa8260ea1aba6bbf",
       "rule_id": "content-unlinked-internal-reference",
       "file_path": "AGENTS.md",
-      "line": 189,
+      "line": 186,
       "message": "Unlinked path reference: '.protobot/project.yaml' \u2014 consider wrapping in link syntax [.protobot/project.yaml](.protobot/project.yaml)",
       "severity": "info"
     },
@@ -367,18 +367,9 @@
       "fingerprint": "39e3adb3a49cdfc4",
       "rule_id": "content-weak-language",
       "file_path": "docs/architecture.md",
-      "line": 1331,
+      "line": 1333,
       "message": "Weak language (hedging): 'as needed' \u2014 Replace 'as needed' with specific triggers",
       "severity": "info"
-    },
-    {
-      "fingerprint": "9ac2052ca695ae1d",
-      "rule_id": "context-budget",
-      "file_path": "AGENTS.md",
-      "message": "Estimated 4,009 tokens exceeds agents-md warn limit of 4,000",
-      "severity": "warning",
-      "value": 4009,
-      "baseline_mode": "ceiling"
     }
   ]
 }

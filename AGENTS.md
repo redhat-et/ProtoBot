@@ -6,15 +6,13 @@
   Key flags: `--all-files` (all tracked files), `--files FILE [FILE ...]`
   (specific files), `--check-parity` (validate config and offline hook
   cache), `--online-if-ci` (allow network when CI=true).
-  For offline runs, pre-install the tools. Pre-populate the hook cache
-  (bootstrap with `pre-commit install-hooks`).
+  For offline runs, pre-install tools and populate hook cache
+  (`pre-commit install-hooks`).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
-- The upstream repository is `redhat-et/protobot`. Ensure pull requests
-  target this repository.
+- Pull requests must target the upstream repository `redhat-et/protobot`.
 - Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
-  there so Claude Code finds the same skills; do not add skills
-  under `.claude/` directly.
+  there; do not add skills under `.claude/` directly.
 
 ## Workflow files and CI boundaries
 
@@ -24,7 +22,7 @@ Agents must follow these rules:
    GitHub workflows must not create or modify any file under
    `.github/workflows/`. Local coding agents may create or modify
    files under `.github/workflows/`, except as restricted by
-   Rule 2, when the change requires it and the user authorizes it.
+   Rule 2, when authorized.
 
 2. **Defer CI integration for new modules.** When implementing an issue
    that introduces a new Go module, package, or tool, implement the
@@ -47,7 +45,7 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
    genuine prose shrink, regenerate the baseline with
    `skillsaw baseline` so the ceiling ratchets downward. The
    `agents-md` warn limit in `.skillsaw.yaml` is lowered when
-   `AGENTS.md` shrinks below it (`.skillsaw.yaml:19-20`).
+   `AGENTS.md` shrinks below it.
 2. **Consolidate or extract when adding prose.** Offset a new rule or
    explanation by consolidating existing prose or extracting
    detail into an on-demand skill under `.agents/skills/`.
@@ -91,10 +89,9 @@ follow these rules:
    intra-entry terminology drift, not only sibling-entry
    terminology matching.
 
-Examples of sibling entries: numbered rules in `AGENTS.md` (other
-rules in the list); specification documents under `docs/` (other
-governed Markdown files); skill files under `.agents/skills/`
-(other skill files).
+Examples of sibling entries: numbered rules in `AGENTS.md`;
+specification documents under `docs/`; skill files under
+`.agents/skills/`.
 
 ## Specification document hierarchy
 
@@ -171,7 +168,7 @@ must follow these rules:
    register new capabilities where `components.md` enumerates
    them, avoid conflicting with principles in `overview.md`
    or `components.md` (e.g., the harness-agnostic
-   Toolkit principle in `components.md`), and match defined
+   Toolkit principle), and match defined
    ProtoBot keywords and relationship terms; an undeclared
    alias for a defined keyword is a defect.
 
@@ -220,18 +217,21 @@ must follow these rules:
    staleness finding that prescribes `ears-manager artifact put`, not a
    hand edit.
 
-7. **Preserve accepted architecture decision records.**
-   Accepted architecture decision records (`docs/decisions/`) are
-   immutable historical records. Never rewrite or replace accepted
-   decision text in place. When design evolution amends an accepted
-   architecture decision record, append a dated amendment block
-   (`**[Amended Month Year]**`) with the change, its rationale, and
-   references to updated architecture documents. Review agents must
-   verify that accepted decision text is never rewritten or replaced
-   in place, and that when design evolution amends an accepted
-   architecture decision record, the change appends the dated
-   amendment block (`**[Amended Month Year]**`) with the change, its
-   rationale, and references to updated architecture documents.
+7. **Preserve accepted and superseded architecture decision records.**
+   Accepted and superseded architecture decision records under
+   `docs/decisions/` are immutable: never rewritten or replaced in
+   place, and never deleted or renamed, even after supersession or
+   retiring a described component. An accepted architecture decision
+   record may append a dated amendment block; the only authorized
+   status change is a single dated accepted-to-superseded status-line
+   transition with an appended dated amendment block citing change,
+   rationale, and updated architecture documents; see the [ADR
+   supersession skill](.agents/skills/adr-supersession/SKILL.md) for
+   the format. Review agents must verify accepted and superseded
+   architecture decision records are never rewritten or replaced in
+   place, and never deleted or renamed, and that an authorized
+   transition matches that format, citing change, rationale, and
+   updated architecture documents.
 
 ## Agent skills
 
