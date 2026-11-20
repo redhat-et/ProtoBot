@@ -37,6 +37,7 @@ agents:
       # Temporary mitigation: https://github.com/fullsend-ai/fullsend/issues/7263
       # Re-evaluate this sonnet override once the upstream timeout is resolved.
       model: sonnet
+      source: harness/code.yaml
     - name: fix
       runtime: pi
       model: google-vertex/gemini-3.8-flash

@@ -4,10 +4,10 @@
   environments without network access, use `python scripts/lint.py` as a
   wrapper around `pre-commit run`.
   Key flags: `--all-files` (all tracked files), `--files FILE [FILE ...]`
-  (specific files), `--check-parity` (validate config and offline hook cache).
-  The hook cache must be pre-populated for offline runs (bootstrap with
-  `pre-commit install-hooks`).
-  Tools must be pre-installed when running without network access.
+  (specific files), `--check-parity` (validate config and offline hook
+  cache), `--online-if-ci` (allow network when CI=true).
+  For offline runs, pre-install the tools. Pre-populate the hook cache
+  (bootstrap with `pre-commit install-hooks`).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
