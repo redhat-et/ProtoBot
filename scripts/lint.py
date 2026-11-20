@@ -209,7 +209,7 @@ def _local_dependency_environment_is_installed(
         for state_path in state_paths:
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 continue
             if (
                 state == expected_state
@@ -1303,8 +1303,14 @@ def _preflight_with_restore(
     """
     if not online:
         configured = _configured_repos(config)
-        missing = _missing_repos(configured, _cached_repos(pre_commit_home))
-        if missing and _restore_cache(pre_commit_home, set(configured)):
+        cached_paths = _cached_repo_paths(pre_commit_home)
+        missing_repos = _missing_repos(configured, set(cached_paths))
+        missing_local = _missing_local_dependency_environments(
+            config, cached_paths, pre_commit_home
+        )
+        if (missing_repos or missing_local) and _restore_cache(
+            pre_commit_home, set(configured)
+        ):
             rc = _preflight(online, pre_commit_home, config)
             if rc == 0:
                 _delete_tarball()
