@@ -22,6 +22,10 @@ are listed at `tracker.github.allowed_targets.repos`. The `repos` list holds
 destinations beyond the source repository; preserve all prior external
 entries and do not add the source repository, which remains implicitly
 allowed.
+For a managed repository, apply this migration to its per-repository `config`
+entry in the managing fleet's `repos.yaml`, including the complete tracker
+policy and required external targets, instead of editing generated local
+configuration.
 
 The `tracker` mapping replaces the parent object as a whole. Each layer that
 sets `tracker` must provide the complete effective provider configuration
@@ -42,12 +46,15 @@ base harnesses even when the overlay disables an agent or replaces its
 source.
 
 When only `config.base.yaml` exists, its layered fields are effective,
-alongside code defaults. For `v0.56.1`, `fullsend lint` requires
-`config.yaml`, so lint a temporary copy that retains `config.base.yaml` and
-adds an empty `config.yaml` overlay. Do not promote the base file by copying
-it to `config.yaml`: `authorization` and `trace_context` are overlay-only,
-so promotion would validate settings the target ignores. The config audit
-must identify those settings as ineffective when they occur in the base.
+alongside code defaults. Before linting, verify from the selected release's CLI
+docs/source whether `fullsend lint` consumes `config.base.yaml`, requires
+`config.yaml`, and validates inherited values. For `v0.56.1`, `fullsend lint`
+requires `config.yaml`; lint a temporary copy retaining `config.base.yaml` and
+adding an empty `config.yaml`. Do not promote the base to `config.yaml`: in
+`v0.56.1`, `authorization` and `trace_context` are overlay-only. Audit these
+as ineffective when they occur in the base. For another release, use its
+documented base-only lint procedure; if none can be established, report a
+blocker.
 Copy `.fullsend-cache` into the temporary directory for offline resolver use
 during this lint invocation; the `EXIT` trap removes that temporary cache
 after lint exits.
@@ -59,6 +66,11 @@ after lint exits.
   if [[ -f .fullsend/config.yaml ]]; then
     fullsend lint --fullsend-dir .fullsend --forge github
   elif [[ -f .fullsend/config.base.yaml ]]; then
+    if [[ "$FULLSEND_TARGET_VERSION" != "v0.56.1" ]]; then
+      printf '%s\n' \
+        'The v0.56.1 workaround does not apply; use the selected release’s documented base-only lint procedure.' >&2
+      exit 1
+    fi
     BASE_AUDIT_DIR=$(mktemp -d)
     trap 'rm -rf "$BASE_AUDIT_DIR"' EXIT
     cp -R .fullsend/. "$BASE_AUDIT_DIR/"
