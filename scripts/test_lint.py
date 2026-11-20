@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import re
 import shlex
@@ -46,16 +47,21 @@ def _init_repo(repo: Path) -> None:
 
 def _make_db(
     db_path: Path,
-    rows: list[tuple[str, str]],
+    rows: list[tuple[str, str] | tuple[str, str, str]],
     paths: dict[tuple[str, str], str | bytes] | None = None,
 ) -> None:
     """Create a pre-commit-style ``db.db`` with *rows* of ``(repo, ref)``.
 
     *paths* maps a row to its build-time repository directory; rows
-    without an entry store ``unused``. A ``bytes`` value is stored as a
-    BLOB.
+    without an entry use a three-tuple's path, or ``unused``. A ``bytes``
+    value is stored as a BLOB.
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_rows = []
+    for row in rows:
+        repo, ref = row[:2]
+        path = row[2] if len(row) == 3 else (paths or {}).get((repo, ref), "unused")
+        normalized_rows.append((repo, ref, path))
     conn = sqlite3.connect(str(db_path))
     try:
         conn.executescript(
@@ -68,10 +74,7 @@ def _make_db(
         )
         conn.executemany(
             "INSERT INTO repos (repo, ref, path) VALUES (?, ?, ?)",
-            [
-                (repo, ref, (paths or {}).get((repo, ref), "unused"))
-                for repo, ref in rows
-            ],
+            normalized_rows,
         )
         conn.commit()
     finally:
@@ -98,6 +101,21 @@ _CONFIG_TWO_REMOTE_ONE_LOCAL: dict[str, object] = {
             "repo": "meta",
             "hooks": [{"id": "check-hooks-apply"}],
         },
+    ],
+}
+
+_CONFIG_LOCAL_DEPENDENCIES: dict[str, object] = {
+    "repos": [
+        {
+            "repo": "local",
+            "hooks": [
+                {
+                    "id": "dependency-hook",
+                    "language": "python",
+                    "additional_dependencies": ["pyyaml==6.0.3"],
+                }
+            ],
+        }
     ],
 }
 
@@ -160,6 +178,35 @@ class ConfiguredReposTests(unittest.TestCase):
 
     def test_empty_config(self) -> None:
         self.assertEqual([], checker._configured_repos({}))
+
+
+class ConfiguredLocalDependenciesTests(unittest.TestCase):
+    def test_returns_local_hooks_with_dependencies(self) -> None:
+        self.assertEqual(
+            [("dependency-hook", ("pyyaml==6.0.3",))],
+            checker._configured_local_dependencies(_CONFIG_LOCAL_DEPENDENCIES),
+        )
+
+    def test_ignores_remote_hooks_and_local_hooks_without_dependencies(self) -> None:
+        config = {
+            "repos": [
+                {
+                    "repo": "https://example.invalid/foo",
+                    "rev": "aaaa",
+                    "hooks": [
+                        {
+                            "id": "remote",
+                            "additional_dependencies": ["remote-dependency"],
+                        }
+                    ],
+                },
+                {
+                    "repo": "local",
+                    "hooks": [{"id": "local-without-dependencies"}],
+                },
+            ]
+        }
+        self.assertEqual([], checker._configured_local_dependencies(config))
 
 
 class AnyAlwaysRunTests(unittest.TestCase):
@@ -254,6 +301,142 @@ class PreflightTests(unittest.TestCase):
         message = buf.getvalue()
         self.assertNotIn("example.invalid/foo @ aaaa", message)
         self.assertIn("https://example.invalid/bar @ bbbb", message)
+
+    def test_offline_reports_missing_local_dependency_environment(self) -> None:
+        _make_db(self.home / "db.db", [])
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn("local hook dependency environment", message)
+        self.assertIn("dependency-hook: pyyaml==6.0.3", message)
+        self.assertIn("pre-commit install-hooks", message)
+
+    def test_offline_passes_with_installed_local_dependency_environment(
+        self,
+    ) -> None:
+        repo_path = self.home / "repo-local"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v1").write_text(
+            json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
+            encoding="utf-8",
+        )
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(0, rc)
+        self.assertEqual("", buf.getvalue())
+
+    def test_matching_v1_state_without_v2_is_installed(self) -> None:
+        repo_path = self.home / "repo-local"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v1").write_text(
+            json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
+            encoding="utf-8",
+        )
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(0, rc)
+        self.assertEqual("", buf.getvalue())
+
+    def test_v2_marker_without_v1_is_installed(self) -> None:
+        repo_path = self.home / "repo-local"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(0, rc)
+        self.assertEqual("", buf.getvalue())
+
+    def test_environment_for_another_python_version_is_missing(self) -> None:
+        repo_path = self.home / "repo-local"
+        environment_path = repo_path / "py_env-python0.0"
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v1").write_text(
+            json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
+            encoding="utf-8",
+        )
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(1, rc)
+        self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
+
+    def test_undecodable_install_state_is_missing(self) -> None:
+        repo_path = self.home / "repo-local"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v1").write_bytes(b"\xff")
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(1, rc)
+        self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
 
 
 class PreflightRestoreTests(unittest.TestCase):
@@ -414,6 +597,113 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn(f"version_info = {self._current_python()}", cfg)
         # No interpreter warning for a matching cache.
         self.assertEqual("", stderr.getvalue())
+
+    def test_missing_local_environment_restores_with_cached_revisions(
+        self,
+    ) -> None:
+        local_dep = ("local:pyyaml==6.0.3", "1")
+        _make_db(self.home / "db.db", self._config_rows())
+        self._build_tarball(
+            [*self._config_rows(), local_dep],
+            stored_paths={local_dep: str(self.home / "repo-local")},
+        )
+        packed = self.root / "packed"
+        environment_path = (
+            packed / "repo-local" / f"py_env-python{self._current_interpreter()}"
+        )
+        (environment_path / "bin").mkdir(parents=True)
+        (environment_path / "pyvenv.cfg").write_text(
+            f"version_info = {self._current_python()}\n",
+            encoding="utf-8",
+        )
+        os.symlink(sys.executable, environment_path / "bin" / "python")
+        (environment_path / ".install_state_v1").write_text(
+            json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
+            encoding="utf-8",
+        )
+        (environment_path / ".install_state_v2").touch()
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        config = {
+            "repos": [
+                *_CONFIG_TWO_REMOTE_ONE_LOCAL["repos"],
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "dependency-hook",
+                            "language": "python",
+                            "additional_dependencies": ["pyyaml==6.0.3"],
+                        }
+                    ],
+                },
+            ]
+        }
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(False, self.home, config)
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertFalse(self.tarball.exists())
+        self.assertTrue(
+            (
+                self.home
+                / "repo-local"
+                / f"py_env-python{self._current_interpreter()}"
+                / ".install_state_v1"
+            ).is_file()
+        )
+        self.assertEqual("", stderr.getvalue())
+
+    def test_incomplete_local_environment_does_not_replace_live_cache(
+        self,
+    ) -> None:
+        local_dep = ("local:pyyaml==6.0.3", "1")
+        _make_db(self.home / "db.db", self._config_rows())
+        self._build_tarball(
+            [*self._config_rows(), local_dep],
+            stored_paths={local_dep: str(self.home / "repo-local")},
+        )
+        packed = self.root / "packed"
+        (packed / "repo-local").mkdir()
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        config = {
+            "repos": [
+                *_CONFIG_TWO_REMOTE_ONE_LOCAL["repos"],
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "dependency-hook",
+                            "language": "python",
+                            "additional_dependencies": ["pyyaml==6.0.3"],
+                        }
+                    ],
+                },
+            ]
+        }
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(False, self.home, config)
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("cannot provide the configured local hook dependency", message)
+        self.assertIn("dependency-hook: pyyaml==6.0.3", message)
+        self.assertNotIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertEqual(set(self._config_rows()), checker._cached_repos(self.home))
 
     def test_no_tarball_keeps_the_existing_error(self) -> None:
         stderr = io.StringIO()
@@ -2534,6 +2824,25 @@ class MainCheckParityTests(unittest.TestCase):
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             rc = checker.main(["--check-parity"])
         self.assertEqual(1, rc)
+
+    def test_missing_local_dependency_environment_fails_before_config_validation(
+        self,
+    ) -> None:
+        _make_db(self.home / "db.db", [])
+        with (
+            patch.object(
+                checker,
+                "_load_config",
+                return_value=_CONFIG_LOCAL_DEPENDENCIES,
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--check-parity"])
+        self.assertEqual(1, rc)
+        mock_run.assert_not_called()
+        self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
 
     def test_online_check_parity_skips_cache_but_still_validates(self) -> None:
         # No db.db at all; --online must bypass the cache gate.

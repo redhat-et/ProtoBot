@@ -169,14 +169,20 @@ repos:
         files: ^scripts/(check_harness_integrity|test_check_harness_integrity)\.py$
       - id: baseline-ratchet
         name: baseline-ratchet
-        entry: python3 scripts/check_baseline_ratchet.py
-        language: system
+        entry: python scripts/check_baseline_ratchet.py
+        language: python
+        additional_dependencies:
+          - pyyaml==6.0.3
         pass_filenames: false
-        files: ^\.skillsaw-baseline\.json$
+        # Pre-commit omits deleted files from the selection. The checker
+        # rejects deleting the baseline while tracked ceiling files remain.
+        always_run: true
       - id: test-baseline-ratchet
         name: test-baseline-ratchet
-        entry: python3 scripts/test_check_baseline_ratchet.py
-        language: system
+        entry: python scripts/test_check_baseline_ratchet.py
+        language: python
+        additional_dependencies:
+          - pyyaml==6.0.3
         pass_filenames: false
         files: ^scripts/(check_baseline_ratchet|test_check_baseline_ratchet)\.py$
       - id: test-lint-wrapper

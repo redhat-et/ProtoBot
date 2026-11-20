@@ -6,10 +6,10 @@ hooks run and how. This script adds only the behaviour needed for
 sandboxed coding agents that lack network access:
 
 * It pins ``PRE_COMMIT_HOME`` so a pre-seeded cache is used.
-* It pre-flights every non-local hook repository/revision against that
-  cache and fails with an actionable message (naming the missing
-  repository, revision, and bootstrap command) instead of letting
-  ``pre-commit`` crash with an opaque traceback.
+* It pre-flights every cloned hook repository/revision and every local
+  hook environment with ``additional_dependencies`` against that cache,
+  and fails with an actionable message instead of letting ``pre-commit``
+  crash with an opaque traceback.
 * When the cache is cold and a bootstrap tarball was copied into the
   sandbox (by the Fullsend pre-script, see ``.fullsend/README.md``),
   it restores the cache from that tarball first and re-runs the
@@ -46,6 +46,7 @@ run ``pre-commit install-hooks`` to refresh the cache.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -80,6 +81,8 @@ _MAX_EXTRACTED_BYTES = 4 * 1024 * 1024 * 1024
 
 # ``repo:`` values pre-commit never clones over the network.
 _NON_CLONED_REPOS = {"local", "meta"}
+_LOCAL_REPO = "local"
+_LOCAL_REPO_VERSION = "1"
 
 
 # ── Environment helpers ─────────────────────────────────────────
@@ -154,6 +157,86 @@ def _configured_repos(config: dict[str, Any]) -> list[tuple[str, str]]:
     return repos
 
 
+def _configured_local_dependencies(
+    config: dict[str, Any],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Return ``[(hook_id, dependencies), ...]`` for local hooks.
+
+    Only hooks that declare ``additional_dependencies`` need an installed
+    environment in the pre-commit cache.
+    """
+    hooks = []
+    for repo in config.get("repos", []):
+        if repo.get("repo") != _LOCAL_REPO:
+            continue
+        for hook in repo.get("hooks", []):
+            dependencies = hook.get("additional_dependencies") or []
+            if dependencies:
+                hooks.append(
+                    (
+                        str(hook.get("id", "<unknown>")),
+                        tuple(str(dependency) for dependency in dependencies),
+                    )
+                )
+    return hooks
+
+
+def _default_python_language_version() -> str:
+    """Return the ``language_version`` pre-commit selects for Python.
+
+    Mirrors ``pre_commit.languages.python.get_default_version`` for the
+    interpreter running this wrapper. The returned name is also the
+    suffix pre-commit uses for the hook environment directory.
+    """
+    major = str(sys.version_info[0])
+    minor = f"{major}.{sys.version_info[1]}"
+    implementation = (
+        "python" if sys.implementation.name == "cpython" else sys.implementation.name
+    )
+    for potential in (minor, major):
+        executable = f"{implementation}{potential}"
+        if shutil.which(executable):
+            return executable
+    for executable_path in (sys.executable, os.path.realpath(sys.executable)):
+        executable = Path(executable_path.lower()).name.partition(".exe")[0]
+        if executable not in {"python", "pythonw"} and shutil.which(executable):
+            return executable
+    return "default"
+
+
+def _configured_local_python_environments(
+    config: dict[str, Any],
+    dependencies: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Return environment directories pre-commit requires for *dependencies*."""
+    environments = set()
+    defaults = config.get("default_language_version")
+    default_python = (
+        str(defaults.get("python", "default"))
+        if isinstance(defaults, dict)
+        else "default"
+    )
+    for repo in config.get("repos", []):
+        if repo.get("repo") != _LOCAL_REPO:
+            continue
+        for hook in repo.get("hooks", []):
+            hook_dependencies = tuple(
+                str(dependency)
+                for dependency in (hook.get("additional_dependencies") or [])
+            )
+            if hook_dependencies != dependencies:
+                continue
+            if hook.get("language") != "python":
+                continue
+            version = str(hook.get("language_version", "default"))
+            if version == "default":
+                version = default_python
+            if version == "default":
+                version = _default_python_language_version()
+            environments.add(f"py_env-{version}")
+    return tuple(sorted(environments))
+
+
 def _any_always_run(config: dict[str, Any]) -> bool:
     """Return True when any configured hook is marked ``always_run``."""
     for repo in config.get("repos", []):
@@ -167,29 +250,79 @@ def _any_always_run(config: dict[str, Any]) -> bool:
 
 
 def _cached_repos(pre_commit_home: Path) -> set[tuple[str, str]]:
-    """Return ``{(repo, ref), ...}`` already cloned into *pre_commit_home*.
+    """Return ``{(repo, ref), ...}`` recorded in *pre_commit_home*."""
+    return set(_cached_repo_paths(pre_commit_home))
 
-    Reads the ``repos`` table from pre-commit's own ``db.db`` SQLite
-    store directly (see ``pre_commit.store.Store``), so this check
-    needs no network access and no dependency on pre-commit's internal
-    Python API. None of this repository's hooks declare
-    ``additional_dependencies``, so pre-commit's stored ``repo`` key
-    always equals the bare repo URL from ``.pre-commit-config.yaml``
-    (a ``:dep1,dep2`` suffix is only appended when dependencies are
-    declared).
-    """
-    db_path = pre_commit_home / "db.db"
-    if not db_path.exists():
-        return set()
+
+def _local_dependency_environment_is_installed(
+    repo_path: Path,
+    dependencies: tuple[str, ...],
+    environment_name: str | None = None,
+) -> bool:
+    """Return whether *repo_path* contains an installed environment for deps."""
+    expected_state = {"additional_dependencies": list(dependencies)}
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            rows = conn.execute("SELECT repo, ref FROM repos").fetchall()
-        finally:
-            conn.close()
-    except sqlite3.DatabaseError:
-        return set()
-    return {(repo, ref) for repo, ref in rows}
+        if environment_name is None:
+            environments = [
+                entry
+                for entry in repo_path.iterdir()
+                if entry.is_dir() and _is_environment_dir(entry.name)
+            ]
+        else:
+            environments = [repo_path / environment_name]
+        for environment in environments:
+            if (environment / ".install_state_v2").is_file():
+                return True
+            state_path = environment / ".install_state_v1"
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if state == expected_state:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _missing_local_dependency_environments(
+    config: dict[str, Any],
+    cached_paths: dict[tuple[str, str], object],
+    pre_commit_home: Path,
+    *,
+    repository_root: Path | None = None,
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Return local hooks whose dependency environment is not installed.
+
+    *repository_root* defaults to *pre_commit_home*. Callers validating a
+    staged archive pass the staging directory while keeping
+    *pre_commit_home* as the root against which stored paths are interpreted.
+    """
+    missing = []
+    environment_root = repository_root or pre_commit_home
+    for hook_id, dependencies in _configured_local_dependencies(config):
+        repo_name = f"{_LOCAL_REPO}:{','.join(dependencies)}"
+        stored_path = cached_paths.get((repo_name, _LOCAL_REPO_VERSION))
+        relative_path = _repository_relative_or_none(stored_path, pre_commit_home)
+        environments = _configured_local_python_environments(config, dependencies)
+        if relative_path is None:
+            missing.append((hook_id, dependencies))
+            continue
+        repo_path = environment_root / relative_path
+        if environments:
+            installed = all(
+                _local_dependency_environment_is_installed(
+                    repo_path, dependencies, environment
+                )
+                for environment in environments
+            )
+        else:
+            installed = _local_dependency_environment_is_installed(
+                repo_path, dependencies
+            )
+        if not installed:
+            missing.append((hook_id, dependencies))
+    return missing
 
 
 def _missing_repos(
@@ -226,18 +359,49 @@ def _report_missing_repos(
     )
 
 
+def _report_missing_local_dependency_environments(
+    missing: list[tuple[str, tuple[str, ...]]],
+    pre_commit_home: Path,
+) -> None:
+    plural = "" if len(missing) == 1 else "s"
+    print(
+        f"ERROR: the offline pre-commit cache ({pre_commit_home}) is "
+        f"missing {len(missing)} local hook dependency environment{plural}:",
+        file=sys.stderr,
+    )
+    for hook_id, dependencies in missing:
+        print(f"  - {hook_id}: {', '.join(dependencies)}", file=sys.stderr)
+    print(
+        "\nNo network access is assumed for this run, so the dependency "
+        "environment(s) cannot be installed. With network access, run:\n"
+        f"  {_bootstrap_command(pre_commit_home)}\n"
+        "then retry. Alternatively, re-run with --online (or "
+        "--online-if-ci under CI=true) to let pre-commit install them "
+        "directly.",
+        file=sys.stderr,
+    )
+
+
 def _preflight(online: bool, pre_commit_home: Path, config: dict[str, Any]) -> int:
-    """Verify the cache covers every configured hook repository revision.
+    """Verify the cache covers every configured hook environment.
 
     Returns ``0`` when the cache is sufficient or network access is
-    assumed available, and non-zero when a hook repository/revision
-    would require network access that is not available.
+    assumed available, and non-zero when a hook repository/revision or
+    local dependency environment would require network access that is
+    not available.
     """
     if online:
         return 0
-    missing = _missing_repos(_configured_repos(config), _cached_repos(pre_commit_home))
-    if missing:
-        _report_missing_repos(missing, pre_commit_home)
+    cached_paths = _cached_repo_paths(pre_commit_home)
+    missing_repos = _missing_repos(_configured_repos(config), set(cached_paths))
+    missing_local = _missing_local_dependency_environments(
+        config, cached_paths, pre_commit_home
+    )
+    if missing_repos:
+        _report_missing_repos(missing_repos, pre_commit_home)
+    if missing_local:
+        _report_missing_local_dependency_environments(missing_local, pre_commit_home)
+    if missing_repos or missing_local:
         return 1
     return 0
 
@@ -1011,7 +1175,11 @@ def _format_revisions(revisions: set[tuple[str, str]]) -> str:
     return ", ".join(f"{repo} @ {rev}" for repo, rev in sorted(revisions))
 
 
-def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> bool:
+def _restore_cache(
+    pre_commit_home: Path,
+    required: set[tuple[str, str]],
+    config: dict[str, Any],
+) -> bool:
     """Restore ``PRE_COMMIT_HOME`` from the bootstrap tarball, if present.
 
     Extraction goes to a staging directory beside ``pre_commit_home``,
@@ -1020,7 +1188,10 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
     live cache already holds. A partial cache must never publish a
     ``db.db`` that lists revisions whose files are missing; a failed
     restore leaves ``pre_commit_home`` untouched so a later run
-    retries. The tarball itself is left in place;
+    retries. Every configured local hook dependency environment in the
+    archive is also validated before promotion, so a complete-looking
+    archive cannot replace a usable live cache with one that the next
+    offline pre-flight would reject. The tarball itself is left in place;
     ``_preflight_with_restore`` deletes it only after the restored
     cache passes the pre-flight. A corrupt or unreadable tarball only
     warns; the pre-flight then reports its usual missing-revision
@@ -1061,6 +1232,10 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
         staged_paths = _cached_repo_paths(staging)
         live = _cached_repos(pre_commit_home)
         live_paths = _cached_repo_paths(pre_commit_home)
+        configured_local = {
+            (f"{_LOCAL_REPO}:{','.join(dependencies)}", _LOCAL_REPO_VERSION)
+            for _hook_id, dependencies in _configured_local_dependencies(config)
+        }
         # A row whose repo or ref is not text cannot be sorted or
         # compared; reject the archive instead of crashing.
         malformed = sorted(
@@ -1097,13 +1272,13 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                 file=sys.stderr,
             )
             return False
-        # Every required and retained revision needs its payload, so a
-        # retained row without a repository directory cannot be promoted.
+        # Every required, configured-local, and retained revision needs its
+        # payload, so a row without a repository directory cannot be promoted.
         # pre-commit stores local environments with additional
         # dependencies under ``local:`` keys without a hook manifest,
         # and never clones local or meta repositories, so those rows
         # need a valid stored path and directory but no manifest.
-        for repo, rev in sorted(required | live):
+        for repo, rev in sorted(required | configured_local | live):
             stored = staged_paths.get((repo, rev), "")
             require_manifest = repo not in _NON_CLONED_REPOS and not repo.startswith(
                 "local:"
@@ -1147,6 +1322,24 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                             file=sys.stderr,
                         )
                         return False
+        missing_local = _missing_local_dependency_environments(
+            config,
+            staged_paths,
+            pre_commit_home,
+            repository_root=staging,
+        )
+        if missing_local:
+            details = "; ".join(
+                f"{hook_id}: {', '.join(dependencies)}"
+                for hook_id, dependencies in missing_local
+            )
+            print(
+                f"WARNING: the archive {tarball} cannot provide the configured "
+                f"local hook dependency environment(s) {details}; keeping the "
+                f"tarball and the existing cache.",
+                file=sys.stderr,
+            )
+            return False
         # Normalize before the promotion, so a concurrent lint.py never
         # sees unrepaired metadata, and so archive-controlled escapes
         # can block the promotion.
@@ -1225,8 +1418,14 @@ def _preflight_with_restore(
     """
     if not online:
         configured = _configured_repos(config)
-        missing = _missing_repos(configured, _cached_repos(pre_commit_home))
-        if missing and _restore_cache(pre_commit_home, set(configured)):
+        cached_paths = _cached_repo_paths(pre_commit_home)
+        missing_repos = _missing_repos(configured, set(cached_paths))
+        missing_local = _missing_local_dependency_environments(
+            config, cached_paths, pre_commit_home
+        )
+        if (missing_repos or missing_local) and _restore_cache(
+            pre_commit_home, set(configured), config
+        ):
             rc = _preflight(online, pre_commit_home, config)
             if rc == 0:
                 _delete_tarball()
