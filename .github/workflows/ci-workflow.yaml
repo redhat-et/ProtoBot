@@ -210,6 +210,82 @@ jobs:
       - name: Run ears-manager check
         run: ./ears-manager/ears-manager --output json check
 
+  validator:
+    name: V2 specification validator
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        # https://github.com/actions/checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history so the comparison base resolves locally.
+          fetch-depth: 0
+
+      - name: Set up Go
+        # https://github.com/actions/setup-go
+        # zizmor: ignore[cache-poisoning]
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: validator/go.mod
+          cache-dependency-path: validator/go.sum
+
+      # scripts/check_spec_validator.py builds with module downloads
+      # disabled, so warm the module cache first.
+      - name: Download validator module dependencies
+        run: go mod download
+        working-directory: validator
+        env:
+          GOWORK: "off"
+
+      - name: Check formatting
+        run: |
+          files="$(gofmt -l validator)" || exit $?
+          test -z "$files"
+
+      - name: Run golangci-lint
+        # https://github.com/golangci/golangci-lint-action
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+          args: --timeout=5m
+          skip-cache: true
+          working-directory: validator
+
+      - name: Run vet
+        run: go vet ./...
+        working-directory: validator
+
+      - name: Run validator module tests
+        run: go test ./...
+        working-directory: validator
+        env:
+          GOWORK: "off"
+
+      # Requirement text is only approved once it reaches the default branch.
+      # A pull request or merge group run compares the candidate with the base
+      # branch. A push to the default branch compares with the exact previous
+      # tip, so edits to approved text fail even after a history rewrite; a
+      # push to any other branch compares with the approved default branch, so
+      # revising unapproved text on the branch is allowed. A base that the
+      # event requires but git cannot provide fails the step
+      # (scripts/select_comparison_base.py).
+      - name: Select the comparison base
+        id: base
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 scripts/select_comparison_base.py
+
+      - name: Run the V2 specification validator
+        env:
+          GITHUB_BASE_SHA: ${{ steps.base.outputs.merge_base }}
+          PROTOBOT_VALIDATOR_BASE: ${{ steps.base.outputs.exact_base }}
+        run: python3 scripts/check_spec_validator.py
+
   scm:
     name: Source Control Manager checks
     runs-on: ubuntu-latest
@@ -322,6 +398,7 @@ jobs:
       - pre-commit
       - go
       - spec
+      - validator
       - scm
       - wms
     runs-on: ubuntu-latest
