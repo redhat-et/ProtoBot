@@ -330,34 +330,38 @@ class BuildValidatorTests(unittest.TestCase):
         env = run.call_args.kwargs["env"]
         self.assertEqual("off", env["GOPROXY"])
         self.assertEqual("off", env["GOWORK"])
-        # validator/vendor/ holds the vendored module dependencies, so the
-        # real repository builds with -mod=vendor rather than -mod=readonly.
-        self.assertEqual("-mod=vendor", env["GOFLAGS"])
 
-    def test_build_goflags_reflects_vendor_directory(self) -> None:
-        """Use -mod=vendor when validator/vendor/ exists and -mod=readonly when absent."""
-        with tempfile.TemporaryDirectory(prefix="test-validator-build-") as tmp:
-            synthetic_repo = Path(tmp)
-            validator_dir = synthetic_repo / "validator"
-            validator_dir.mkdir()
-
-            # Without vendor/ directory
+    def test_build_uses_vendor_when_vendor_present(self) -> None:
+        """Build with -mod=vendor when validator/vendor/ is present."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "validator" / "vendor").mkdir(parents=True)
             with patch.object(
                 checker.subprocess, "run", return_value=self._completed(0)
             ) as run:
-                ok, _ = checker.build_validator(Path("/tmp/out"), synthetic_repo)
+                ok, message = checker.build_validator(Path("/tmp/out"), repo)
             self.assertTrue(ok)
-            self.assertEqual("-mod=readonly", run.call_args.kwargs["env"]["GOFLAGS"])
+            self.assertEqual("", message)
+            env = run.call_args.kwargs["env"]
+            self.assertEqual("off", env["GOPROXY"])
+            self.assertEqual("off", env["GOWORK"])
+            self.assertEqual("-mod=vendor", env["GOFLAGS"])
 
-            # With vendor/ directory
-            vendor_dir = validator_dir / "vendor"
-            vendor_dir.mkdir()
+    def test_build_uses_readonly_when_vendor_absent(self) -> None:
+        """Build with -mod=readonly when validator/vendor/ is absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "validator").mkdir()
             with patch.object(
                 checker.subprocess, "run", return_value=self._completed(0)
             ) as run:
-                ok, _ = checker.build_validator(Path("/tmp/out"), synthetic_repo)
+                ok, message = checker.build_validator(Path("/tmp/out"), repo)
             self.assertTrue(ok)
-            self.assertEqual("-mod=vendor", run.call_args.kwargs["env"]["GOFLAGS"])
+            self.assertEqual("", message)
+            env = run.call_args.kwargs["env"]
+            self.assertEqual("off", env["GOPROXY"])
+            self.assertEqual("off", env["GOWORK"])
+            self.assertEqual("-mod=readonly", env["GOFLAGS"])
 
     def test_dependency_failure_is_reported_as_offline_problem(self) -> None:
         """Report unresolved module dependencies as an offline problem."""
