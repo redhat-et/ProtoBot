@@ -936,6 +936,21 @@ class CheckRepoTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("none increased", messages[0])
 
+    def test_malformed_config_fails_closed_without_tracked_agents_ceiling(
+        self,
+    ) -> None:
+        """Fail closed on malformed config even without an AGENTS.md ceiling."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules: [\n",
+            encoding="utf-8",
+        )
+        self._write_baseline(_baseline())
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("invalid YAML in .skillsaw.yaml", messages[0])
+
     def test_merge_base_missing_uses_named_ref_in_source_label(self) -> None:
         """Use the named ref as the source label when merge-base returns None."""
         with patch.object(checker, "git_merge_base", return_value=None):
