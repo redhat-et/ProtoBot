@@ -177,7 +177,6 @@ repos:
         # Pre-commit omits deleted files from the selection. The checker
         # rejects deleting the baseline while tracked ceiling files remain.
         always_run: true
-        files: ^(\.skillsaw-baseline\.json|\.skillsaw\.yaml)$
       - id: test-baseline-ratchet
         name: test-baseline-ratchet
         entry: python scripts/test_check_baseline_ratchet.py
