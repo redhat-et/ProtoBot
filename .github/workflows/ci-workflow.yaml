@@ -124,6 +124,13 @@ jobs:
         # https://github.com/actions/checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # On pull_request, the default checkout is the synthetic merge
+          # commit of the PR head into the default-branch tip; the merge
+          # base of that commit with the default branch is the tip itself,
+          # so the artifact delta must run on the PR head, whose merge base
+          # is the fork point. On push, merge_group, and workflow_dispatch,
+          # the expression falls back to github.sha.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -147,6 +154,21 @@ jobs:
           git fetch --no-tags https://github.com/redhat-et/ProtoBot.git refs/heads/main
           git checkout --detach HEAD
           git update-ref refs/heads/main FETCH_HEAD
+
+      # The artifact-operation delta must not blame this PR for registered
+      # artifact changes that the default branch made after this PR forked,
+      # so its baseline is the merge base of the default branch and HEAD.
+      # Change-set approval and proposed-base freshness still compare with
+      # the default-branch tip above; --base-ref narrows only the artifact
+      # delta.
+      - name: Compute artifact comparison base
+        id: artifact-base
+        run: |
+          if ! base=$(git merge-base refs/heads/main HEAD) || [ -z "$base" ]; then
+            echo "::error::Could not compute the merge base of refs/heads/main and HEAD for the artifact comparison"
+            exit 1
+          fi
+          printf 'commit=%s\n' "$base" >> "$GITHUB_OUTPUT"
 
       - name: Verify change-set store location
         id: change-set-store
@@ -208,7 +230,9 @@ jobs:
           exit 1
 
       - name: Run ears-manager check
-        run: ./ears-manager/ears-manager --output json check
+        env:
+          ARTIFACT_BASE: ${{ steps.artifact-base.outputs.commit }}
+        run: ./ears-manager/ears-manager --output json check --base-ref "$ARTIFACT_BASE"
 
   validator:
     name: V2 specification validator

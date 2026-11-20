@@ -546,7 +546,7 @@ file.
 | H5 | Nothing on idle or exit | No `Stop` or `SessionEnd` hook | Designed |
 | H6 | Replayable session record | The session file under `$CODEX_HOME/sessions/` and the `codex exec --json` event stream | Designed; hook events are not recorded, and a refusal is recorded as the tool output |
 | H7 | Headless replay with no permission prompt | `codex exec --json`, `approval_policy = "never"`, and a custom model provider pointed at a replay endpoint | Observed with a stub endpoint; the fixture has not run |
-| H8 | Invoke the guard on each tool call and enforce its decision | The project hook; the launcher, which checks the hook file and the profile and starts Codex with `--dangerously-bypass-hook-trust`; the probe as the second layer | Observed for shell commands. The launcher closes the untrusted-hook and changed-hook cases and pins the profile; outside it, an untrusted hook does not run. A killed guard, non-2 exit, or hook timeout lets that call through (recorded gaps). The sandbox bounds what a call can write, not what it can read: a host credential file can reach the model, and the `wms` and `scm` servers have network. A fail-open shell write can target `.protobot/` control files, configured stores, or registered artifacts. Structured-store digest checks catch content changes only while recorded digests are intact; those digests can be rewritten through `.protobot/project.yaml`. `ears-manager check` catches registered artifact path/canonical-content deltas without a matching proposed operation and unregistration of a default-branch artifact, even if an artifact digest is rewritten. Coordinated manual edits to artifact content, its registry digest, and the manifest, or project-setting edits that retarget the baseline, remain outside the operation-record guarantee. The operation record does not prove `ears-manager artifact put` was invoked or otherwise establish writer provenance. Rule 5 in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag hand edits. File-source provenance remains unverified ([File-source arguments](adapter-contract.md#file-source-arguments)) |
+| H8 | Invoke the guard on each tool call and enforce its decision | The project hook; the launcher, which checks the hook file and the profile and starts Codex with `--dangerously-bypass-hook-trust`; the probe as the second layer | Observed for shell commands. The launcher closes the untrusted-hook and changed-hook cases and pins the profile; outside it, an untrusted hook does not run. A killed guard, non-2 exit, or hook timeout lets that call through (recorded gaps). The sandbox bounds what a call can write, not what it can read: a host credential file can reach the model, and the `wms` and `scm` servers have network. A fail-open shell write can target `.protobot/` control files, configured stores, or registered artifacts. Structured-store digest checks catch content changes only while recorded digests are intact; those digests can be rewritten through `.protobot/project.yaml`. `ears-manager check` catches registered artifact path/canonical-content deltas without a matching proposed operation and unregistration of an artifact registered on the comparison base, even if an artifact digest is rewritten. Coordinated manual edits to artifact content, its registry digest, and the manifest, or project-setting edits that retarget the baseline, remain outside the operation-record guarantee. The operation record does not prove `ears-manager artifact put` was invoked or otherwise establish writer provenance. Rule 5 in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag hand edits. File-source provenance remains unverified ([File-source arguments](adapter-contract.md#file-source-arguments)) |
 | H9 | Hide file-writing, subagent, and web tools | `web_search = "disabled"`, `multi_agent = false` | Observed for web and subagent tools; `apply_patch` cannot be hidden and is refused by the guard (gap) |
 | H10 | Toolkit skills only | `include_instructions = false`; the profile names the Toolkit skills; the guard refuses any other `SKILL.md` read | Observed that the catalog is gone; `$<name>` in the prompt text can still insert another skill's text, and the fixture has not run (gap) |
 | H11 | No credential in binding files; no session upload | Placeholders; `[analytics]` and `[feedback]` off; no `codex cloud` or `remote-control` | Designed |
@@ -596,16 +596,17 @@ catch content changes only while their recorded digests remain intact. These
 checks do not establish writer provenance or generally check `.protobot/`
 control files, reserved harness controls, the selected manifest, or Git
 metadata; an indirect `ears-manager` write with a matching operation can pass.
-The baseline uses the existing default-branch resolver and working-tree
-project settings without fetching; hand edits to `repository.default_branch`,
-or to `repository.canonical_remote` when the remote-tracking fallback is used,
-can retarget it. Rule 5 in `AGENTS.md` prohibits hand-editing
-`.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag
-hand edits. The checks also do not enforce shell grammar, argument values,
-variable expansion, or file-source provenance ([What the harness layer
-stops][layer-stops]). The sandbox stops more: no command in the role writes
-`.git/` or reaches the network, and its `workspace-write` mode keeps
-`.agents/` read-only.
+By default, the baseline uses the existing default-branch resolver and
+working-tree project settings without fetching; callers may pass
+`--base-ref FULL-SHA` to select an explicit artifact comparison base. Hand
+edits to `repository.default_branch`, or to `repository.canonical_remote` when
+the remote-tracking fallback is used, can retarget the default-branch baseline.
+Rule 5 in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6
+requires reviewers to inspect it and flag hand edits. The checks also do not
+enforce shell grammar, argument values, variable expansion, or file-source
+provenance ([What the harness layer stops][layer-stops]). The sandbox stops
+more: no command in the role writes `.git/` or reaches the network, and its
+`workspace-write` mode keeps `.agents/` read-only.
 
 ---
 
