@@ -58,43 +58,43 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
 
 ## Rules for creating or modifying sibling entries
 
-A governed scope defines a domain of applicability; a list
-or governed collection defines the sibling set within that domain.
-When creating or modifying any numbered rule in `AGENTS.md`, any
-specification document under `docs/`, any skill file under
-`.agents/skills/`, or an entry in any future governed scope, agents must
-follow these rules:
+A governed scope defines a domain of applicability; a list or
+governed collection defines the sibling set within it. A
+**component README** is the top-level `README.md` of
+`drafting-table/`, `source-control-manager/`, `validator/`, or
+`wms/`. When creating or modifying any numbered rule in
+`AGENTS.md`, any specification document under `docs/`, any skill
+file under `.agents/skills/`, any component README, or an entry in
+any future governed scope, agents must follow these rules:
 
-1. **Read all sibling entries first.** Before drafting or
-   revising an entry, read every other entry in the same list
-   or governed collection.
+1. **Read all sibling entries first.** Read every other
+   entry in the list or governed collection before drafting
+   or revising one.
 
 2. **Reuse established terminology.** Match sibling
    entries' terms for the same concepts. An undeclared alias
-   for a term already used in the same list or governed
-   collection is a defect.
+   for a term used in the list or governed collection is a
+   defect.
 
 3. **Review agents must check sibling-entry terminology.**
-   When reviewing a PR that creates or modifies an entry in
-   a governed scope, verify that the new or changed entry
-   reuses established sibling terminology rather than inventing
-   an alias. Findings should include terminology drift within
-   the same list or governed collection, not only
-   specification-hierarchy keyword checks.
+   When reviewing a PR that modifies an entry in a governed
+   scope, verify it reuses established sibling terminology
+   rather than inventing an alias. Findings should include
+   terminology drift within the list or governed collection,
+   not only specification-hierarchy keyword checks.
 
-4. **Match intra-entry restatement terminology.** When
-   an entry restates a requirement's cases in a separate
-   enforcement or consequence clause, both statements
-   must use identical terminology. An undeclared alias
-   or omitted term is a defect. Review agents must
-   check this restatement. Findings should include
-   intra-entry terminology drift, not only sibling-entry
-   terminology matching.
+4. **Match intra-entry restatement terminology.** When an
+   entry restates a requirement's cases in a separate
+   enforcement or consequence clause, both statements must
+   use identical terminology — in a component README, this
+   also covers CLI-flag and paragraph drift; an undeclared
+   alias or omitted term is a defect; review agents must
+   check this restatement.
 
-Examples of sibling entries: numbered rules in `AGENTS.md` (other
-rules in the list); specification documents under `docs/` (other
-governed Markdown files); skill files under `.agents/skills/`
-(other skill files).
+Examples of sibling entries: `AGENTS.md` rules; `docs/`
+specification documents; `.agents/skills/` skill files;
+component READMEs (other component READMEs and its `docs/`
+docs).
 
 ## Specification document hierarchy
 
