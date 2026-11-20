@@ -103,6 +103,11 @@ its release notes and relevant tag changes as well as the Fullsend CLI's notes.
 If no GitHub release or release notes exist for that tag, compare each
 overlay's current base tag with the target tag and record any migration or
 compatibility impact; missing notes do not mean no changes.
+The migration audit must inspect `.fullsend/config.yaml` and
+`.fullsend/config.base.yaml`, when present, against the selected release's
+configuration contract. Apply each required migration; release-note review and
+PR-description notes are not compatibility evidence.
+Step 6's target-CLI config check is a hard gate.
 
 Record the resolved binary path, installed release, selected target, and
 installation ownership. Compare normalized semantic versions, not strings.
@@ -119,8 +124,14 @@ authorizes it.
 
 Continue only when `command -v fullsend`, `fullsend --version`, and
 `fullsend github setup --help` confirm the exact selected release and
-`--dry-run` support. The reference covers release metadata, archive checksums,
-installation, and refreshing shell command lookup.
+`--dry-run` support. For a manual binary update, also check
+`fullsend self-update --help` for `--version` and `--dry-run`; if the
+subcommand or flags are absent, use the verified archive procedure in the
+[CLI installation reference](references/cli-installation.md). In `v0.56.1`,
+the binary updater is `fullsend self-update`, not `fullsend self-upgrade`; it
+updates only the local CLI binary. Repository workflows and configuration are
+handled by this skill's later steps. The reference covers its signed dry-run
+and the package-manager/archive safeguards.
 
 ## Step 3: Preview and review repository setup
 
@@ -218,40 +229,6 @@ space before and after the hash.
 
 ## Step 6: Verify and document the upgrade
 
-Do not report the upgrade complete until the selected target repository passes
-its applicable integrity, lint, and test checks. Inspect that repository's
-documentation and CI/build configuration to identify the actual commands, and
-run them from `FULLSEND_TARGET_ROOT`. For a non-ProtoBot target, use that
-repository's verification commands. For a ProtoBot target, run:
-
-```bash
-(
-  cd "$FULLSEND_TARGET_ROOT"
-  set -e
-  python3 scripts/check_harness_integrity.py
-  python scripts/lint.py --all-files
-  for module in drafting-table ears-manager source-control-manager validator wms; do
-    (cd "$module" && go test ./...)
-  done
-)
-```
-
-If a category has no applicable command or a check cannot run, record that
-limitation; never report the category as passed.
-Record each command's actual result. If any check fails or cannot run, report
-the failure or blocker; do not claim the upgrade is verified.
-
-Prepare a structured PR description that includes:
-
-- **Release and migration notes:** the previous and selected release tags,
-  release-note links for both `fullsend-ai/fullsend` and `fullsend-ai/agents`,
-  breaking changes, and how each migration requirement was handled.
-- **Harness compatibility:** every affected overlay and the evidence for its
-  compatibility with the selected release. A matching checksum proves file
-  identity, not behavioral compatibility.
-- **Workflow synchronization:** the generated workflow changes and each
-  reviewed downstream addition retained.
-- **Repository settings:** approved setting names and actions, without
-  plaintext secret values.
-- **Verification:** the target's applicable integrity, lint, and test commands
-  with their observed results.
+Read [the verification reference](references/verification.md) and run its
+release-specific config audit, inherited-value check, and applicable repository
+checks. Do not report the upgrade complete until every required check passes.
