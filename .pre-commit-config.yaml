@@ -36,7 +36,7 @@ repos:
         exclude: |
           (?x)^(
                 .github/pull_request_template\.md |
-                .agents/skills/.* |
+                .agents/skills/ |
                 validator/vendor/.*
             )$
 
