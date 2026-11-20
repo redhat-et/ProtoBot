@@ -36,8 +36,8 @@ repos:
         exclude: |
           (?x)^(
                 .github/pull_request_template\.md |
-                .agents/skills/ |
-                validator/vendor/
+                .agents/skills/.* |
+                validator/vendor/.*
             )$
 
   - repo: https://github.com/hadolint/hadolint
