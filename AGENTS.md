@@ -93,8 +93,8 @@ any future governed scope, agents must follow these rules:
 
 Examples of sibling entries: `AGENTS.md` rules; `docs/`
 specification documents; `.agents/skills/` skill files;
-component READMEs (other component READMEs and its `docs/`
-docs).
+component READMEs (other component READMEs and their
+`docs/` documents).
 
 ## Specification document hierarchy
 
