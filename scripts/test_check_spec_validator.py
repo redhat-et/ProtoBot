@@ -334,6 +334,22 @@ class BuildValidatorTests(unittest.TestCase):
         # real repository builds with -mod=vendor rather than -mod=readonly.
         self.assertEqual("-mod=vendor", env["GOFLAGS"])
 
+    def test_build_uses_readonly_when_vendor_absent(self) -> None:
+        """Build with -mod=readonly when validator/vendor/ is absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "validator").mkdir()
+            with patch.object(
+                checker.subprocess, "run", return_value=self._completed(0)
+            ) as run:
+                ok, message = checker.build_validator(Path("/tmp/out"), repo)
+            self.assertTrue(ok)
+            self.assertEqual("", message)
+            env = run.call_args.kwargs["env"]
+            self.assertEqual("off", env["GOPROXY"])
+            self.assertEqual("off", env["GOWORK"])
+            self.assertEqual("-mod=readonly", env["GOFLAGS"])
+
     def test_dependency_failure_is_reported_as_offline_problem(self) -> None:
         """Report unresolved module dependencies as an offline problem."""
         failure = self._completed(1, "go: module lookup disabled by GOPROXY=off")
