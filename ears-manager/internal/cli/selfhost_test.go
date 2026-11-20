@@ -471,6 +471,17 @@ func TestSelfHostingWorkflowBasesArtifactCheckOnMergeBase(t *testing.T) {
 	workflow := readTestFile(t, selfHostingRoot(t), ".github/workflows/ci-workflow.yaml")
 	specJob := workflowJobRegion(t, workflow, "spec", "scm")
 
+	// The default pull_request checkout is the synthetic merge commit,
+	// whose merge base with the default branch is the default-branch tip,
+	// so the spec job must check out the pull request head itself.
+	checkoutStep := workflowStep(t, specJob, "Checkout repository")
+	if !strings.Contains(checkoutStep, "ref: ${{ github.event.pull_request.head.sha || github.sha }}") {
+		t.Fatalf("the spec checkout does not pin the pull request head:\n%s", checkoutStep)
+	}
+	if !strings.Contains(checkoutStep, "persist-credentials: false") || !strings.Contains(checkoutStep, "fetch-depth: 0") {
+		t.Fatalf("the spec checkout lost persist-credentials: false or full history:\n%s", checkoutStep)
+	}
+
 	fetchStep := workflowStep(t, specJob, "Fetch default branch for change-set approval")
 	if !strings.Contains(fetchStep, "git update-ref refs/heads/main FETCH_HEAD") {
 		t.Fatalf("the fetch step no longer points the local default branch at FETCH_HEAD:\n%s", fetchStep)

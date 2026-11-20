@@ -473,6 +473,9 @@ proposed-base freshness checks continue to evaluate against the
 default-branch head. CI passes the merge base of the default branch and
 the pull request head, so a pull request forked before a
 default-branch registered artifact change is not blamed for that change.
+CI checks out the pull request head for `pull_request` events before
+computing the merge base; without that checkout the synthetic merge commit's
+merge base is the default tip and the artifact comparison is a no-op.
 See [`check`](../architecture/ears-manager-cli.md#check) and
 [Gates and labels](../architecture/git-integration.md#gates-and-labels).
 

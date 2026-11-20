@@ -68,7 +68,7 @@ The same binary serves these callers:
 | Caller | Reads | Writes |
 | --- | --- | --- |
 | Drafting Table through the Specification Toolkit | Proposed and approved specification state, comparison, impact candidates, validation results | Proposed specification records and change-set manifests on the active change-set branch, which `change-set create` cuts |
-| CI | Registered records and artifacts at the checked-out revision, and the comparison base commit's project configuration and registered artifacts during `check --base-ref` | None |
+| CI | Registered records and artifacts at the checked-out revision (on `pull_request` events CI checks out the pull request head, fetches the default branch, computes their merge base as the fork point, and passes it to `check --base-ref`, while approval and freshness still read the default-branch head), and the comparison base commit's project configuration and registered artifacts during `check --base-ref` | None |
 | Job Site Materializer | The approved manifest and requirements at an immutable specification commit | None; it passes lifecycle state to the WMS Adapter |
 | [Source Control Manager](source-control-manager.md) | A change set's paths, comparison, impact candidates, and validation result, and a change set's manifest, status, and manifest path at a commit | None; it stages, commits, and publishes what `ears-manager` wrote |
 | Human maintainer | All data exposed by the read commands | The same proposed changes as the Toolkit, subject to the same validation |
@@ -986,8 +986,12 @@ status `4` and `revision.invalid`. A hash that names no commit in the local
 repository fails with status `4` and `revision.not_found`. Supplying
 `--base-ref` does not alter change-set approval classification or proposed
 `base_commit` freshness checks; those checks always read the default-branch
-head. Every full or scoped `check` requires a resolvable default-branch head,
-with or without `--base-ref`, even when the project has zero change sets.
+head. On `pull_request` events, CI checks out the pull request head, fetches
+the default branch, computes their merge base, and passes it to
+`check --base-ref`. This makes the comparison baseline the fork point, not
+the default tip. Every full or scoped `check` requires a resolvable
+default-branch head, with or without `--base-ref`, even when the project has
+zero change sets.
 
 For each artifact registered in the comparison base project configuration
 (the default-branch tree by default, or the commit named by `--base-ref`),

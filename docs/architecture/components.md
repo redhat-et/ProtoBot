@@ -441,8 +441,10 @@ It is used by these callers:
   and [open question Q19][q19].
 - **CI** — `ears-manager check` runs on every branch push to
   validate that spec files are well-formed, all EARS statements
-  match required templates, referential integrity holds, every registered
-  artifact path/canonical-content delta has a matching
+  match required templates, and referential integrity holds. On
+  `pull_request` events, CI checks out the pull request head before
+  comparing against the artifact comparison base it computes.
+  Every registered artifact path/canonical-content delta must have a matching
   `artifact_operations[]` entry with the same `artifact_id` in a proposed
   change set, every artifact registered on the artifact comparison base
   that CI computes remains registered, and each proposed change set's

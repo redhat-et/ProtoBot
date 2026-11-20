@@ -124,6 +124,13 @@ jobs:
         # https://github.com/actions/checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # On pull_request, the default checkout is the synthetic merge
+          # commit of the PR head into the default-branch tip; the merge
+          # base of that commit with the default branch is the tip itself,
+          # so the artifact delta must run on the PR head, whose merge base
+          # is the fork point. On push, merge_group, and workflow_dispatch,
+          # the expression falls back to github.sha.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
