@@ -583,8 +583,6 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
     """
     try:
         head = load_working_tree_baseline(repo_root)
-        if head is None:
-            return 0, [f"No {BASELINE_RELATIVE_PATH} in the working tree."]
         if base_ref is None and is_shallow_push_checkout(repo_root):
             return 0, [
                 "WARNING: baseline ratchet skipped: shallow push checkout lacks base history."
@@ -608,6 +606,9 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
         return 0, [warning]
 
     source, base = loaded
+    head_missing = head is None
+    if head is None:
+        head = {"violations": []}
     try:
         head_index = ceiling_values(head, "working tree")
         diagnostics = compare_ceilings(head, base, repo_root=repo_root)
@@ -618,6 +619,13 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
 
     if diagnostics:
         return 1, diagnostics
+    if head_missing:
+        return 0, [
+            (
+                f"No {BASELINE_RELATIVE_PATH} in the working tree; all base "
+                "ceilings belong to deleted files."
+            )
+        ]
     clean_source = sanitize_log_string(source)
     return 0, [
         f"Validated {n_ceilings} ceiling(s) against {clean_source}; none increased."

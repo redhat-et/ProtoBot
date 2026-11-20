@@ -172,7 +172,7 @@ def _cached_repos(pre_commit_home: Path) -> set[tuple[str, str]]:
     Reads the ``repos`` table from pre-commit's own ``db.db`` SQLite
     store directly (see ``pre_commit.store.Store``), so this check
     needs no network access and no dependency on pre-commit's internal
-    Python API. None of this repository's hooks declare
+    Python API. None of this repository's remote hooks declare
     ``additional_dependencies``, so pre-commit's stored ``repo`` key
     always equals the bare repo URL from ``.pre-commit-config.yaml``
     (a ``:dep1,dep2`` suffix is only appended when dependencies are

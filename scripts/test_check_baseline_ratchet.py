@@ -947,14 +947,26 @@ class CheckRepoTests(unittest.TestCase):
             messages[0],
         )
 
-    def test_missing_working_tree_baseline_skips(self) -> None:
-        """Skip when the working tree has no baseline file."""
+    def test_missing_working_tree_baseline_with_deleted_file_passes(self) -> None:
+        """Allow baseline deletion when every referenced ceiling file was deleted."""
         (self.root / checker.BASELINE_RELATIVE_PATH).unlink()
 
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
 
         self.assertEqual(0, exit_code)
         self.assertIn("No .skillsaw-baseline.json", messages[0])
+        self.assertIn("deleted files", messages[0])
+
+    def test_missing_working_tree_baseline_with_existing_file_fails(self) -> None:
+        """Reject baseline deletion while a referenced ceiling file remains."""
+        (self.root / "AGENTS.md").write_text("dummy", encoding="utf-8")
+        (self.root / checker.BASELINE_RELATIVE_PATH).unlink()
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("was removed while the file still exists", messages[0])
+        self.assertIn("(context-budget)", messages[0])
 
     def test_missing_explicit_base_ref_fails(self) -> None:
         """Fail closed when --base-ref does not exist."""
