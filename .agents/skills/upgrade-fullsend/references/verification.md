@@ -16,21 +16,49 @@ layered lint does not validate. `fullsend lint` is not necessarily a strict
 key validator: `v0.56.1` uses non-strict YAML unmarshalling, so a typo such as
 `runtim: pi` is ignored.
 
-For `v0.56.1`, migrate `create_issues.allow_targets` to
-`tracker.<provider>.allowed_targets`. For GitHub, repository destinations
-are listed at `tracker.github.allowed_targets.repos`. The `repos` list holds
-destinations beyond the source repository; preserve all prior external
-entries and do not add the source repository, which remains implicitly
-allowed.
-For a managed repository, apply this migration to its per-repository `config`
-entry in the managing fleet's `repos.yaml`, including the complete tracker
-policy and required external targets, instead of editing generated local
-configuration.
+## Migrate tracker policy
 
-The `tracker` mapping replaces the parent object as a whole. Each layer that
-sets `tracker` must provide the complete effective provider configuration
-and `allowed_targets` it needs. An overlay must repeat required external
-targets rather than relying on them to merge from the base layer.
+### Migrate removed keys and presets
+
+For `v0.56.1`, migrate every `create_issues` setting in each layer to
+`tracker.<provider>.allowed_targets`. Runtime loading rejects the removed key
+in either `.fullsend/config.yaml` or `.fullsend/config.base.yaml`. For GitHub,
+preserve external repository targets at
+`tracker.github.allowed_targets.repos`; the source repository is implicitly
+allowed.
+
+A `config_base` preset can still contain `create_issues` after the overlay is
+updated. Migrate the preset at its source, update its pinned `sha256` if set,
+and rerun `fullsend repos install` to deliver the updated base. In `v0.56.1`,
+`fullsend repos install` migrates managed `config:` entries but does not
+convert presets or markerless local config files.
+
+### Keep post-script targets in the overlay
+
+For `v0.56.1` retro or triage post-scripts that need external targets, put the
+complete tracker policy in `.fullsend/config.yaml`: those scripts read the
+overlay, not `config.base.yaml`. For `fullsend repos`-managed repositories,
+declare the policy in the manifest's applicable `config` section and rerun
+`fullsend repos install`. For unmanaged installations, create or update
+`.fullsend/config.yaml`; updating only the preset does not enable these
+operations.
+
+### Locate managed configuration
+
+A repository is fleet-managed when `fullsend repos` installs it from a
+`repos.yaml` manifest. Locate that manifest from a `Source manifest:` marker
+in `.fullsend/config.yaml` when present, or from the repository's deployment
+documentation or workflow. Resolve the effective `config_base.source` from
+that manifest. If the manifest or preset source cannot be located, report a
+blocker; do not guess or edit generated `.fullsend` files. See the [v0.56.1 Config
+Reference](https://github.com/fullsend-ai/fullsend/blob/v0.56.1/docs/reference/config-reference.md).
+
+### Check whole-object replacements
+
+`tracker` replaces its parent object as a whole. Each layer that sets it must
+provide the complete effective provider configuration and `allowed_targets`.
+When an overlay replaces a whole-object field, identify base-only children
+shadowed by the overlay as ineffective, even when schema-valid.
 
 ## Lint effective configuration
 
