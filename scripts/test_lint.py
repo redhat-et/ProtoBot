@@ -627,16 +627,14 @@ class PreflightRestoreTests(unittest.TestCase):
                 rc = checker._preflight_with_restore(
                     False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
                 )
-        self.assertEqual(0, rc)
+        self.assertEqual(1, rc)
         message = stderr.getvalue()
-        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("unsafe python hook environments", message)
         self.assertIn("py_env-regular", message)
         self.assertIn("is not a symlink", message)
-        # The environment's file is left unchanged.
-        cfg = (self.home / "repodir" / "py_env-regular" / "pyvenv.cfg").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn(f"version_info = {self._stale_patch_version()}", cfg)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
 
     def test_missing_bin_python_is_reported(self) -> None:
         self._build_tarball(
@@ -772,20 +770,20 @@ class PreflightRestoreTests(unittest.TestCase):
             rc = checker._preflight_with_restore(
                 False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
             )
-        # The restore succeeded, the external file is unchanged, and the
-        # environment is reported as unnormalized.
-        self.assertEqual(0, rc)
-        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        # A symlinked pyvenv.cfg is unsafe: the archive is rejected, the
+        # external file is unchanged, and nothing is promoted.
+        self.assertEqual(1, rc)
+        self.assertNotIn("Restored", stdout.getvalue())
         self.assertEqual(
             f"version_info = {self._stale_patch_version()}\n",
             outside.read_text(encoding="utf-8"),
         )
         message = stderr.getvalue()
-        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("unsafe python hook environments", message)
         self.assertIn("py_env-linked", message)
         self.assertIn("is a symlink", message)
-        live_cfg = self.home / "repodir" / "py_env-linked" / "pyvenv.cfg"
-        self.assertTrue(live_cfg.is_symlink())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
 
     def test_rewrite_version_info_preserves_other_lines(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
@@ -1029,12 +1027,14 @@ class PreflightRestoreTests(unittest.TestCase):
                 rc = checker._preflight_with_restore(
                     False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
                 )
-        self.assertEqual(0, rc)
-        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertEqual(1, rc)
         message = stderr.getvalue()
-        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("unsafe python hook environments", message)
         self.assertIn("py_env-escaped", message)
         self.assertIn("is a symlink", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
         # The external pyvenv.cfg is unchanged.
         self.assertEqual(
             f"version_info = {self._stale_patch_version()}\n",
@@ -1072,11 +1072,13 @@ class PreflightRestoreTests(unittest.TestCase):
             rc = checker._preflight_with_restore(
                 False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
             )
-        self.assertEqual(0, rc)
+        self.assertEqual(1, rc)
         message = stderr.getvalue()
-        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("unsafe python hook environments", message)
         self.assertIn("py_env-emptybase", message)
         self.assertIn("base-executable is empty", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
 
     def test_local_row_without_a_staged_directory_is_rejected(self) -> None:
         # A retained local: row still needs its staged directory; an
@@ -1463,10 +1465,95 @@ class PreflightRestoreTests(unittest.TestCase):
                 rc = checker._preflight_with_restore(
                     False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
                 )
-        self.assertEqual(0, rc)
+        self.assertEqual(1, rc)
         message = stderr.getvalue()
-        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("unsafe python hook environments", message)
         self.assertIn("home /tmp/evil is not /usr or below /usr", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_home_traversal_is_not_promoted(self) -> None:
+        # "/usr/../tmp/evil" lexically sits under /usr only through the
+        # ".." component; it must be rejected before resolution.
+        self._build_env_cfg_tarball(
+            [
+                f"version_info = {self._stale_patch_version()}",
+                "home = /usr/../tmp/evil",
+            ]
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("unsafe python hook environments", message)
+        self.assertIn("home /usr/../tmp/evil contains '..'", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+
+    def test_home_resolving_outside_usr_is_rejected(self) -> None:
+        original_resolve = Path.resolve
+
+        def resolve_escaping_usr(path):
+            if str(path) == "/usr/linked":
+                return Path("/tmp/evil")
+            return original_resolve(path)
+
+        with patch.object(
+            Path, "resolve", side_effect=resolve_escaping_usr, autospec=True
+        ):
+            rejection = checker._home_rejection("/usr/linked")
+        self.assertIsNotNone(rejection)
+        self.assertIn("home /usr/linked is not /usr or below /usr", rejection)
+        self.assertIn("resolves to /tmp/evil", rejection)
+
+    def test_home_at_usr_bin_is_accepted(self) -> None:
+        self.assertIsNone(checker._home_rejection("/usr/bin"))
+
+    def test_bin_python_to_a_non_platform_path_is_not_promoted(self) -> None:
+        # bin/python may only be a symlink to a platform interpreter;
+        # /bin/sh is not one.
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        _make_db(packed / "db.db", rows, paths)
+        env_dir = packed / "repodir" / "py_env-sh"
+        (env_dir / "bin").mkdir(parents=True)
+        (env_dir / "pyvenv.cfg").write_text(
+            f"version_info = {self._stale_patch_version()}\n", encoding="utf-8"
+        )
+        os.symlink("/bin/sh", env_dir / "bin" / "python")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("unsafe python hook environments", message)
+        self.assertIn("py_env-sh", message)
+        self.assertIn("not /usr/bin/python3", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
 
     def test_home_at_usr_bin_passes(self) -> None:
         self._build_env_cfg_tarball(

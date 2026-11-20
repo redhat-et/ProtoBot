@@ -57,7 +57,7 @@ import tempfile
 import zlib
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
@@ -389,6 +389,37 @@ def _contained_real_path_rejection(path: Path, root: Path) -> str | None:
     return None
 
 
+def _home_rejection(home: str) -> str | None:
+    """Return why a ``pyvenv.cfg`` ``home`` value is untrusted, or None.
+
+    Python reads ``home`` during path initialization, before ``-S`` or
+    ``-c`` take effect, so it must name ``/usr`` or a directory below
+    it. Traversal components are rejected outright, and the resolved
+    path must stay below ``/usr``, so a symlink cannot escape.
+    """
+    home_path = Path(home)
+    if not home_path.is_absolute():
+        return f"home {home} is not an absolute path"
+    if ".." in home_path.parts:
+        return f"home {home} contains '..'"
+    resolved = home_path.resolve()
+    if resolved == Path("/usr") or Path("/usr") in resolved.parents:
+        return None
+    detail = f" (resolves to {resolved})" if str(resolved) != home else ""
+    return f"home {home} is not /usr or below /usr{detail}"
+
+
+class _EnvCheckResult(NamedTuple):
+    """Why an environment could not be normalized, and how severe it is.
+
+    An unsafe environment is archive-controlled and must block the
+    promotion; an unverified one only may need a reinstall.
+    """
+
+    reason: str
+    unsafe: bool = False
+
+
 def _staged_db_rejection(staging: Path) -> str | None:
     """Return why the staged ``db.db`` cannot be read, or None.
 
@@ -688,26 +719,32 @@ def _rewrite_version_info(env_dir: Path, version_info: str, cache_root: Path) ->
     return True
 
 
-def _interpreter_link_rejection(interpreter: Path, current: str) -> str | None:
+def _interpreter_link_rejection(
+    interpreter: Path, current: str
+) -> _EnvCheckResult | None:
     """Return why *interpreter* must not be executed, or None.
 
     The environment's ``bin/python`` comes from the archive, so it is
     only executed when it is a symlink to a platform interpreter:
     ``/usr/bin/python3``, ``/usr/bin/python<current>``, or the running
-    interpreter itself.
+    interpreter itself. A missing interpreter is only unverifiable; a
+    link to anything else is unsafe.
     """
-    if not interpreter.exists():
-        return f"bin/python {interpreter} is missing"
+    if not interpreter.exists() and not interpreter.is_symlink():
+        return _EnvCheckResult(f"bin/python {interpreter} is missing")
     if not interpreter.is_symlink():
-        return f"bin/python {interpreter} is not a symlink"
+        return _EnvCheckResult(
+            f"bin/python {interpreter} is not a symlink", unsafe=True
+        )
     target = interpreter.resolve()
     if target == Path(sys.executable).resolve():
         return None
     allowed_names = {"python3", f"python{current}"}
     if target.parent != Path("/usr/bin") or target.name not in allowed_names:
-        return (
+        return _EnvCheckResult(
             f"bin/python resolves to {target}, not /usr/bin/python3, "
-            f"/usr/bin/python{current}, or the running interpreter"
+            f"/usr/bin/python{current}, or the running interpreter",
+            unsafe=True,
         )
     return None
 
@@ -739,17 +776,18 @@ def _probe_interpreter(executable: Path) -> tuple[str | None, str | None]:
     return reported, None
 
 
-def _base_executable_rejection(base_executable: str, reported: str) -> str | None:
+def _base_executable_rejection(
+    base_executable: str, reported: str
+) -> _EnvCheckResult | None:
     """Return why the base executable disagrees with the environment.
 
-    ``base-executable`` comes from the archive's ``pyvenv.cfg``, so it
-    is only executed when it names a platform interpreter, and it must
-    report the same version as the environment's own interpreter. An
-    empty value is present-but-unusable, which pre-commit would try to
-    execute, so it is reported like any other disagreement.
+    ``base-executable`` comes from the archive's ``pyvenv.cfg``, so a
+    value that does not name a platform interpreter is unsafe; an
+    allowed name that cannot be probed or reports another version is
+    only unverifiable.
     """
     if not base_executable:
-        return "base-executable is empty"
+        return _EnvCheckResult("base-executable is empty", unsafe=True)
     base = Path(base_executable)
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
     allowed_names = {"python3", f"python{current}"}
@@ -758,17 +796,18 @@ def _base_executable_rejection(base_executable: str, reported: str) -> str | Non
         or base.parent != Path("/usr/bin")
         or base.name not in allowed_names
     ):
-        return (
+        return _EnvCheckResult(
             f"base-executable {base_executable} is not /usr/bin/python3 or "
-            f"/usr/bin/python{current}"
+            f"/usr/bin/python{current}",
+            unsafe=True,
         )
     if not base.is_file():
-        return f"base-executable {base_executable} does not exist"
+        return _EnvCheckResult(f"base-executable {base_executable} does not exist")
     base_reported, failure = _probe_interpreter(base)
     if failure:
-        return failure
+        return _EnvCheckResult(failure)
     if _version_key(base_reported) != _version_key(reported):
-        return (
+        return _EnvCheckResult(
             f"base-executable {base_executable} reports {base_reported}, but "
             f"the environment reports {reported}"
         )
@@ -777,12 +816,12 @@ def _base_executable_rejection(base_executable: str, reported: str) -> str | Non
 
 def _verify_and_normalize_env(
     env_dir: Path, cache_root: Path, current: str
-) -> str | None:
-    """Normalize one environment; return a failure reason or None.
+) -> _EnvCheckResult | None:
+    """Normalize one environment; return a failure result or None.
 
     Returns None without changes when the recorded ``major.minor``
     differs from this interpreter; the restore's interpreter-mismatch
-    warning reports that case.
+    warning reports that case. An unsafe result blocks promotion.
     """
     # The environment directory and its pyvenv.cfg must be real paths
     # inside the cache before anything is read or executed through
@@ -790,40 +829,34 @@ def _verify_and_normalize_env(
     # interpreter.
     env_rejection = _contained_real_path_rejection(env_dir, cache_root)
     if env_rejection:
-        return f"the environment directory {env_rejection}"
+        return _EnvCheckResult(
+            f"the environment directory {env_rejection}", unsafe=True
+        )
     cfg = env_dir / "pyvenv.cfg"
     cfg_rejection = _contained_real_path_rejection(cfg, cache_root)
     if cfg_rejection:
-        return f"pyvenv.cfg {cfg_rejection}"
+        return _EnvCheckResult(f"pyvenv.cfg {cfg_rejection}", unsafe=True)
     values = _read_pyvenv_cfg(cfg)
     version_info = values.get("version_info", "")
     if not version_info or _pyvenv_major_minor(version_info) != current:
         return None
-    home = values.get("home", "")
-    if home:
-        # Python reads pyvenv.cfg's home during path initialization,
-        # before -S or -c take effect, so an untrusted home would be
-        # used even by the probe.
-        home_path = Path(home)
-        if (
-            not home_path.is_absolute()
-            or home_path != Path("/usr")
-            and Path("/usr") not in home_path.parents
-        ):
-            return f"home {home} is not /usr or below /usr"
+    if values.get("home"):
+        home_rejection = _home_rejection(values["home"])
+        if home_rejection:
+            return _EnvCheckResult(home_rejection, unsafe=True)
     interpreter = env_dir / "bin" / "python"
     gate = _interpreter_link_rejection(interpreter, current)
     if gate:
         return gate
     reported, probe_failure = _probe_interpreter(interpreter)
     if probe_failure:
-        return probe_failure
+        return _EnvCheckResult(probe_failure)
     if _pyvenv_major_minor(reported) != current:
-        return f"bin/python reports {reported}, not Python {current}"
+        return _EnvCheckResult(f"bin/python reports {reported}, not Python {current}")
     if "base-executable" in values:
-        base_rejection = _base_executable_rejection(values["base-executable"], reported)
-        if base_rejection:
-            return base_rejection
+        base_result = _base_executable_rejection(values["base-executable"], reported)
+        if base_result:
+            return base_result
     # A real interpreter reports five components, for example
     # ``3.12.4.final.0``; keep major.minor.micro and normalize the tail
     # to the form virtualenv writes.
@@ -831,7 +864,10 @@ def _verify_and_normalize_env(
     if rewritten != version_info and not _rewrite_version_info(
         env_dir, rewritten, cache_root
     ):
-        return f"the environment or its pyvenv.cfg resolves outside {cache_root}"
+        return _EnvCheckResult(
+            f"the environment or its pyvenv.cfg resolves outside {cache_root}",
+            unsafe=True,
+        )
     return None
 
 
@@ -848,22 +884,32 @@ def _normalize_pyvenv_patch_versions(cache_root: Path) -> list[tuple[Path, str]]
     line is rewritten to the reported ``major.minor.micro`` followed by
     ``.final.0``, the form virtualenv writes. Running this before the
     promotion means a concurrent ``lint.py`` never sees unrepaired
-    metadata. Returns the environments that could not be verified, as
-    ``(path relative to *cache_root*, reason)`` pairs; pre-commit may
-    try to reinstall those. An environment whose ``pyvenv.cfg`` cannot
-    be read or rewritten is reported the same way; the restore itself
-    still succeeds. No other metadata is changed.
+    metadata. Returns ``(unsafe, unverified)`` as ``(path relative to
+    *cache_root*, reason)`` pairs. Unsafe environments are
+    archive-controlled escapes and must block the promotion; unverified
+    ones may need a reinstall, which pre-commit attempts itself. An
+    environment whose ``pyvenv.cfg`` cannot be read or rewritten for a
+    non-containment reason counts as unverified. No other metadata is
+    changed.
     """
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    unsafe: list[tuple[Path, str]] = []
     unverified: list[tuple[Path, str]] = []
     for env_dir in _python_env_dirs(cache_root):
         try:
-            reason = _verify_and_normalize_env(env_dir, cache_root, current)
+            result = _verify_and_normalize_env(env_dir, cache_root, current)
         except (OSError, UnicodeDecodeError) as error:
-            reason = f"pyvenv.cfg could not be read or rewritten: {error}"
-        if reason:
-            unverified.append((env_dir.relative_to(cache_root), reason))
-    return unverified
+            result = _EnvCheckResult(
+                f"pyvenv.cfg could not be read or rewritten: {error}"
+            )
+        if result is None:
+            continue
+        entry = (env_dir.relative_to(cache_root), result.reason)
+        if result.unsafe:
+            unsafe.append(entry)
+        else:
+            unverified.append(entry)
+    return unsafe, unverified
 
 
 def _remove_quietly(path: Path) -> None:
@@ -1058,8 +1104,20 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                         )
                         return False
         # Normalize before the promotion, so a concurrent lint.py never
-        # sees unrepaired metadata.
-        unverified = _normalize_pyvenv_patch_versions(staging)
+        # sees unrepaired metadata, and so archive-controlled escapes
+        # can block the promotion.
+        unsafe, unverified = _normalize_pyvenv_patch_versions(staging)
+        if unsafe:
+            listing = "; ".join(
+                f"{pre_commit_home / env} ({reason})" for env, reason in unsafe
+            )
+            print(
+                f"WARNING: the archive {tarball} holds unsafe python hook "
+                f"environments: {listing}; keeping the tarball and the "
+                f"existing cache.",
+                file=sys.stderr,
+            )
+            return False
         _swap_cache_home(staging, pre_commit_home)
     except (tarfile.TarError, EOFError, OSError, zlib.error) as error:
         print(

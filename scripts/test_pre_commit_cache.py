@@ -615,6 +615,45 @@ class PythonEnvironmentTests(unittest.TestCase):
         self.assertIn("home /tmp/evil is not /usr or below /usr", str(ctx.exception))
         self.assertFalse(tarball.exists())
 
+    def test_home_traversal_is_rejected(self) -> None:
+        # "/usr/../tmp/evil" lexically sits under /usr only through the
+        # ".." component; it must be rejected before resolution.
+        rejection = bootstrap._home_rejection("/usr/../tmp/evil")
+        self.assertIsNotNone(rejection)
+        self.assertIn("home /usr/../tmp/evil contains '..'", rejection)
+
+    def test_home_resolving_outside_usr_is_rejected(self) -> None:
+        original_resolve = Path.resolve
+
+        def resolve_escaping_usr(path):
+            if str(path) == "/usr/linked":
+                return Path("/tmp/evil")
+            return original_resolve(path)
+
+        with patch.object(
+            Path, "resolve", side_effect=resolve_escaping_usr, autospec=True
+        ):
+            rejection = bootstrap._home_rejection("/usr/linked")
+        self.assertIsNotNone(rejection)
+        self.assertIn("home /usr/linked is not /usr or below /usr", rejection)
+        self.assertIn("resolves to /tmp/evil", rejection)
+
+    def test_home_at_usr_bin_is_accepted_by_the_helper(self) -> None:
+        self.assertIsNone(bootstrap._home_rejection("/usr/bin"))
+
+    def test_home_traversal_rejects_at_warming(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_py_env(cache_home, "py_env", home="/usr/../tmp/evil")
+        with (
+            patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertIn("home /usr/../tmp/evil contains '..'", str(ctx.exception))
+        self.assertFalse(tarball.exists())
+
     def test_home_at_usr_bin_passes(self) -> None:
         root = self._temporary_root()
         cache_home = root / "cache"

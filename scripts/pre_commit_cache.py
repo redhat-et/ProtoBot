@@ -474,6 +474,26 @@ def _read_pyvenv_cfg(env_dir: Path) -> dict[str, str]:
     return values
 
 
+def _home_rejection(home: str) -> str | None:
+    """Return why a ``pyvenv.cfg`` ``home`` value is untrusted, or None.
+
+    Python reads ``home`` during path initialization, before ``-S`` or
+    ``-c`` take effect, so it must name ``/usr`` or a directory below
+    it. Traversal components are rejected outright, and the resolved
+    path must stay below ``/usr``, so a symlink cannot escape.
+    """
+    home_path = Path(home)
+    if not home_path.is_absolute():
+        return f"home {home} is not an absolute path"
+    if ".." in home_path.parts:
+        return f"home {home} contains '..'"
+    resolved = home_path.resolve()
+    if resolved == Path("/usr") or Path("/usr") in resolved.parents:
+        return None
+    detail = f" (resolves to {resolved})" if str(resolved) != home else ""
+    return f"home {home} is not /usr or below /usr{detail}"
+
+
 def _python_env_rejection(env_dir: Path, sandbox_python: str) -> str | None:
     """Return why *env_dir* cannot run in the sandbox, or None when it can.
 
@@ -497,13 +517,9 @@ def _python_env_rejection(env_dir: Path, sandbox_python: str) -> str | None:
         # Python reads home during path initialization, before -S or -c
         # take effect, so the archive cannot point it at an untrusted
         # directory.
-        home_path = Path(home)
-        if (
-            not home_path.is_absolute()
-            or home_path != Path("/usr")
-            and Path("/usr") not in home_path.parents
-        ):
-            return f"home {home} is not /usr or below /usr"
+        rejection = _home_rejection(home)
+        if rejection:
+            return rejection
     if "base-executable" in values:
         base_executable = values["base-executable"]
         if not base_executable:
