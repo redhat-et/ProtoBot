@@ -420,6 +420,11 @@ class _EnvCheckResult(NamedTuple):
     unsafe: bool = False
 
 
+# An environment's path relative to the cache root and the reason it
+# could not be normalized.
+_EnvFinding = tuple[Path, str]
+
+
 def _staged_db_rejection(staging: Path) -> str | None:
     """Return why the staged ``db.db`` cannot be read, or None.
 
@@ -776,15 +781,12 @@ def _probe_interpreter(executable: Path) -> tuple[str | None, str | None]:
     return reported, None
 
 
-def _base_executable_rejection(
-    base_executable: str, reported: str
-) -> _EnvCheckResult | None:
-    """Return why the base executable disagrees with the environment.
+def _base_executable_path_rejection(base_executable: str) -> _EnvCheckResult | None:
+    """Static check: the base executable must name a platform interpreter.
 
     ``base-executable`` comes from the archive's ``pyvenv.cfg``, so a
-    value that does not name a platform interpreter is unsafe; an
-    allowed name that cannot be probed or reports another version is
-    only unverifiable.
+    value that is empty, relative, or not ``/usr/bin/python3`` or
+    ``/usr/bin/python<X.Y>`` is unsafe.
     """
     if not base_executable:
         return _EnvCheckResult("base-executable is empty", unsafe=True)
@@ -801,6 +803,14 @@ def _base_executable_rejection(
             f"/usr/bin/python{current}",
             unsafe=True,
         )
+    return None
+
+
+def _base_executable_version_rejection(
+    base_executable: str, reported: str
+) -> _EnvCheckResult | None:
+    """Dynamic check: the base executable must agree with the environment."""
+    base = Path(base_executable)
     if not base.is_file():
         return _EnvCheckResult(f"base-executable {base_executable} does not exist")
     base_reported, failure = _probe_interpreter(base)
@@ -819,42 +829,61 @@ def _verify_and_normalize_env(
 ) -> _EnvCheckResult | None:
     """Normalize one environment; return a failure result or None.
 
-    Returns None without changes when the recorded ``major.minor``
-    differs from this interpreter; the restore's interpreter-mismatch
-    warning reports that case. An unsafe result blocks promotion.
+    Every static safety check runs before the version gate:
+    pre-commit's own health check executes ``bin/python`` before it
+    compares versions, so a mismatched ``version_info`` must not skip
+    them. After the gate, the dynamic checks probe the interpreters
+    and rewrite the metadata; their failures are unverified, not
+    unsafe. Returns None without changes when the recorded
+    ``major.minor`` differs from this interpreter; the restore's
+    interpreter-mismatch warning reports that case.
     """
-    # The environment directory and its pyvenv.cfg must be real paths
-    # inside the cache before anything is read or executed through
-    # them; only bin/python may be a symlink, and only to a platform
-    # interpreter.
+    # 1. The environment directory must be a real path inside the
+    #    cache; only bin/python may be a symlink, to a platform
+    #    interpreter.
     env_rejection = _contained_real_path_rejection(env_dir, cache_root)
     if env_rejection:
         return _EnvCheckResult(
             f"the environment directory {env_rejection}", unsafe=True
         )
+    # 2. pyvenv.cfg must be a real path inside the cache.
     cfg = env_dir / "pyvenv.cfg"
     cfg_rejection = _contained_real_path_rejection(cfg, cache_root)
     if cfg_rejection:
         return _EnvCheckResult(f"pyvenv.cfg {cfg_rejection}", unsafe=True)
+    # 3. Read pyvenv.cfg; a read error is unverified.
     values = _read_pyvenv_cfg(cfg)
-    version_info = values.get("version_info", "")
-    if not version_info or _pyvenv_major_minor(version_info) != current:
-        return None
+    # 4. home must name /usr or a directory below it; Python reads it
+    #    during path initialization, before -S or -c take effect.
     if values.get("home"):
         home_rejection = _home_rejection(values["home"])
         if home_rejection:
             return _EnvCheckResult(home_rejection, unsafe=True)
+    # 5. bin/python may only be a symlink to a platform interpreter.
     interpreter = env_dir / "bin" / "python"
     gate = _interpreter_link_rejection(interpreter, current)
     if gate:
         return gate
+    # 6. base-executable must statically name a platform interpreter.
+    if "base-executable" in values:
+        base_path_result = _base_executable_path_rejection(values["base-executable"])
+        if base_path_result:
+            return base_path_result
+    # 7. Version gate: a cache built for another interpreter is only
+    #    reported by the interpreter-mismatch warning.
+    version_info = values.get("version_info", "")
+    if not version_info or _pyvenv_major_minor(version_info) != current:
+        return None
+    # 8. Dynamic checks.
     reported, probe_failure = _probe_interpreter(interpreter)
     if probe_failure:
         return _EnvCheckResult(probe_failure)
     if _pyvenv_major_minor(reported) != current:
         return _EnvCheckResult(f"bin/python reports {reported}, not Python {current}")
     if "base-executable" in values:
-        base_result = _base_executable_rejection(values["base-executable"], reported)
+        base_result = _base_executable_version_rejection(
+            values["base-executable"], reported
+        )
         if base_result:
             return base_result
     # A real interpreter reports five components, for example
@@ -871,7 +900,9 @@ def _verify_and_normalize_env(
     return None
 
 
-def _normalize_pyvenv_patch_versions(cache_root: Path) -> list[tuple[Path, str]]:
+def _normalize_pyvenv_patch_versions(
+    cache_root: Path,
+) -> tuple[list[_EnvFinding], list[_EnvFinding]]:
     """Verify and rewrite each python environment's recorded patch version.
 
     The runner cannot know the sandbox image's Python patch version, so
@@ -893,8 +924,8 @@ def _normalize_pyvenv_patch_versions(cache_root: Path) -> list[tuple[Path, str]]
     changed.
     """
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
-    unsafe: list[tuple[Path, str]] = []
-    unverified: list[tuple[Path, str]] = []
+    unsafe: list[_EnvFinding] = []
+    unverified: list[_EnvFinding] = []
     for env_dir in _python_env_dirs(cache_root):
         try:
             result = _verify_and_normalize_env(env_dir, cache_root, current)

@@ -551,6 +551,56 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("py_env-stale", message)
         self.assertIn("reinstall", message)
 
+    def test_mismatched_version_with_regular_file_bin_python_is_rejected(self) -> None:
+        # pre-commit's health check executes bin/python before it
+        # compares versions, so a mismatched version_info must not skip
+        # the static safety checks.
+        other = self._other_interpreter()
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=((f"py_env-python{other}", f"{other}.9.final.0", "9.9.1"),),
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("unsafe python hook environments", message)
+        self.assertIn(f"py_env-python{other}", message)
+        self.assertIn("is not a symlink", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_mismatched_version_with_missing_bin_python_warns_and_promotes(
+        self,
+    ) -> None:
+        other = self._other_interpreter()
+        self._build_tarball(
+            self._config_rows(),
+            env_specs=((f"py_env-python{other}", f"{other}.9.final.0", None),),
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        message = stderr.getvalue()
+        self.assertIn("built for another interpreter", message)
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("is missing", message)
+
     def test_env_reporting_another_major_minor_is_left_unchanged(self) -> None:
         other = self._other_interpreter()
         self._build_tarball(

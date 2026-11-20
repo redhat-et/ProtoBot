@@ -61,6 +61,18 @@ trust. The upstream pre-script content is hash-pinned
 (`UPSTREAM_SCRIPT_SHA256` in `scripts/pre_commit_cache.py`), so a moved
 tag or a changed file fails the run instead of running unverified code.
 
+The archive itself is not signed. The sandbox cannot verify a
+signature: any key or sidecar hash that reaches the sandbox is writable
+by the same user, so it cannot attest to the producer. The copy is
+trustworthy because of how Fullsend v0.56.1 delivers it: each run
+creates a new sandbox with a unique name (`generateSandboxName` in
+`internal/cli/run.go`), the sandbox is deleted after the run
+(`sandbox.Delete` in `internal/cli/run.go`; `--keep-sandbox` is a debug
+flag), and `host_files` copies the tarball during bootstrap, before any
+agent process exists, with `sandbox.UploadFile` installing it through
+`mv -fT` (`internal/sandbox/sandbox.go`), which replaces the destination
+instead of merging into it.
+
 Only the `code` and `fix` harnesses seed the cache. They are the agents
 that commit and run `scripts/lint.py`. The `review`, `triage`, `retro`,
 and `prioritize` harnesses do not seed it.
