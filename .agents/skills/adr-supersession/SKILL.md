@@ -15,7 +15,8 @@ accepted-to-superseded status-line transition paired with an appended
 dated amendment block. The `adr-amendments` local pre-commit hook
 (`scripts/check_adr_amendments.py`) enforces this exact format; a
 transition that does not match every part below is rejected as an
-unauthorized rewrite.
+unauthorized rewrite. The hook enforces only the status line, the marker
+line, and the marker placement; a reviewer must confirm the prose citation.
 
 ## Status-line transition
 
@@ -33,7 +34,8 @@ to exactly:
 
 `ADR-NNNN` is the superseding ADR's number, and the month/year date is
 required — an undated `> Status: **Superseded by ADR-NNNN**` line is
-rejected. No other text may follow the status line on that line.
+rejected. Month names must be full English names. No other text may
+follow the status line on that line.
 
 ## Appended amendment block
 
@@ -48,14 +50,31 @@ architecture documents.>
 ```
 
 The `**[Amended Month Year]**` marker must occupy its own line, with
-nothing else on it. The marker line must not sit inside a fenced
-(` ``` `) code block.
+nothing else on it. Month names must be full English names. The marker
+line must not sit inside a fenced (` ``` `) code block.
 
 ## Worked example
 
-Removal PR R1 (issue #406) will demonstrate this transition on
-`docs/decisions/0003-ears-manager-storage-layout.md` for ADR-0004's
-adoption of ProtoBot V2.
+`docs/decisions/0003-ears-manager-storage-layout.md` demonstrates this
+transition for ADR-0004's adoption of ProtoBot V2. Its header status
+line was updated to:
+
+```text
+> Status: **Superseded by ADR-0004** — November 2026
+```
+
+and the following block was appended after the file's last line:
+
+```text
+**[Amended November 2026]**
+ADR-0004 adopts ProtoBot V2 and deletes `ears-manager` and `.protobot/`
+rather than reworking this storage layout (removal PR R1, tracked in
+issue #406). This ADR's file stays in place per the supersession,
+rename, and deletion lifecycle in `AGENTS.md` Rule 7; only its status
+line changes. See [ADR-0004: Adopt ProtoBot
+V2](0004-adopt-protobot-v2.md) and updated architecture documents
+under `docs/architecture/` for the replacement decision.
+```
 
 ## What stays unauthorized
 

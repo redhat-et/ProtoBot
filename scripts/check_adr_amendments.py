@@ -39,21 +39,25 @@ _MONTH_NAMES = (
 # treated as accepted/superseded (and therefore protected), failing closed
 # even if trailing text or an unrecognized status-line format is present.
 _ACCEPTED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Accepted\*\*",
+    r"^> Status:[ \t]*\*\*Accepted\*\*",
     re.MULTILINE,
 )
 _SUPERSEDED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Superseded by ADR-\d+\*\*",
+    r"^> Status:[ \t]*\*\*Superseded by ADR-\d+\*\*",
     re.MULTILINE,
 )
 # Strict (date required): the only status line an authorized transition may
 # write. Trailing text after the date is never allowed.
 _SUPERSEDED_STATUS_DATED = re.compile(
-    rf"^> Status:\s*\*\*Superseded by ADR-\d+\*\* — (?:{_MONTH_NAMES}) \d{{4}}$",
+    rf"^> Status:[ \t]*\*\*Superseded by ADR-\d+\*\* — (?:{_MONTH_NAMES}) \d{{4}}$",
     re.MULTILINE,
 )
+_AMBIGUOUS_STATUS = re.compile(
+    r"^[ \t]*>[ \t]*status:[ \t]*\*{0,2}(?:Accepted|Superseded\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
 _AMENDMENT_MARKER = re.compile(
-    r"^\*\*\[Amended [A-Z][a-z]+ \d{4}\]\*\*$",
+    rf"^\*\*\[Amended (?:{_MONTH_NAMES}) \d{{4}}\]\*\*$",
     re.MULTILINE,
 )
 _FENCE_DELIMITER = re.compile(r"^(`{3,}|~{3,})")
@@ -89,9 +93,21 @@ def is_protected(text: str) -> bool:
     Protection from in-place rewriting, deletion, and renaming continues
     after an ADR is superseded; only the dated status-line transition
     performed by an authorized supersession is permitted (see
-    ``historical_mutations``).
+    ``historical_mutations``). Non-canonical or ambiguous status headers
+    are also treated as protected (fail closed) and reported as errors.
     """
-    return is_accepted(text) or is_superseded(text)
+    if is_accepted(text) or is_superseded(text):
+        return True
+    header_lines = text.splitlines()[:_HEADER_LINE_LIMIT]
+    fenced = _fenced_code_mask(header_lines)
+    for idx, line in enumerate(header_lines):
+        if not fenced[idx] and _AMBIGUOUS_STATUS.search(line):
+            print(
+                f"ERROR: ambiguous status header: {line.strip()}",
+                file=sys.stderr,
+            )
+            return True
+    return False
 
 
 def _fenced_code_mask(lines: list[str]) -> list[bool]:
@@ -113,17 +129,25 @@ def _fenced_code_mask(lines: list[str]) -> list[bool]:
 
 
 def _accepted_status_index(lines: list[str]) -> int | None:
-    """Return the index of the sole line matching the Accepted status, or None."""
-    matches = [idx for idx, line in enumerate(lines) if _ACCEPTED_STATUS.match(line)]
+    """Return the index of the sole line matching Accepted status in the header, or None."""
+    header_lines = lines[:_HEADER_LINE_LIMIT]
+    fenced = _fenced_code_mask(header_lines)
+    matches = [
+        idx
+        for idx, line in enumerate(header_lines)
+        if not fenced[idx] and _ACCEPTED_STATUS.match(line)
+    ]
     return matches[0] if len(matches) == 1 else None
 
 
 def _dated_superseded_status_index(lines: list[str]) -> int | None:
-    """Return the index of the sole dated Superseded status line, or None."""
+    """Return the index of the sole dated Superseded status line in the header, or None."""
+    header_lines = lines[:_HEADER_LINE_LIMIT]
+    fenced = _fenced_code_mask(header_lines)
     matches = [
         idx
-        for idx, line in enumerate(lines)
-        if _SUPERSEDED_STATUS_DATED.fullmatch(line)
+        for idx, line in enumerate(header_lines)
+        if not fenced[idx] and _SUPERSEDED_STATUS_DATED.fullmatch(line)
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -192,11 +216,13 @@ def _authorized_transition(
 
 
 def _status_line_count(lines: list[str]) -> int:
-    """Return the number of lines matching the Accepted or Superseded status."""
+    """Return the number of lines matching the Accepted or Superseded status outside fences."""
+    fenced = _fenced_code_mask(lines)
     return sum(
         1
-        for line in lines
-        if _ACCEPTED_STATUS.match(line) or _SUPERSEDED_STATUS.match(line)
+        for idx, line in enumerate(lines)
+        if not fenced[idx]
+        and (_ACCEPTED_STATUS.match(line) or _SUPERSEDED_STATUS.match(line))
     )
 
 
@@ -238,8 +264,11 @@ def historical_mutations(
                 head_line = head_idx + 1 if head_idx < j2 else None
                 mutations.append((old_idx + 1, head_line, old_lines[old_idx]))
         elif tag == "insert" and check_extra_status_lines:
+            fenced = _fenced_code_mask(new_lines)
             for idx in range(j1, j2):
                 if authorized is not None and idx == authorized[1]:
+                    continue
+                if fenced[idx]:
                     continue
                 line = new_lines[idx]
                 if _ACCEPTED_STATUS.match(line) or _SUPERSEDED_STATUS.match(line):
@@ -256,14 +285,23 @@ def _git(
     run_env = dict(os.environ)
     if env:
         run_env.update(env)
-    return subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        cwd=str(repo_root),
-        check=False,
-        env=run_env,
-    )
+    try:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(repo_root),
+            check=False,
+            env=run_env,
+        )
+    except UnicodeDecodeError as exc:
+        return subprocess.CompletedProcess(
+            args=["git", *args],
+            returncode=1,
+            stdout="",
+            stderr=f"git decode error: {exc}",
+        )
 
 
 def _relative_to_repo(path: Path, repo_root: Path) -> Path | None:
@@ -511,6 +549,8 @@ def _git_show_blob(
         exists = _git(repo_root, "cat-file", "-e", ref_and_path)
     except FileNotFoundError:
         return None, "git not found on PATH"
+    except UnicodeDecodeError as exc:
+        return None, f"git decode error: {exc}"
     if exists.returncode != 0:
         stderr = exists.stderr.lower()
         if "does not exist in" in stderr or "but not in" in stderr:
@@ -521,6 +561,8 @@ def _git_show_blob(
         shown = _git(repo_root, "show", ref_and_path)
     except FileNotFoundError:
         return None, "git not found on PATH"
+    except UnicodeDecodeError as exc:
+        return None, f"git decode error: {exc}"
     if shown.returncode != 0:
         return None, shown.stderr.strip() or f"git show {ref_and_path} failed"
     return shown.stdout, None
@@ -737,7 +779,7 @@ def check(
                 if nst and stat.S_ISREG(nst.st_mode):
                     try:
                         new_text = new_path.read_text(encoding="utf-8")
-                    except OSError as exc:
+                    except (OSError, UnicodeDecodeError) as exc:
                         print(
                             f"ERROR: {new_path_posix}: cannot read working tree ({type(exc).__name__})",
                             file=sys.stderr,
@@ -767,7 +809,7 @@ def check(
 
         try:
             new_text = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             print(
                 f"ERROR: {rel_posix}: cannot read working tree ({type(exc).__name__})",
                 file=sys.stderr,

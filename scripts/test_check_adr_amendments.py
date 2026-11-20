@@ -208,6 +208,29 @@ Superseded by ADR-0004; see docs/decisions/0004-adopt-protobot-v2.md.
         self.assertTrue(checker.is_protected(self._SUPERSEDED_ADR))
         self.assertFalse(checker.is_protected(_PROPOSED_ADR))
 
+    def test_non_canonical_status_is_protected(self) -> None:
+        """Non-canonical status lines are treated as protected and log an error."""
+        cases = [
+            "# ADR-0010: Legacy\n\n> Status: Accepted — September 2026\n",
+            "# ADR-0010: Legacy\n\n> status: **Accepted** — September 2026\n",
+            "# ADR-0010: Legacy\n\n> STATUS: accepted\n",
+            "# ADR-0010: Legacy\n\n> Status: Superseded by ADR-0004\n",
+            "# ADR-0010: Legacy\n\n> status: **Superseded by ADR-0004**\n",
+        ]
+        for text in cases:
+            with self.subTest(text=text):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    self.assertTrue(checker.is_protected(text))
+                self.assertIn("ERROR: ambiguous status header:", stderr.getvalue())
+
+    def test_missing_status_is_not_protected(self) -> None:
+        """An ADR with no status header is not protected."""
+        body = "# ADR-0010: Note\n\n## Decision\n\nSome note.\n"
+        self.assertFalse(checker.is_accepted(body))
+        self.assertFalse(checker.is_superseded(body))
+        self.assertFalse(checker.is_protected(body))
+
 
 class SupersessionTransitionTests(unittest.TestCase):
     """Cover the authorized accepted-to-superseded status transition."""
@@ -346,6 +369,43 @@ class SupersessionTransitionTests(unittest.TestCase):
         new[6] = "Use JSONL storage instead."
         mutations = checker.historical_mutations(old, new)
         self.assertEqual([(7, 7, "Use one file per record.")], mutations)
+
+    def test_quoted_status_line_in_fenced_code_block_passes(self) -> None:
+        """An amendment quoting a status line in fenced code does not reject transition."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new += [
+            "",
+            "**[Amended November 2026]**",
+            "Superseded by ADR-0004. Prior status was:",
+            "```text",
+            "> Status: **Accepted** — September 2026",
+            "```",
+        ]
+        self.assertEqual([], checker.historical_mutations(self.old, new))
+
+    def test_quoted_superseded_status_in_amendment_fenced_block_passes(self) -> None:
+        """An amendment quoting a superseded status line in fenced code does not reject transition."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new += [
+            "",
+            "**[Amended November 2026]**",
+            "Superseded by ADR-0004. New header looks like:",
+            "```text",
+            "> Status: **Superseded by ADR-0004** — November 2026",
+            "```",
+        ]
+        self.assertEqual([], checker.historical_mutations(self.old, new))
+
+    def test_duplicate_dated_superseded_status_lines_fails(self) -> None:
+        """Duplicate dated superseded lines in header invalidates the transition."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new.insert(
+            self.status_idx + 1,
+            "> Status: **Superseded by ADR-0004** — November 2026",
+        )
+        new += ["", "**[Amended November 2026]**", "Superseded by ADR-0004."]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertTrue(mutations)
 
 
 class PathFilterTests(unittest.TestCase):
@@ -1024,6 +1084,156 @@ class GitRepoCheckTests(unittest.TestCase):
         rc, output = self._check(self.adr_rel.as_posix())
         self.assertEqual(1, rc)
         self.assertIn("was deleted", output)
+
+    def test_superseded_adr_with_no_change_passes(self) -> None:
+        """An unchanged superseded ADR in baseline passes end to end."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            )
+            + "\n**[Amended November 2026]**\nSuperseded by ADR-0004.\n",
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "baseline superseded ADR")
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_superseded_adr_with_amendment_passes(self) -> None:
+        """Appending an amendment to an already-superseded ADR passes end to end."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            )
+            + "\n**[Amended November 2026]**\nSuperseded by ADR-0004.\n",
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "baseline superseded ADR")
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            + "\n**[Amended December 2026]**\nFurther amendment note.\n",
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_proposed_adr_can_be_rewritten_and_deleted(self) -> None:
+        """Proposed ADRs are not locked: rewriting or deleting them passes check."""
+        prop_rel = "docs/decisions/0009-draft.md"
+        path = self.root / prop_rel
+
+        # Rewriting passes
+        path.write_text(
+            _PROPOSED_ADR.replace("A draft decision", "A rewritten draft decision"),
+            encoding="utf-8",
+        )
+        rc, output = self._check(prop_rel)
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+        # Deleting passes
+        path.unlink()
+        rc, output = self._check(prop_rel)
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_missing_status_adr_can_be_rewritten_or_deleted(self) -> None:
+        """An ADR with no status header is not protected and can be changed or removed."""
+        unprotected_rel = "docs/decisions/0020-no-status.md"
+        path = self.root / unprotected_rel
+        path.write_text(
+            "# ADR-0020: Draft\n\n## Decision\n\nDraft text.\n", encoding="utf-8"
+        )
+        _git(self.root, "add", unprotected_rel)
+        _git(self.root, "commit", "--no-gpg-sign", "-m", "add unstatused ADR")
+
+        # Rewrite
+        path.write_text(
+            "# ADR-0020: Draft\n\n## Decision\n\nModified draft text.\n",
+            encoding="utf-8",
+        )
+        rc, output = self._check(unprotected_rel)
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+        # Delete
+        path.unlink()
+        rc, output = self._check(unprotected_rel)
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_deleted_adr_with_non_canonical_status_fails(self) -> None:
+        """Deleting an ADR with non-canonical status header fails closed."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: Accepted — September 2026",
+            ),
+            encoding="utf-8",
+        )
+        _git(
+            self.root,
+            "commit",
+            "--no-gpg-sign",
+            "-am",
+            "baseline non-canonical status",
+        )
+        path.unlink()
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("was deleted", output)
+
+    def test_mutation_diagnostics_report_baseline_and_head_labels(self) -> None:
+        """Verify report_mutations formatting for replaced, deleted, and inserted lines."""
+        buf = io.StringIO()
+        mutations = [
+            (2, 4, "replaced line text"),
+            (7, None, "deleted line text"),
+            (None, 12, "> Status: **Accepted** — September 2026"),
+        ]
+        with contextlib.redirect_stdout(buf):
+            checker._report_mutations("docs/decisions/0001-example.md", mutations)
+        output = buf.getvalue()
+        self.assertIn("baseline line 2 / HEAD line 4: replaced line text", output)
+        self.assertIn(
+            "baseline line 7 (deleted, no corresponding HEAD line): deleted line text",
+            output,
+        )
+        self.assertIn(
+            "HEAD line 12 (no corresponding baseline line): > Status: **Accepted** — September 2026",
+            output,
+        )
+
+    def test_check_reports_deleted_label_for_removed_line(self) -> None:
+        """check() reports baseline line (deleted, no corresponding HEAD line) when line is removed."""
+        path = self.root / self.adr_rel
+        lines = _ACCEPTED_ADR.splitlines()
+        lines.remove("Keep diffs small.")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn(
+            "(deleted, no corresponding HEAD line): Keep diffs small.", output
+        )
+
+    def test_check_reports_inserted_label_for_extra_status_line(self) -> None:
+        """check() reports HEAD line (no corresponding baseline line) when extra status line inserted."""
+        path = self.root / self.adr_rel
+        lines = _ACCEPTED_ADR.splitlines()
+        lines.append("> Status: **Accepted** — October 2026")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn(
+            "(no corresponding baseline line): > Status: **Accepted** — October 2026",
+            output,
+        )
 
 
 class LiveRepoTests(unittest.TestCase):
