@@ -9,7 +9,7 @@ description: >
 
 # ADR Supersession Format
 
-AGENTS.md Rule 7 makes accepted and superseded architecture decision
+`AGENTS.md` Rule 7 makes accepted and superseded architecture decision
 records immutable, with one authorized exception: a dated
 accepted-to-superseded status-line transition paired with an appended
 dated amendment block. The `adr-amendments` local pre-commit hook
@@ -53,8 +53,9 @@ nothing else on it. The marker line must not sit inside a fenced
 
 ## Worked example
 
-`docs/decisions/0003-ears-manager-storage-layout.md` demonstrates this
-transition for ADR-0004's adoption of ProtoBot V2.
+Removal PR R1 (issue #406) will demonstrate this transition on
+`docs/decisions/0003-ears-manager-storage-layout.md` for ADR-0004's
+adoption of ProtoBot V2.
 
 ## What stays unauthorized
 
