@@ -725,17 +725,19 @@ def _rewrite_version_info(env_dir: Path, version_info: str, cache_root: Path) ->
 
 
 def _interpreter_link_rejection(
-    interpreter: Path, current: str
+    interpreter: Path, current: str, recorded: str
 ) -> _EnvCheckResult | None:
     """Return why *interpreter* must not be executed, or None.
 
     The environment's ``bin/python`` comes from the archive, so it is
-    only executed when it is a symlink to a platform interpreter:
-    ``/usr/bin/python3``, ``/usr/bin/python<current>``, or the running
-    interpreter itself. A missing interpreter is only unverifiable; a
+    only executed when it is a symlink to a platform interpreter: the
+    running interpreter, ``/usr/bin/python3``, or ``/usr/bin/python<X.Y>``
+    for the running interpreter or the version the environment
+    records — a cache built for another interpreter still names a
+    platform binary. A missing interpreter is only unverifiable; a
     link to anything else is unsafe.
     """
-    if not interpreter.exists() and not interpreter.is_symlink():
+    if not os.path.lexists(interpreter):
         return _EnvCheckResult(f"bin/python {interpreter} is missing")
     if not interpreter.is_symlink():
         return _EnvCheckResult(
@@ -744,11 +746,12 @@ def _interpreter_link_rejection(
     target = interpreter.resolve()
     if target == Path(sys.executable).resolve():
         return None
-    allowed_names = {"python3", f"python{current}"}
+    allowed_names = {"python3", f"python{current}", f"python{recorded}"}
     if target.parent != Path("/usr/bin") or target.name not in allowed_names:
         return _EnvCheckResult(
             f"bin/python resolves to {target}, not /usr/bin/python3, "
-            f"/usr/bin/python{current}, or the running interpreter",
+            f"/usr/bin/python{current}, /usr/bin/python{recorded}, or the "
+            f"running interpreter",
             unsafe=True,
         )
     return None
@@ -781,26 +784,30 @@ def _probe_interpreter(executable: Path) -> tuple[str | None, str | None]:
     return reported, None
 
 
-def _base_executable_path_rejection(base_executable: str) -> _EnvCheckResult | None:
+def _base_executable_path_rejection(
+    base_executable: str, current: str, recorded: str
+) -> _EnvCheckResult | None:
     """Static check: the base executable must name a platform interpreter.
 
     ``base-executable`` comes from the archive's ``pyvenv.cfg``, so a
-    value that is empty, relative, or not ``/usr/bin/python3`` or
-    ``/usr/bin/python<X.Y>`` is unsafe.
+    value that is empty, relative, or not ``/usr/bin/python3``,
+    ``/usr/bin/python<current>``, or ``/usr/bin/python<recorded>`` is
+    unsafe. The file need not exist for this check; the dynamic check
+    handles existence and version agreement once the version gate has
+    passed.
     """
     if not base_executable:
         return _EnvCheckResult("base-executable is empty", unsafe=True)
     base = Path(base_executable)
-    current = f"{sys.version_info.major}.{sys.version_info.minor}"
-    allowed_names = {"python3", f"python{current}"}
+    allowed_names = {"python3", f"python{current}", f"python{recorded}"}
     if (
         not base.is_absolute()
         or base.parent != Path("/usr/bin")
         or base.name not in allowed_names
     ):
         return _EnvCheckResult(
-            f"base-executable {base_executable} is not /usr/bin/python3 or "
-            f"/usr/bin/python{current}",
+            f"base-executable {base_executable} is not /usr/bin/python3, "
+            f"/usr/bin/python{current}, or /usr/bin/python{recorded}",
             unsafe=True,
         )
     return None
@@ -853,6 +860,11 @@ def _verify_and_normalize_env(
         return _EnvCheckResult(f"pyvenv.cfg {cfg_rejection}", unsafe=True)
     # 3. Read pyvenv.cfg; a read error is unverified.
     values = _read_pyvenv_cfg(cfg)
+    version_info = values.get("version_info", "")
+    # The recorded interpreter names a platform binary too: a cache
+    # built for another interpreter must reach the version gate, not
+    # fail the static checks.
+    recorded = _pyvenv_major_minor(version_info) or current
     # 4. home must name /usr or a directory below it; Python reads it
     #    during path initialization, before -S or -c take effect.
     if values.get("home"):
@@ -861,17 +873,18 @@ def _verify_and_normalize_env(
             return _EnvCheckResult(home_rejection, unsafe=True)
     # 5. bin/python may only be a symlink to a platform interpreter.
     interpreter = env_dir / "bin" / "python"
-    gate = _interpreter_link_rejection(interpreter, current)
+    gate = _interpreter_link_rejection(interpreter, current, recorded)
     if gate:
         return gate
     # 6. base-executable must statically name a platform interpreter.
     if "base-executable" in values:
-        base_path_result = _base_executable_path_rejection(values["base-executable"])
+        base_path_result = _base_executable_path_rejection(
+            values["base-executable"], current, recorded
+        )
         if base_path_result:
             return base_path_result
     # 7. Version gate: a cache built for another interpreter is only
     #    reported by the interpreter-mismatch warning.
-    version_info = values.get("version_info", "")
     if not version_info or _pyvenv_major_minor(version_info) != current:
         return None
     # 8. Dynamic checks.

@@ -601,6 +601,101 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("could not normalize the version_info", message)
         self.assertIn("is missing", message)
 
+    def test_other_version_platform_interpreters_warn_and_promote(self) -> None:
+        # A cache built for another interpreter names platform binaries
+        # for that version; the static checks must accept them so the
+        # version gate can warn instead of rejecting the archive.
+        other = self._other_interpreter()
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        _make_db(packed / "db.db", rows, paths)
+        env_dir = packed / "repodir" / f"py_env-python{other}"
+        (env_dir / "bin").mkdir(parents=True)
+        cfg_content = (
+            f"version_info = {other}.9.final.0\n"
+            f"base-executable = /usr/bin/python{other}\n"
+        )
+        (env_dir / "pyvenv.cfg").write_text(cfg_content, encoding="utf-8")
+        # The symlink target need not exist: os.path.lexists treats the
+        # link as present and Path.resolve returns the lexical target,
+        # so the static check still sees the platform name.
+        os.symlink(f"/usr/bin/python{other}", env_dir / "bin" / "python")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        message = stderr.getvalue()
+        self.assertIn("built for another interpreter", message)
+        self.assertNotIn("unsafe python hook environments", message)
+        self.assertNotIn("could not normalize the version_info", message)
+        # Nothing was rewritten: pyvenv.cfg is byte-identical.
+        self.assertEqual(
+            cfg_content,
+            (self.home / "repodir" / f"py_env-python{other}" / "pyvenv.cfg").read_text(
+                encoding="utf-8"
+            ),
+        )
+
+    def test_mismatched_version_with_untrusted_home_is_rejected(self) -> None:
+        other = self._other_interpreter()
+        self._build_env_cfg_tarball(
+            [f"version_info = {other}.9.final.0", "home = /tmp/evil"]
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("unsafe python hook environments", message)
+        self.assertIn("home /tmp/evil is not /usr or below /usr", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_mismatched_version_with_foreign_base_executable_is_rejected(self) -> None:
+        other = self._other_interpreter()
+        self._build_env_cfg_tarball(
+            [f"version_info = {other}.9.final.0", "base-executable = /opt/python3"]
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("unsafe python hook environments", message)
+        self.assertIn("base-executable /opt/python3", message)
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
     def test_env_reporting_another_major_minor_is_left_unchanged(self) -> None:
         other = self._other_interpreter()
         self._build_tarball(
