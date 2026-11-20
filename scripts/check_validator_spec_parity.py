@@ -4,7 +4,8 @@
 Used as the ``validator-spec-parity`` local pre-commit hook (and via
 ``scripts/lint.py``). Every exported ``Code*`` diagnostic constant under
 ``validator/internal/`` must appear in ``validator/README.md`` and be
-listed in ``docs/architecture/ProtoBotV2.md``. Raw string literals in
+listed in ``docs/architecture/ProtoBotV2.md`` and in the registered
+specification artifact ``docs/architecture.md``. Raw string literals in
 ``validator/internal/specvalidation/`` that duplicate an exported
 ``Code*`` value are also rejected.
 """
@@ -22,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR_INTERNAL = Path("validator") / "internal"
 README_RELATIVE = Path("validator") / "README.md"
 SPEC_RELATIVE = Path("docs") / "architecture" / "ProtoBotV2.md"
+ARCH_SPEC_RELATIVE = Path("docs") / "architecture.md"
 SPECVALIDATION_DIR = VALIDATOR_INTERNAL / "specvalidation"
 
 _CODE_VALUE = r"[a-z0-9]+(?:_[a-z0-9]+)*\.[a-z0-9]+(?:_[a-z0-9]+)*"
@@ -35,8 +37,8 @@ _POTENTIAL_CODE_ASSIGN = re.compile(
 _LINE_COMMENT = re.compile(r"^\s*//")
 _STRING_LIT = re.compile(r"`[^`]*`|\"(?:[^\"\\]|\\.)*\"")
 _BACKTICK_CODE = re.compile(r"`(" + _CODE_VALUE + r")`")
-_VALIDATOR_HEADING = re.compile(r"(?m)^#{2,3}[ \t]+Validator[ \t]*$")
-_NEXT_HEADING = re.compile(r"(?m)^#{1,3}[ \t]+")
+_VALIDATOR_HEADING = re.compile(r"(?m)^(?P<hashes>#{2,4})[ \t]+Validator[ \t]*$")
+_ANY_HEADING = re.compile(r"(?m)^(?P<hashes>#{1,6})[ \t]+")
 
 
 class ValidatorSpecParityError(ValueError):
@@ -70,6 +72,7 @@ class ParityReport:
     constants: tuple[CodeConstant, ...]
     missing_in_readme: tuple[str, ...]
     missing_in_protobot_v2: tuple[str, ...]
+    missing_in_architecture_md: tuple[str, ...]
     raw_string_duplicates: tuple[RawStringDuplicate, ...]
     errors: tuple[str, ...]
 
@@ -79,6 +82,7 @@ class ParityReport:
         return not (
             self.missing_in_readme
             or self.missing_in_protobot_v2
+            or self.missing_in_architecture_md
             or self.raw_string_duplicates
             or self.errors
         )
@@ -162,10 +166,11 @@ def extract_validator_section(text: str) -> str:
     if match is None:
         return ""
     start = match.end()
-    nxt = _NEXT_HEADING.search(text, start)
-    if nxt is None:
-        return text[start:]
-    return text[start : nxt.start()]
+    level = len(match.group("hashes"))
+    for nxt in _ANY_HEADING.finditer(text, start):
+        if len(nxt.group("hashes")) <= level:
+            return text[start : nxt.start()]
+    return text[start:]
 
 
 def spec_listing_text(text: str) -> str:
@@ -317,7 +322,7 @@ def collect_raw_string_duplicates(
 
 
 def evaluate(repo_root: Path) -> ParityReport:
-    """Compare declared diagnostic constants against README and ProtoBotV2.md."""
+    """Compare declared diagnostic constants against README and spec documents."""
     constants, errors = collect_constants(repo_root)
     if not constants:
         errors.append(
@@ -340,10 +345,19 @@ def evaluate(repo_root: Path) -> ParityReport:
     except ValidatorSpecParityError as error:
         errors.append(str(error))
 
+    arch_text = ""
+    arch_path = repo_root / ARCH_SPEC_RELATIVE
+    try:
+        arch_text = _read_text(arch_path)
+    except ValidatorSpecParityError as error:
+        errors.append(str(error))
+
     documented = extract_documented_codes(readme_text)
     listing = spec_listing_text(spec_text)
+    arch_listing = spec_listing_text(arch_text)
     missing_readme: list[str] = []
     missing_spec: list[str] = []
+    missing_arch: list[str] = []
     seen: set[str] = set()
     for constant in constants:
         if constant.value in seen:
@@ -353,10 +367,13 @@ def evaluate(repo_root: Path) -> ParityReport:
             missing_readme.append(constant.value)
         if not is_listed_in_spec(constant.value, listing):
             missing_spec.append(constant.value)
+        if not is_listed_in_spec(constant.value, arch_listing):
+            missing_arch.append(constant.value)
     return ParityReport(
         constants=tuple(constants),
         missing_in_readme=tuple(missing_readme),
         missing_in_protobot_v2=tuple(missing_spec),
+        missing_in_architecture_md=tuple(missing_arch),
         raw_string_duplicates=tuple(duplicates),
         errors=tuple(errors),
     )
@@ -386,6 +403,15 @@ def format_report(report: ParityReport) -> list[str]:
             "ERROR: diagnostic code "
             f"{code}{suffix} is not listed in {SPEC_RELATIVE.as_posix()}"
         )
+    for code in report.missing_in_architecture_md:
+        where = ", ".join(locations.get(code, []))
+        suffix = f" ({where})" if where else ""
+        lines.append(
+            "ERROR: diagnostic code "
+            f"{code}{suffix} is not listed in {ARCH_SPEC_RELATIVE.as_posix()}; "
+            "update it with `ears-manager artifact put` in an active change "
+            "set (AGENTS.md Rules 5 and 6), never by hand"
+        )
     for duplicate in report.raw_string_duplicates:
         lines.append(
             "ERROR: raw diagnostic string "
@@ -396,12 +422,13 @@ def format_report(report: ParityReport) -> list[str]:
 
 
 def check(repo_root: Path = REPO_ROOT) -> int:
-    """Return 0 when diagnostic constants match README and ProtoBotV2.md."""
+    """Return 0 when diagnostic constants match README and spec documents."""
     report = evaluate(repo_root)
     if report.ok:
         print(
             f"Validated {len(report.constants)} diagnostic code(s) against "
-            f"{README_RELATIVE.as_posix()} and {SPEC_RELATIVE.as_posix()}."
+            f"{README_RELATIVE.as_posix()}, {SPEC_RELATIVE.as_posix()}, and "
+            f"{ARCH_SPEC_RELATIVE.as_posix()}."
         )
         return 0
     for line in format_report(report):
