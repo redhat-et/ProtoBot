@@ -85,6 +85,69 @@ func TestCheckBaseRefComparesArtifactDeltaWithMergeBase(t *testing.T) {
 	assertSuccess(t, code, stdout, stderr)
 }
 
+// On pull_request, actions/checkout checks out GitHub's synthetic merge
+// commit of the PR head into the default-branch tip, not the PR head. The
+// CI spec job therefore pins its checkout to the PR head; this test proves
+// that pinning is required.
+func TestCheckBaseRefSyntheticMergeCommitRequiresPullRequestHead(t *testing.T) {
+	root := newFixtureProject(t)
+	t.Chdir(root)
+
+	// The pull request forks from the default branch and adds an
+	// unrelated commit.
+	git(t, root, "checkout", "-b", "pr/fork")
+	forkPoint := gitOutput(t, root, "rev-parse", "refs/heads/main")
+	writeTestFile(t, root, "unrelated.txt", "branch-local change\n")
+	commitAll(t, root, "unrelated branch change")
+	prHead := gitOutput(t, root, "rev-parse", "pr/fork")
+
+	// The default branch advances with a registered artifact change
+	// after the fork.
+	git(t, root, "checkout", "main")
+	writeArtifactContent(t, root, "vision", []byte("# Advanced Fixture Vision\n"))
+	commitAll(t, root, "advance the registered vision artifact")
+	advancedMain := gitOutput(t, root, "rev-parse", "refs/heads/main")
+
+	// Model the synthetic merge commit: its parents are the
+	// default-branch tip and the PR head, and the local default branch
+	// stays at the fetched tip, as the workflow pins it.
+	git(t, root, "checkout", "--detach", advancedMain)
+	git(t, root, "merge", "--no-ff", "-m", "synthetic pull request merge", "pr/fork")
+	git(t, root, "update-ref", "refs/heads/main", advancedMain)
+	parents := strings.Fields(gitOutput(t, root, "rev-list", "--parents", "-n", "1", "HEAD"))
+	if len(parents) != 3 || parents[1] != advancedMain || parents[2] != prHead {
+		t.Fatalf("synthetic merge commit parents = %v, want the default tip %s and the PR head %s", parents, advancedMain, prHead)
+	}
+
+	// On the synthetic merge commit, the merge base with the default
+	// branch is the default-branch tip itself, so the option degenerates
+	// to a no-op there.
+	mergeBase := gitOutput(t, root, "merge-base", "refs/heads/main", "HEAD")
+	if mergeBase != advancedMain {
+		t.Fatalf("merge base on the synthetic merge commit = %s, want the default-branch tip %s", mergeBase, advancedMain)
+	}
+	code, stdout, stderr := runCLI(nil, "--output", "json", "check", "--base-ref", mergeBase)
+	assertSuccess(t, code, stdout, stderr)
+
+	// Keeping the synthetic merge commit and passing the fork point
+	// instead blames the pull request for the default branch's artifact
+	// change, so only changing the base expression cannot fix the job.
+	code, stdout, stderr = runCLI(nil, "--output", "json", "check", "--base-ref", forkPoint)
+	assertValidationFailure(t, code, stdout, stderr)
+	assertArtifactDiagnostic(t, stdout, "artifact.operation_missing", "vision")
+
+	// The workflow shape: HEAD detached at the PR head, with the local
+	// default branch still at the fetched tip. The merge base returns to
+	// the fork point and the check passes.
+	git(t, root, "checkout", "--detach", "pr/fork")
+	base := gitOutput(t, root, "merge-base", "refs/heads/main", "HEAD")
+	if base != forkPoint {
+		t.Fatalf("merge base on the PR head = %s, want the fork point %s", base, forkPoint)
+	}
+	code, stdout, stderr = runCLI(nil, "--output", "json", "check", "--base-ref", base)
+	assertSuccess(t, code, stdout, stderr)
+}
+
 func TestCheckBaseRefStillRequiresOperationForGenuineArtifactEdit(t *testing.T) {
 	root := newFixtureProject(t)
 	t.Chdir(root)

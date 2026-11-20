@@ -666,12 +666,18 @@ report is a view of the Finding Ledger.
   default branch, so that `check` can tell approved from proposed change sets
   ([approval rule](ears-manager-cli.md#approved-and-proposed-change-sets)) and
   can compare each proposed `base_commit` with that fetched head
-  ([`check`](ears-manager-cli.md#check)). For the artifact-operation delta
-  only, CI computes the merge base of the fetched default branch and `HEAD`
-  and passes it to `check --base-ref FULL-SHA`. Computing the merge base
-  fails closed when the merge base cannot be resolved. Change-set approval
-  classification and proposed-base freshness always evaluate against the
-  fetched default-branch tip.
+  ([`check`](ears-manager-cli.md#check)).
+  On `pull_request` events, CI checks out the pull request head before the
+  artifact check, not the synthetic merge commit, because the merge commit's
+  merge base with the default branch is the default tip and would make
+  `--base-ref` a no-op. On `push` and `merge_group` events, the checked-out
+  commit is the pushed or merge-group commit.
+  For the artifact-operation delta only, CI computes the merge base of the
+  fetched default branch and the checked-out commit and passes it to
+  `check --base-ref FULL-SHA`. Computing the merge base fails closed when the
+  merge base cannot be resolved. Change-set approval classification and
+  proposed-base freshness always evaluate against the fetched default-branch
+  tip.
 - Path ownership in CI rejects a change that edits files outside
   the owning component's paths.
 - Branch protection on the default branch requires the pull
