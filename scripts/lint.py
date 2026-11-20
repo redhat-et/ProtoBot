@@ -289,9 +289,17 @@ def _missing_local_dependency_environments(
     config: dict[str, Any],
     cached_paths: dict[tuple[str, str], object],
     pre_commit_home: Path,
+    *,
+    repository_root: Path | None = None,
 ) -> list[tuple[str, tuple[str, ...]]]:
-    """Return local hooks whose dependency environment is not installed."""
+    """Return local hooks whose dependency environment is not installed.
+
+    *repository_root* defaults to *pre_commit_home*. Callers validating a
+    staged archive pass the staging directory while keeping
+    *pre_commit_home* as the root against which stored paths are interpreted.
+    """
     missing = []
+    environment_root = repository_root or pre_commit_home
     for hook_id, dependencies in _configured_local_dependencies(config):
         repo_name = f"{_LOCAL_REPO}:{','.join(dependencies)}"
         stored_path = cached_paths.get((repo_name, _LOCAL_REPO_VERSION))
@@ -300,7 +308,7 @@ def _missing_local_dependency_environments(
         if relative_path is None:
             missing.append((hook_id, dependencies))
             continue
-        repo_path = pre_commit_home / relative_path
+        repo_path = environment_root / relative_path
         if environments:
             installed = all(
                 _local_dependency_environment_is_installed(
@@ -1167,7 +1175,11 @@ def _format_revisions(revisions: set[tuple[str, str]]) -> str:
     return ", ".join(f"{repo} @ {rev}" for repo, rev in sorted(revisions))
 
 
-def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> bool:
+def _restore_cache(
+    pre_commit_home: Path,
+    required: set[tuple[str, str]],
+    config: dict[str, Any],
+) -> bool:
     """Restore ``PRE_COMMIT_HOME`` from the bootstrap tarball, if present.
 
     Extraction goes to a staging directory beside ``pre_commit_home``,
@@ -1176,7 +1188,10 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
     live cache already holds. A partial cache must never publish a
     ``db.db`` that lists revisions whose files are missing; a failed
     restore leaves ``pre_commit_home`` untouched so a later run
-    retries. The tarball itself is left in place;
+    retries. Every configured local hook dependency environment in the
+    archive is also validated before promotion, so a complete-looking
+    archive cannot replace a usable live cache with one that the next
+    offline pre-flight would reject. The tarball itself is left in place;
     ``_preflight_with_restore`` deletes it only after the restored
     cache passes the pre-flight. A corrupt or unreadable tarball only
     warns; the pre-flight then reports its usual missing-revision
@@ -1303,6 +1318,24 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                             file=sys.stderr,
                         )
                         return False
+        missing_local = _missing_local_dependency_environments(
+            config,
+            staged_paths,
+            pre_commit_home,
+            repository_root=staging,
+        )
+        if missing_local:
+            details = "; ".join(
+                f"{hook_id}: {', '.join(dependencies)}"
+                for hook_id, dependencies in missing_local
+            )
+            print(
+                f"WARNING: the archive {tarball} cannot provide the configured "
+                f"local hook dependency environment(s) {details}; keeping the "
+                f"tarball and the existing cache.",
+                file=sys.stderr,
+            )
+            return False
         # Normalize before the promotion, so a concurrent lint.py never
         # sees unrepaired metadata, and so archive-controlled escapes
         # can block the promotion.
@@ -1387,7 +1420,7 @@ def _preflight_with_restore(
             config, cached_paths, pre_commit_home
         )
         if (missing_repos or missing_local) and _restore_cache(
-            pre_commit_home, set(configured)
+            pre_commit_home, set(configured), config
         ):
             rc = _preflight(online, pre_commit_home, config)
             if rc == 0:

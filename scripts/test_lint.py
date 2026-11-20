@@ -661,6 +661,50 @@ class PreflightRestoreTests(unittest.TestCase):
         )
         self.assertEqual("", stderr.getvalue())
 
+    def test_incomplete_local_environment_does_not_replace_live_cache(
+        self,
+    ) -> None:
+        local_dep = ("local:pyyaml==6.0.3", "1")
+        _make_db(self.home / "db.db", self._config_rows())
+        self._build_tarball(
+            [*self._config_rows(), local_dep],
+            stored_paths={local_dep: str(self.home / "repo-local")},
+        )
+        packed = self.root / "packed"
+        (packed / "repo-local").mkdir()
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        config = {
+            "repos": [
+                *_CONFIG_TWO_REMOTE_ONE_LOCAL["repos"],
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "dependency-hook",
+                            "language": "python",
+                            "additional_dependencies": ["pyyaml==6.0.3"],
+                        }
+                    ],
+                },
+            ]
+        }
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(False, self.home, config)
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("cannot provide the configured local hook dependency", message)
+        self.assertIn("dependency-hook: pyyaml==6.0.3", message)
+        self.assertNotIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
+        self.assertEqual(set(self._config_rows()), checker._cached_repos(self.home))
+
     def test_no_tarball_keeps_the_existing_error(self) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
