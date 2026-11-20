@@ -262,7 +262,7 @@ class PreflightRestoreTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
-        self.root = Path(temporary_directory.name)
+        self.root = Path(temporary_directory.name).resolve()
         self.home = self.root / "cache"
         self.tarball = self.root / "pre-commit-cache.tar.gz"
         env_patcher = patch.dict(
@@ -783,7 +783,7 @@ class PreflightRestoreTests(unittest.TestCase):
         message = stderr.getvalue()
         self.assertIn("could not normalize the version_info", message)
         self.assertIn("py_env-linked", message)
-        self.assertIn("resolves outside", message)
+        self.assertIn("is a symlink", message)
         live_cfg = self.home / "repodir" / "py_env-linked" / "pyvenv.cfg"
         self.assertTrue(live_cfg.is_symlink())
 
@@ -1009,21 +1009,32 @@ class PreflightRestoreTests(unittest.TestCase):
         with tarfile.open(self.tarball, "w:gz") as tar:
             for path in sorted(packed.rglob("*")):
                 tar.add(path, arcname=path.relative_to(packed), recursive=False)
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with (
-            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
-            contextlib.redirect_stdout(stdout),
-            contextlib.redirect_stderr(stderr),
+
+        original_probe = checker._probe_interpreter
+
+        def probe_refusing_escaped_env(executable):
+            if "py_env-escaped" in str(executable):
+                raise AssertionError("the escaped environment was executed")
+            return original_probe(executable)
+
+        with patch.object(
+            checker, "_probe_interpreter", side_effect=probe_refusing_escaped_env
         ):
-            rc = checker._preflight_with_restore(
-                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
-            )
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
         self.assertEqual(0, rc)
         self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
         message = stderr.getvalue()
         self.assertIn("could not normalize the version_info", message)
         self.assertIn("py_env-escaped", message)
-        self.assertIn("resolves outside", message)
+        self.assertIn("is a symlink", message)
         # The external pyvenv.cfg is unchanged.
         self.assertEqual(
             f"version_info = {self._stale_patch_version()}\n",
@@ -1329,6 +1340,150 @@ class PreflightRestoreTests(unittest.TestCase):
         # The promoted cache holds the retained environment under the
         # staged row's directory.
         self.assertTrue((self.home / "staged-local" / "py_env-python3.12").is_dir())
+
+    def test_staged_repository_symlink_is_rejected(self) -> None:
+        # A staged repository directory that is a symlink to an outside
+        # directory with a valid manifest must be rejected; is_dir()
+        # would follow it.
+        outside_repo = self.root / "outside-repo"
+        outside_repo.mkdir()
+        (outside_repo / ".pre-commit-hooks.yaml").write_text(
+            "hooks: []\n", encoding="utf-8"
+        )
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows[1:], start=1):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        # foo's staged repository directory is a symlink outside.
+        os.symlink(outside_repo, packed / "repo0")
+        paths[rows[0]] = str(self.home / "repo0")
+        _make_db(packed / "db.db", rows, paths)
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("https://example.invalid/foo @ aaaa", message)
+        self.assertIn("repository directory", message)
+        self.assertIn("is a symlink", message)
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def test_staged_db_symlink_is_rejected(self) -> None:
+        # A db.db that is a symlink must not be read.
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        outside_db = self.root / "outside-db.db"
+        _make_db(outside_db, rows, paths)
+        _make_db(packed / "db.real", rows, paths)
+        os.symlink(outside_db, packed / "db.db")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(1, rc)
+        message = stderr.getvalue()
+        self.assertIn("db.db", message)
+        self.assertIn("is a symlink", message)
+        self.assertTrue(self.tarball.exists())
+        self.assertFalse((self.home / "db.db").exists())
+
+    def _build_env_cfg_tarball(self, cfg_lines: list[str]) -> None:
+        """Archive whose default environment's pyvenv.cfg holds *cfg_lines*."""
+        rows = self._config_rows()
+        packed = self.root / "packed"
+        paths = {}
+        for index, row in enumerate(rows):
+            repo_dir = packed / f"repo{index}"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".pre-commit-hooks.yaml").write_text(
+                "hooks: []\n", encoding="utf-8"
+            )
+            paths[row] = str(self.home / f"repo{index}")
+        _make_db(packed / "db.db", rows, paths)
+        env_dir = packed / "repodir" / f"py_env-python{self._current_interpreter()}"
+        (env_dir / "bin").mkdir(parents=True)
+        (env_dir / "pyvenv.cfg").write_text(
+            "\n".join(cfg_lines) + "\n", encoding="utf-8"
+        )
+        os.symlink(sys.executable, env_dir / "bin" / "python")
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+
+    def test_home_outside_usr_is_reported_and_not_probed(self) -> None:
+        # Python reads pyvenv.cfg's home during path initialization,
+        # before -S takes effect, so an untrusted home must stop the
+        # probe.
+        self._build_env_cfg_tarball(
+            [f"version_info = {self._stale_patch_version()}", "home = /tmp/evil"]
+        )
+
+        def probe_refusing_evil_home(executable):
+            raise AssertionError("the environment with an untrusted home was probed")
+
+        with patch.object(
+            checker, "_probe_interpreter", side_effect=probe_refusing_evil_home
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                rc = checker._preflight_with_restore(
+                    False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+                )
+        self.assertEqual(0, rc)
+        message = stderr.getvalue()
+        self.assertIn("could not normalize the version_info", message)
+        self.assertIn("home /tmp/evil is not /usr or below /usr", message)
+
+    def test_home_at_usr_bin_passes(self) -> None:
+        self._build_env_cfg_tarball(
+            [f"version_info = {self._stale_patch_version()}", "home = /usr/bin"]
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_TWO_REMOTE_ONE_LOCAL
+            )
+        self.assertEqual(0, rc)
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+        self.assertEqual("", stderr.getvalue())
 
     def test_blob_stored_path_is_rejected(self) -> None:
         # A BLOB in the path column must produce a normal rejection,
@@ -1719,7 +1874,7 @@ class SwapCacheHomeTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
-        self.root = Path(temporary_directory.name)
+        self.root = Path(temporary_directory.name).resolve()
         self.home = self.root / "cache"
 
     def _seed_live_cache(self) -> None:
@@ -1837,7 +1992,7 @@ class ChangedFilesTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
-        self.root = Path(temporary_directory.name)
+        self.root = Path(temporary_directory.name).resolve()
         _init_repo(self.root)
         (self.root / "committed.txt").write_text("one\n", encoding="utf-8")
         _git(self.root, "add", "committed.txt")
@@ -2033,7 +2188,7 @@ class MainCheckParityTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
-        self.root = Path(temporary_directory.name)
+        self.root = Path(temporary_directory.name).resolve()
         self.home = self.root / "cache"
         # Pin the bootstrap tarball to a path that does not exist, so a
         # tarball left on the host cannot change these cases.

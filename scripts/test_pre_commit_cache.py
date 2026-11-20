@@ -501,12 +501,15 @@ class PythonEnvironmentTests(unittest.TestCase):
         repo: str = "repodir",
         version_info: str = "3.12.4.final.0",
         base_executable: str | None = "/usr/bin/python3",
+        home: str | None = None,
     ) -> Path:
         env_dir = cache_home / repo / name
         env_dir.mkdir(parents=True, exist_ok=True)
         lines = [f"version_info = {version_info}"]
         if base_executable is not None:
             lines.append(f"base-executable = {base_executable}")
+        if home is not None:
+            lines.append(f"home = {home}")
         (env_dir / "pyvenv.cfg").write_text("\n".join(lines) + "\n", encoding="utf-8")
         return env_dir
 
@@ -596,6 +599,39 @@ class PythonEnvironmentTests(unittest.TestCase):
             bootstrap._warm_cache(cache_home, tarball, "3.12")
         self.assertIn("empty base-executable", str(ctx.exception))
         self.assertFalse(tarball.exists())
+
+    def test_home_outside_usr_rejects(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        # Python reads home during path initialization, before -S or -c
+        # take effect, so the archive cannot point it elsewhere.
+        self._make_py_env(cache_home, "py_env", home="/tmp/evil")
+        with (
+            patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertIn("home /tmp/evil is not /usr or below /usr", str(ctx.exception))
+        self.assertFalse(tarball.exists())
+
+    def test_home_at_usr_bin_passes(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_py_env(cache_home, "py_env", home="/usr/bin")
+        with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertTrue(tarball.is_file())
+
+    def test_absent_home_still_passes(self) -> None:
+        root = self._temporary_root()
+        cache_home = root / "cache"
+        tarball = root / "pc.tar.gz"
+        self._make_py_env(cache_home, "py_env", home=None)
+        with patch.object(bootstrap, "_run", side_effect=_fake_run_succeeds):
+            bootstrap._warm_cache(cache_home, tarball, "3.12")
+        self.assertTrue(tarball.is_file())
 
     def test_base_executable_outside_usr_bin_rejects(self) -> None:
         root = self._temporary_root()

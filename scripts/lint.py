@@ -370,6 +370,45 @@ def _cached_repo_paths(cache_root: Path) -> dict[tuple[str, str], object]:
     return {(repo, ref): path for repo, ref, path in rows}
 
 
+def _contained_real_path_rejection(path: Path, root: Path) -> str | None:
+    """Return why *path* cannot be trusted inside *root*, or None.
+
+    The path must not be a symlink and, when it exists, must resolve
+    inside the resolved *root*, so archive-controlled symlinks cannot
+    redirect reads, writes, or execution outside the root. A missing
+    path is not rejected here; callers report absence where it matters.
+    """
+    if path.is_symlink():
+        return f"{path} is a symlink"
+    if not path.exists():
+        return None
+    resolved = path.resolve()
+    resolved_root = root.resolve()
+    if resolved != resolved_root and resolved_root not in resolved.parents:
+        return f"{path} resolves outside {root}"
+    return None
+
+
+def _staged_db_rejection(staging: Path) -> str | None:
+    """Return why the staged ``db.db`` cannot be read, or None.
+
+    A db.db that exists must be a regular file inside the staging
+    directory; a missing one is left to the coverage check.
+    """
+    db_path = staging / "db.db"
+    if not db_path.exists() and not db_path.is_symlink():
+        return None
+    if db_path.is_symlink():
+        return f"the staged {db_path} is a symlink"
+    if not db_path.is_file():
+        return f"the staged {db_path} is not a regular file"
+    resolved = db_path.resolve()
+    resolved_staging = staging.resolve()
+    if resolved != resolved_staging and resolved_staging not in resolved.parents:
+        return f"the staged {db_path} resolves outside the staging directory"
+    return None
+
+
 def _repository_relative(stored: str, cache_root: Path) -> Path:
     """Return a validated stored path's position inside the cache root."""
     return Path(os.path.normpath(stored)).relative_to(
@@ -457,13 +496,15 @@ def _staged_repository_rejection(
     The stored value must be an absolute path string without ``..``
     components inside the cache root used at build time — ``cache_root``
     under the path contract — and the staged tree must hold that
-    directory. Cloned repositories must also hold a
-    ``.pre-commit-hooks.yaml``, or pre-commit later fails to load the
-    repository's hook manifest; rows for ``local``, ``local:`` keys,
-    and ``meta`` carry no manifest, so *require_manifest* is False for
-    them. Both sides are compared lexically with ``os.path.normpath``:
-    resolving would follow symlinks in the live cache and inspect the
-    wrong staging directory.
+    directory as a real directory: a symlink, or a directory whose
+    resolved path leaves the staging tree, is rejected, because the
+    archive's symlink members may point anywhere. Cloned repositories
+    must also hold a ``.pre-commit-hooks.yaml``, or pre-commit later
+    fails to load the repository's hook manifest; rows for ``local``,
+    ``local:`` keys, and ``meta`` carry no manifest, so
+    *require_manifest* is False for them. Both sides are compared
+    lexically with ``os.path.normpath``: resolving would follow
+    symlinks in the live cache and inspect the wrong staging directory.
     """
     if not isinstance(stored, str) or not stored or not os.path.isabs(stored):
         return f"the stored path {stored!r} is not an absolute path"
@@ -480,10 +521,27 @@ def _staged_repository_rejection(
     ):
         return f"the stored path {stored} is outside the cache root {cache_root}"
     staged_dir = staging / _repository_relative(stored, cache_root)
+    if staged_dir.is_symlink():
+        return f"the repository directory {staged_dir} is a symlink"
     if not staged_dir.is_dir():
         return f"the repository directory {staged_dir} is missing from the archive"
-    if require_manifest and not (staged_dir / ".pre-commit-hooks.yaml").is_file():
-        return f"{staged_dir} has no .pre-commit-hooks.yaml"
+    resolved_staging = staging.resolve()
+    resolved_dir = staged_dir.resolve()
+    if (
+        resolved_dir != resolved_staging
+        and resolved_staging not in resolved_dir.parents
+    ):
+        return (
+            f"the repository directory {staged_dir} resolves outside the "
+            f"staging directory"
+        )
+    if require_manifest:
+        manifest = staged_dir / ".pre-commit-hooks.yaml"
+        manifest_rejection = _contained_real_path_rejection(manifest, staging)
+        if manifest_rejection:
+            return f"the manifest {manifest_rejection}"
+        if not manifest.is_file():
+            return f"{staged_dir} has no .pre-commit-hooks.yaml"
     return None
 
 
@@ -726,10 +784,33 @@ def _verify_and_normalize_env(
     differs from this interpreter; the restore's interpreter-mismatch
     warning reports that case.
     """
-    values = _read_pyvenv_cfg(env_dir / "pyvenv.cfg")
+    # The environment directory and its pyvenv.cfg must be real paths
+    # inside the cache before anything is read or executed through
+    # them; only bin/python may be a symlink, and only to a platform
+    # interpreter.
+    env_rejection = _contained_real_path_rejection(env_dir, cache_root)
+    if env_rejection:
+        return f"the environment directory {env_rejection}"
+    cfg = env_dir / "pyvenv.cfg"
+    cfg_rejection = _contained_real_path_rejection(cfg, cache_root)
+    if cfg_rejection:
+        return f"pyvenv.cfg {cfg_rejection}"
+    values = _read_pyvenv_cfg(cfg)
     version_info = values.get("version_info", "")
     if not version_info or _pyvenv_major_minor(version_info) != current:
         return None
+    home = values.get("home", "")
+    if home:
+        # Python reads pyvenv.cfg's home during path initialization,
+        # before -S or -c take effect, so an untrusted home would be
+        # used even by the probe.
+        home_path = Path(home)
+        if (
+            not home_path.is_absolute()
+            or home_path != Path("/usr")
+            and Path("/usr") not in home_path.parents
+        ):
+            return f"home {home} is not /usr or below /usr"
     interpreter = env_dir / "bin" / "python"
     gate = _interpreter_link_rejection(interpreter, current)
     if gate:
@@ -877,6 +958,15 @@ def _restore_cache(pre_commit_home: Path, required: set[tuple[str, str]]) -> boo
                 file=sys.stderr,
             )
         if members.skipped_members or members.size_capped:
+            return False
+        db_rejection = _staged_db_rejection(staging)
+        if db_rejection:
+            print(
+                f"WARNING: cannot restore the pre-commit cache from "
+                f"{tarball}: {db_rejection}; keeping the tarball and the "
+                f"existing cache.",
+                file=sys.stderr,
+            )
             return False
         staged_paths = _cached_repo_paths(staging)
         live = _cached_repos(pre_commit_home)

@@ -492,6 +492,18 @@ def _python_env_rejection(env_dir: Path, sandbox_python: str) -> str | None:
     parts = version_info.split(".")
     if len(parts) < 2 or f"{parts[0]}.{parts[1]}" != sandbox_python:
         return f"version_info {version_info} is not Python {sandbox_python}"
+    home = values.get("home", "")
+    if home:
+        # Python reads home during path initialization, before -S or -c
+        # take effect, so the archive cannot point it at an untrusted
+        # directory.
+        home_path = Path(home)
+        if (
+            not home_path.is_absolute()
+            or home_path != Path("/usr")
+            and Path("/usr") not in home_path.parents
+        ):
+            return f"home {home} is not /usr or below /usr"
     if "base-executable" in values:
         base_executable = values["base-executable"]
         if not base_executable:

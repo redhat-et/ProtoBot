@@ -2,7 +2,9 @@
 
 This directory holds the per-repo Fullsend configuration: `config.yaml`,
 the local harness overlays in `harness/`, and the pre-script wrappers in
-`scripts/`. See ADR 0033 for the per-repo installation mode.
+`scripts/`. See the [per-repo installation mode
+ADR](https://github.com/fullsend-ai/fullsend/blob/v0.56.1/docs/ADRs/0033-per-repo-installation-mode.md)
+in the Fullsend repository.
 
 ## Offline pre-commit cache bootstrap
 
