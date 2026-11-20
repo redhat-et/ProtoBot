@@ -9,16 +9,23 @@
 
 # yamllint disable rule:line-length
 
-# Completely exclude certain files from checks.
+# Note on validator/vendor/:
 # validator/vendor/ holds go mod vendor's copy of validator's module
 # dependencies (gopkg.in/yaml.v3 as of this writing) so the always-run
 # spec-validator hook (see its entry below) can build offline without a
-# populated GOMODCACHE; the vendored sources keep their upstream
-# formatting and are not ours to lint, gofmt, or vet.
-exclude: |
-  (?x)^(
-    validator/vendor/.*
-  )$
+# populated GOMODCACHE. CI's "Check formatting" step
+# (.github/workflows/ci-workflow.yaml:244) runs `gofmt -l validator`,
+# which recurses into vendor/. Run `gofmt -w validator/vendor/gopkg.in/yaml.v3`
+# after `go mod vendor` to keep vendored sources formatted. Formatting
+# fixers below exclude validator/vendor/ individually, keeping secret
+# scans and size checks unfiltered.
+
+# Completely exclude certain files from checks
+# exclude: |
+#   (?x)^(
+#     vendor/.**|
+#     dir2/.*
+#   )$
 
 repos:
   - repo: https://github.com/DavidAnson/markdownlint-cli2
@@ -29,7 +36,8 @@ repos:
         exclude: |
           (?x)^(
                 .github/pull_request_template\.md |
-                .agents/skills/
+                .agents/skills/ |
+                validator/vendor/
             )$
 
   - repo: https://github.com/hadolint/hadolint
@@ -53,6 +61,9 @@ repos:
   # but not git/github.com clones (see issue #550). `language: python`
   # makes pre-commit build a per-hook virtualenv and `pip install` the
   # pinned package; no image change or network to a VCS host is needed.
+  # First use in a new environment still requires pypi.org and
+  # files.pythonhosted.org for `pip install`, so an offline sandbox must
+  # warm PRE_COMMIT_HOME with `scripts/pre_commit_cache.py` first.
   - repo: local
     hooks:
       # General file and hygiene checks.
@@ -121,6 +132,7 @@ repos:
         additional_dependencies: ["pre-commit-hooks==6.0.0"]
         types: [text]
         stages: [pre-commit, pre-push, manual]
+        exclude: ^validator/vendor/
       - id: fix-byte-order-marker
         name: fix-byte-order-marker
         description: Forbid utf-8 byte order marker
@@ -128,6 +140,7 @@ repos:
         language: python
         additional_dependencies: ["pre-commit-hooks==6.0.0"]
         types: [text]
+        exclude: ^validator/vendor/
       - id: trailing-whitespace
         name: trailing-whitespace
         description: Trims trailing whitespace
@@ -137,6 +150,7 @@ repos:
         types: [text]
         stages: [pre-commit, pre-push, manual]
         args: [--markdown-linebreak-ext=md]
+        exclude: ^validator/vendor/
       # Forbid UTF-8 replacement character.
       # Mirrors https://github.com/pre-commit/pygrep-hooks's
       # text-unicode-replacement-char hook. `pygrep` is built into
@@ -146,6 +160,7 @@ repos:
         entry: "\uFFFD"
         language: pygrep
         types: [text]
+        exclude: ^validator/vendor/
       - id: yamllint
         name: yamllint
         description: This hook runs yamllint.
@@ -164,6 +179,8 @@ repos:
         language: python
         additional_dependencies: ["ruff==0.17.4"]
         types_or: [python, pyi, jupyter]
+        require_serial: true
+        exclude: ^validator/vendor/
       # args: [ --fix ]
       - id: ruff-format
         name: ruff-format
@@ -172,6 +189,8 @@ repos:
         language: python
         additional_dependencies: ["ruff==0.17.4"]
         types_or: [python, pyi, jupyter, markdown]
+        require_serial: true
+        exclude: ^validator/vendor/
       - id: skillsaw
         name: skillsaw
         description: Lint agentic contextual building blocks (CLAUDE.md, skills, plugins, hooks, ...)
@@ -216,17 +235,17 @@ repos:
           - '^(base_commit|impact_assessment_base_commit): "[0-9a-fA-F]{40}"$'
         files: ^\.protobot/change-sets/
       # Check that JSON files are valid JSON5. Uses
-      # https://github.com/simonvanlierde/check-json5, a maintained
-      # PyPI-published fork of https://gitlab.com/bmares/check-json5
-      # (which has no PyPI package of its own).
+      # https://github.com/simonvanlierde/check-json5 (tag v1.4.1), a
+      # maintained PyPI-published fork of
+      # https://gitlab.com/bmares/check-json5 (which has no PyPI package of
+      # its own).
       - id: check-json5
         name: check json5
         description: checks json files for syntax parsable as json5 (with comments).
         entry: check-json5
         language: python
         additional_dependencies: ["json5==0.17.3", "check-json5==1.4.1"]
-        files: (\.(json|jsonc|json5|geojson|jsonld|hujson|jwcc|code-workspace|code-snippets|webmanifest)|(^|/)\.babelrc)$
-        types: [text]
+        types_or: [json, json5]
       - id: zizmor
         name: zizmor
         description: "Find security issues in GitHub Actions CI/CD setups"
@@ -242,11 +261,13 @@ repos:
         entry: python3 scripts/check_gofmt.py
         language: system
         files: \.go$
+        exclude: ^validator/vendor/
       - id: go-vet
         name: go-vet
         entry: python3 scripts/check_govet.py
         language: system
         files: \.go$
+        exclude: ^validator/vendor/
       - id: check-portable-null-device
         name: check-portable-null-device
         entry: python3 scripts/check_portable_null_device.py

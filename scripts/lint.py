@@ -140,17 +140,39 @@ def _load_config() -> dict[str, Any]:
 
 
 def _configured_repos(config: dict[str, Any]) -> list[tuple[str, str]]:
-    """Return ``[(repo_url, rev), ...]`` for cloned hook repositories.
+    """Return ``[(repo_url, rev), ...]`` for configured hook repositories and environments.
 
-    Skips ``repo: local`` and ``repo: meta`` entries, which pre-commit
-    never fetches over the network.
+    Includes cloned hook repositories and ``repo: local`` hooks that pin
+    dependencies via ``additional_dependencies``. Skips ``repo: meta``
+    and local hooks with ``pygrep`` or ``system`` languages, which do not
+    require an installed environment in the pre-commit cache.
     """
-    repos = []
+    repos: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for entry in config.get("repos", []):
         repo = entry.get("repo", "")
-        if repo in _NON_CLONED_REPOS:
+        if repo == "meta":
             continue
-        repos.append((repo, entry.get("rev", "")))
+        if repo == "local":
+            for hook in entry.get("hooks", []):
+                language = hook.get("language", "")
+                if language in ("pygrep", "system"):
+                    continue
+                deps = hook.get("additional_dependencies")
+                if not deps:
+                    continue
+                key = f"local:{','.join(deps)}"
+                ref = "1"
+                pair = (key, ref)
+                if pair not in seen:
+                    seen.add(pair)
+                    repos.append(pair)
+            continue
+        rev = entry.get("rev", "")
+        pair = (repo, rev)
+        if pair not in seen:
+            seen.add(pair)
+            repos.append(pair)
     return repos
 
 
@@ -167,16 +189,15 @@ def _any_always_run(config: dict[str, Any]) -> bool:
 
 
 def _cached_repos(pre_commit_home: Path) -> set[tuple[str, str]]:
-    """Return ``{(repo, ref), ...}`` already cloned into *pre_commit_home*.
+    """Return ``{(repo, ref), ...}`` already cloned or installed in *pre_commit_home*.
 
     Reads the ``repos`` table from pre-commit's own ``db.db`` SQLite
     store directly (see ``pre_commit.store.Store``), so this check
     needs no network access and no dependency on pre-commit's internal
-    Python API. None of this repository's hooks declare
-    ``additional_dependencies``, so pre-commit's stored ``repo`` key
-    always equals the bare repo URL from ``.pre-commit-config.yaml``
-    (a ``:dep1,dep2`` suffix is only appended when dependencies are
-    declared).
+    Python API. Cloned hook repositories are stored with their bare
+    repository URL and revision, while ``repo: local`` hooks with
+    ``additional_dependencies`` are stored with keys of the form
+    ``local:<dep1,dep2,...>`` and ref ``1``.
     """
     db_path = pre_commit_home / "db.db"
     if not db_path.exists():
