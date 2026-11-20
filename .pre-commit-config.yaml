@@ -21,22 +21,6 @@ exclude: |
   )$
 
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
-    hooks:
-      - id: check-added-large-files  # Prevents giant files from being committed
-      - id: check-docstring-first    # Prevent code before docstring
-      - id: check-json               # Check that JSON files are valid
-      - id: check-merge-conflict     # Check merge conflict strings
-      - id: check-symlinks           # Ensure symlinks have a valid target
-      - id: check-toml               # Ensure toml files are valid
-      - id: check-xml                # Check that XML files are valid
-      - id: debug-statements         # debugger imports and breakpoint() calls
-      - id: end-of-file-fixer        # File is empty or ends with one newline
-      - id: fix-byte-order-marker    # Forbid utf-8 byte order marker
-      - id: trailing-whitespace      # Trims trailing whitespace
-        args: [--markdown-linebreak-ext=md]
-
   - repo: https://github.com/DavidAnson/markdownlint-cli2
     rev: 341e2a331ba578029e66c2e01183e7a6b5ca9ab4  # frozen: v0.24.0
     hooks:
@@ -71,6 +55,88 @@ repos:
   # pinned package; no image change or network to a VCS host is needed.
   - repo: local
     hooks:
+      # General file and hygiene checks.
+      # Mirrors https://github.com/pre-commit/pre-commit-hooks.
+      - id: check-added-large-files
+        name: check-added-large-files
+        description: Prevents giant files from being committed
+        entry: check-added-large-files
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        stages: [pre-commit, pre-push, manual]
+      - id: check-docstring-first
+        name: check-docstring-first
+        description: Prevent code before docstring
+        entry: check-docstring-first
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [python]
+      - id: check-json
+        name: check-json
+        description: Check that JSON files are valid
+        entry: check-json
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [json]
+      - id: check-merge-conflict
+        name: check-merge-conflict
+        description: Check merge conflict strings
+        entry: check-merge-conflict
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [text]
+      - id: check-symlinks
+        name: check-symlinks
+        description: Ensure symlinks have a valid target
+        entry: check-symlinks
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [symlink]
+      - id: check-toml
+        name: check-toml
+        description: Ensure toml files are valid
+        entry: check-toml
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [toml]
+      - id: check-xml
+        name: check-xml
+        description: Check that XML files are valid
+        entry: check-xml
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [xml]
+      - id: debug-statements
+        name: debug-statements
+        description: debugger imports and breakpoint() calls
+        entry: debug-statement-hook
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [python]
+      - id: end-of-file-fixer
+        name: end-of-file-fixer
+        description: File is empty or ends with one newline
+        entry: end-of-file-fixer
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
+      - id: fix-byte-order-marker
+        name: fix-byte-order-marker
+        description: Forbid utf-8 byte order marker
+        entry: fix-byte-order-marker
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [text]
+      - id: trailing-whitespace
+        name: trailing-whitespace
+        description: Trims trailing whitespace
+        entry: trailing-whitespace-fixer
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
+        args: [--markdown-linebreak-ext=md]
       # Forbid UTF-8 replacement character.
       # Mirrors https://github.com/pre-commit/pygrep-hooks's
       # text-unicode-replacement-char hook. `pygrep` is built into
@@ -227,7 +293,7 @@ repos:
         entry: python3 scripts/test_lint.py
         language: system
         pass_filenames: false
-        files: ^scripts/(lint|test_lint)\.py$
+        files: ^(scripts/(lint|test_lint)\.py|\.github/workflows/ci-workflow\.yaml)$
       - id: adr-amendments
         name: adr-amendments
         entry: python3 scripts/check_adr_amendments.py
