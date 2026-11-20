@@ -38,6 +38,23 @@ The validator checks:
 """
 
 
+_SAMPLE_ARCH = """# Architecture
+
+#### Validator
+
+Codes: `sample.error`.
+
+#### Specification pull request check
+
+Unrelated.
+"""
+
+
+def _arch_path(root: Path) -> Path:
+    """Return the registered architecture document path under *root*."""
+    return root / "docs" / "architecture.md"
+
+
 def _write(path: Path, content: str) -> None:
     """Create parent directories and write UTF-8 *content* to *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,13 +62,18 @@ def _write(path: Path, content: str) -> None:
 
 
 def _layout(root: Path) -> tuple[Path, Path, Path]:
-    """Return Go, README, and spec paths under *root* after creating dirs."""
+    """Return Go, README, and spec paths under *root* after creating dirs.
+
+    A documented ``docs/architecture.md`` is also written; tests that exercise
+    its absence overwrite it via ``_arch_path``.
+    """
     go_path = root / "validator" / "internal" / "sample" / "check.go"
     readme = root / "validator" / "README.md"
     spec = root / "docs" / "architecture" / "ProtoBotV2.md"
     go_path.parent.mkdir(parents=True, exist_ok=True)
     readme.parent.mkdir(parents=True, exist_ok=True)
     spec.parent.mkdir(parents=True, exist_ok=True)
+    _write(_arch_path(root), _SAMPLE_ARCH)
     return go_path, readme, spec
 
 
@@ -689,6 +711,60 @@ class EvaluateAndCheckTests(unittest.TestCase):
         self.assertIn("Validated", stdout.getvalue())
 
 
+class ArchitectureParityTests(unittest.TestCase):
+    def test_missing_code_in_architecture_md_fails_parity(self) -> None:
+        """Fail parity when an exported constant is absent from architecture.md."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            go_path, readme, spec = _layout(root)
+            _write(go_path, _SAMPLE_GO)
+            _write(readme, _SAMPLE_README)
+            _write(spec, _SAMPLE_SPEC)
+            _write(
+                _arch_path(root),
+                "#### Validator\nNo codes listed.\n"
+                "#### Specification pull request check\n`sample.error`\n",
+            )
+            report = checker.evaluate(root)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = checker.check(root)
+        self.assertFalse(report.ok)
+        self.assertEqual(1, rc)
+        self.assertEqual(("sample.error",), report.missing_in_architecture_md)
+        self.assertEqual([], list(report.missing_in_protobot_v2))
+        lines = checker.format_report(report)
+        self.assertTrue(any("docs/architecture.md" in line for line in lines))
+        self.assertIn("ears-manager artifact put", stderr.getvalue())
+
+    def test_missing_architecture_md_file_is_an_error(self) -> None:
+        """Report a read error when docs/architecture.md does not exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            go_path, readme, spec = _layout(root)
+            _write(go_path, _SAMPLE_GO)
+            _write(readme, _SAMPLE_README)
+            _write(spec, _SAMPLE_SPEC)
+            _arch_path(root).unlink()
+            report = checker.evaluate(root)
+        self.assertFalse(report.ok)
+        self.assertTrue(any("architecture.md" in e for e in report.errors))
+
+    def test_level_four_validator_section_is_bounded(self) -> None:
+        """A #### Validator section ends at the next heading of level <= 4."""
+        text = "#### Validator\n\n`a.b`\n\n#### Next\n\n`c.d`\n"
+        section = checker.extract_validator_section(text)
+        self.assertIn("a.b", section)
+        self.assertNotIn("c.d", section)
+
+    def test_deeper_subheadings_stay_inside_section(self) -> None:
+        """Subheadings below the Validator level do not end the section."""
+        text = "### Validator\n\nx\n\n#### Sub\n\n`a.b`\n\n### Next\n`c.d`\n"
+        section = checker.extract_validator_section(text)
+        self.assertIn("a.b", section)
+        self.assertNotIn("c.d", section)
+
+
 class FormatReportTests(unittest.TestCase):
     def test_includes_locations_when_present(self) -> None:
         """Attach constant locations when the code was parsed."""
@@ -696,6 +772,7 @@ class FormatReportTests(unittest.TestCase):
             constants=(checker.CodeConstant("CodeX", "sample.error", "x.go", 4),),
             missing_in_readme=("sample.error",),
             missing_in_protobot_v2=("sample.error",),
+            missing_in_architecture_md=(),
             raw_string_duplicates=(
                 checker.RawStringDuplicate("y.go", 8, "sample.error", "CodeX"),
             ),
@@ -714,6 +791,7 @@ class FormatReportTests(unittest.TestCase):
             constants=(),
             missing_in_readme=("sample.error",),
             missing_in_protobot_v2=("sample.error",),
+            missing_in_architecture_md=(),
             raw_string_duplicates=(),
             errors=(),
         )
@@ -725,12 +803,14 @@ class FormatReportTests(unittest.TestCase):
 
     def test_ok_is_false_for_each_failure_kind(self) -> None:
         """Each populated failure field makes the report not ok."""
-        empty = checker.ParityReport((), (), (), (), ())
+        empty = checker.ParityReport((), (), (), (), (), ())
         self.assertTrue(empty.ok)
-        self.assertFalse(checker.ParityReport((), ("x",), (), (), ()).ok)
-        self.assertFalse(checker.ParityReport((), (), ("x",), (), ()).ok)
+        self.assertFalse(checker.ParityReport((), ("x",), (), (), (), ()).ok)
+        self.assertFalse(checker.ParityReport((), (), ("x",), (), (), ()).ok)
+        self.assertFalse(checker.ParityReport((), (), (), ("x",), (), ()).ok)
         self.assertFalse(
             checker.ParityReport(
+                (),
                 (),
                 (),
                 (),
@@ -738,7 +818,7 @@ class FormatReportTests(unittest.TestCase):
                 (),
             ).ok
         )
-        self.assertFalse(checker.ParityReport((), (), (), (), ("e",)).ok)
+        self.assertFalse(checker.ParityReport((), (), (), (), (), ("e",)).ok)
 
 
 class MainTests(unittest.TestCase):
