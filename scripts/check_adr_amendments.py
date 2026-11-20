@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Fail if accepted ADR historical text is rewritten in place.
+"""Fail if accepted or superseded ADR historical text is rewritten in place.
 
 Used as the ``adr-amendments`` local pre-commit hook (and via
-``scripts/lint.py``). Accepted architecture decision records under
-``docs/decisions/`` are immutable historical records: git diffs may
-insert dated amendment blocks, but must not delete or modify lines
-from the baseline copy of an accepted ADR.
+``scripts/lint.py``). Accepted and superseded architecture decision records
+under ``docs/decisions/`` are immutable historical records: they are never
+deleted or renamed, and git diffs may insert dated amendment blocks, but
+must not delete or modify lines from the baseline copy. The sole exception
+is the authorized accepted-to-superseded status-line transition (see
+``historical_mutations`` and ``_authorized_transition``), which requires a
+dated ``Superseded by ADR-NNNN`` status line plus an appended dated
+amendment block.
 
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
@@ -26,10 +30,32 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _DECISIONS_DIR = Path("docs") / "decisions"
+_MONTH_NAMES = (
+    "January|February|March|April|May|June|July|August|September|"
+    "October|November|December"
+)
+# Lenient (date optional): used for header detection (is_accepted,
+# is_superseded) and for scanning baseline files, which may predate the
+# dated-transition requirement below.
 _ACCEPTED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Accepted\*\*",
+    rf"^> Status:\s*\*\*Accepted\*\*(?: — (?:{_MONTH_NAMES}) \d{{4}})?$",
     re.MULTILINE,
 )
+_SUPERSEDED_STATUS = re.compile(
+    rf"^> Status:\s*\*\*Superseded by ADR-\d+\*\*(?: — (?:{_MONTH_NAMES}) \d{{4}})?$",
+    re.MULTILINE,
+)
+# Strict (date required): the only status line an authorized transition may
+# write. Trailing text after the date is never allowed.
+_SUPERSEDED_STATUS_DATED = re.compile(
+    rf"^> Status:\s*\*\*Superseded by ADR-\d+\*\* — (?:{_MONTH_NAMES}) \d{{4}}$",
+    re.MULTILINE,
+)
+_AMENDMENT_MARKER = re.compile(
+    r"^\*\*\[Amended [A-Z][a-z]+ \d{4}\]\*\*$",
+    re.MULTILINE,
+)
+_FENCE_DELIMITER = re.compile(r"^(`{3,}|~{3,})")
 _HEADER_LINE_LIMIT = 30
 _MAX_REPORTED_LINES = 10
 
@@ -50,26 +76,177 @@ def is_accepted(text: str) -> bool:
     return _ACCEPTED_STATUS.search(header) is not None
 
 
+def is_superseded(text: str) -> bool:
+    """Return True when *text* declares ADR status Superseded in its header."""
+    header = "\n".join(text.splitlines()[:_HEADER_LINE_LIMIT])
+    return _SUPERSEDED_STATUS.search(header) is not None
+
+
+def is_protected(text: str) -> bool:
+    """Return True when *text* is an Accepted or Superseded ADR.
+
+    Protection from in-place rewriting, deletion, and renaming continues
+    after an ADR is superseded; only the dated status-line transition
+    performed by an authorized supersession is permitted (see
+    ``historical_mutations``).
+    """
+    return is_accepted(text) or is_superseded(text)
+
+
+def _fenced_code_mask(lines: list[str]) -> list[bool]:
+    """Return a per-line mask that is True while *lines* is inside a fence.
+
+    A fence delimiter line itself is marked True: text may not be hidden in
+    the delimiter line, and a marker immediately following the delimiter is
+    still inside the fenced block.
+    """
+    mask: list[bool] = []
+    in_fence = False
+    for line in lines:
+        if _FENCE_DELIMITER.match(line):
+            mask.append(True)
+            in_fence = not in_fence
+        else:
+            mask.append(in_fence)
+    return mask
+
+
+def _accepted_status_index(lines: list[str]) -> int | None:
+    """Return the index of the sole line matching the Accepted status, or None."""
+    matches = [
+        idx for idx, line in enumerate(lines) if _ACCEPTED_STATUS.fullmatch(line)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _dated_superseded_status_index(lines: list[str]) -> int | None:
+    """Return the index of the sole dated Superseded status line, or None."""
+    matches = [
+        idx
+        for idx, line in enumerate(lines)
+        if _SUPERSEDED_STATUS_DATED.fullmatch(line)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _has_appended_amendment_block(
+    baseline_lines: list[str],
+    new_lines: list[str],
+    opcodes: list[tuple[str, int, int, int, int]],
+) -> bool:
+    """Return True when a dated amendment marker is inserted after the last
+    *baseline_lines* line and outside any fenced code block in *new_lines*.
+    """
+    fenced = _fenced_code_mask(new_lines)
+    tail_start = len(baseline_lines)
+    for tag, i1, _i2, j1, j2 in opcodes:
+        if tag != "insert" or i1 != tail_start:
+            continue
+        for idx in range(j1, j2):
+            if _AMENDMENT_MARKER.fullmatch(new_lines[idx]) and not fenced[idx]:
+                return True
+    return False
+
+
+def _authorized_transition(
+    old_lines: list[str],
+    new_lines: list[str],
+) -> tuple[int, int] | None:
+    """Return ``(old_index, new_index)`` for an authorized status transition.
+
+    An accepted-to-superseded transition is authorized when:
+
+    1. *old_lines* has exactly one line matching the Accepted status.
+    2. *new_lines* has exactly one line matching the dated Superseded status.
+    3. Substituting the new status line for the old one in *old_lines*
+       (a "synthetic baseline") and diffing it against *new_lines* produces
+       only insertions. Any other historical line rewritten or deleted
+       invalidates the transition, however the real diff happens to group
+       opcodes (e.g. an amendment block diffed adjacent to the status line).
+    4. One of those insertions is a dated amendment marker appended after
+       the synthetic baseline's last line and outside a fenced code block.
+
+    This is the single implementation of the supersession authorization
+    rule; both the per-line mutation check and the extra-status-line check
+    in ``historical_mutations`` consult it rather than re-deriving it.
+    """
+    old_status_idx = _accepted_status_index(old_lines)
+    if old_status_idx is None:
+        return None
+    new_status_idx = _dated_superseded_status_index(new_lines)
+    if new_status_idx is None:
+        return None
+
+    synthetic_old = list(old_lines)
+    synthetic_old[old_status_idx] = new_lines[new_status_idx]
+
+    opcodes = difflib.SequenceMatcher(
+        a=synthetic_old,
+        b=new_lines,
+        autojunk=False,
+    ).get_opcodes()
+    if any(tag in {"replace", "delete"} for tag, *_rest in opcodes):
+        return None
+    if not _has_appended_amendment_block(synthetic_old, new_lines, opcodes):
+        return None
+    return old_status_idx, new_status_idx
+
+
+def _status_line_count(lines: list[str]) -> int:
+    """Return the number of lines matching the Accepted or Superseded status."""
+    return sum(
+        1
+        for line in lines
+        if _ACCEPTED_STATUS.fullmatch(line) or _SUPERSEDED_STATUS.fullmatch(line)
+    )
+
+
 def historical_mutations(
     old_lines: list[str],
     new_lines: list[str],
-) -> list[tuple[int, str]]:
-    """Return ``(HEAD line number, text)`` for deleted or replaced lines.
+) -> list[tuple[int | None, int | None, str]]:
+    """Return ``(baseline line number, HEAD line number, text)`` mutations.
 
-    Insertions are allowed so dated amendment blocks can be added.
-    Any delete or replace opcode means accepted decision text was
-    rewritten or replaced in place.
+    Insertions are allowed so dated amendment blocks can be added. Any
+    delete or replace opcode means accepted or superseded decision text was
+    rewritten or replaced in place, except for the single authorized
+    accepted-to-superseded status transition (see ``_authorized_transition``).
+    An inserted line that adds an extra status line beyond the one
+    authorized transition is also reported, unless the baseline already had
+    the same number of status lines (an unrelated, pre-existing condition).
+
+    Either line number may be ``None``: a deleted line has no HEAD line, and
+    an unauthorized extra status line insertion has no baseline line.
     """
-    matcher = difflib.SequenceMatcher(
+    opcodes = difflib.SequenceMatcher(
         a=old_lines,
         b=new_lines,
         autojunk=False,
+    ).get_opcodes()
+    authorized = _authorized_transition(old_lines, new_lines)
+    check_extra_status_lines = _status_line_count(old_lines) != _status_line_count(
+        new_lines
     )
-    mutations: list[tuple[int, str]] = []
-    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
+
+    mutations: list[tuple[int | None, int | None, str]] = []
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag in {"replace", "delete"}:
-            for idx in range(i1, i2):
-                mutations.append((idx + 1, old_lines[idx]))
+            for k in range(i2 - i1):
+                old_idx = i1 + k
+                if authorized is not None and old_idx == authorized[0]:
+                    continue
+                head_idx = j1 + k
+                head_line = head_idx + 1 if head_idx < j2 else None
+                mutations.append((old_idx + 1, head_line, old_lines[old_idx]))
+        elif tag == "insert" and check_extra_status_lines:
+            for idx in range(j1, j2):
+                if authorized is not None and idx == authorized[1]:
+                    continue
+                line = new_lines[idx]
+                if _ACCEPTED_STATUS.fullmatch(line) or _SUPERSEDED_STATUS.fullmatch(
+                    line
+                ):
+                    mutations.append((None, idx + 1, line))
     return mutations
 
 
@@ -449,11 +626,31 @@ def _display_line(text: str, limit: int = 80) -> str:
     return text[: limit - 3] + "..."
 
 
-def _report_mutations(rel_posix: str, mutations: list[tuple[int, str]]) -> None:
-    """Print a diagnostic for rewritten or deleted historical lines."""
-    print(f"{rel_posix}: accepted decision text was rewritten or replaced in place")
-    for line_no, line in mutations[:_MAX_REPORTED_LINES]:
-        print(f"  HEAD line {line_no}: {_display_line(line)}")
+def _report_mutations(
+    rel_posix: str,
+    mutations: list[tuple[int | None, int | None, str]],
+) -> None:
+    """Print a diagnostic for rewritten, deleted, or unauthorized historical text."""
+    print(
+        f"{rel_posix}: accepted or superseded decision text was rewritten "
+        "or replaced in place"
+    )
+    for baseline_line, head_line, line in mutations[:_MAX_REPORTED_LINES]:
+        if baseline_line is not None and head_line is not None:
+            print(
+                f"  baseline line {baseline_line} / HEAD line {head_line}: "
+                f"{_display_line(line)}"
+            )
+        elif baseline_line is not None:
+            print(
+                f"  baseline line {baseline_line} (deleted, no corresponding "
+                f"HEAD line): {_display_line(line)}"
+            )
+        else:
+            print(
+                f"  HEAD line {head_line} (no corresponding baseline line): "
+                f"{_display_line(line)}"
+            )
     remaining = len(mutations) - _MAX_REPORTED_LINES
     if remaining > 0:
         print(f"  … ({remaining} more line(s))")
@@ -511,7 +708,7 @@ def check(
             continue
         if hist_text is None:
             continue
-        if not is_accepted(hist_text):
+        if not is_protected(hist_text):
             continue
 
         try:
@@ -530,8 +727,8 @@ def check(
             new_path_posix = renames.get(rel_posix)
             if new_path_posix:
                 print(
-                    f"{rel_posix}: accepted architecture decision record "
-                    f"was deleted (renamed to {new_path_posix})"
+                    f"{rel_posix}: accepted or superseded architecture decision "
+                    f"record was deleted (renamed to {new_path_posix})"
                 )
                 failed = True
                 handled_renames.add(new_path_posix)
@@ -556,7 +753,10 @@ def check(
                         if mutations:
                             _report_mutations(new_path_posix, mutations)
             else:
-                print(f"{rel_posix}: accepted architecture decision record was deleted")
+                print(
+                    f"{rel_posix}: accepted or superseded architecture decision "
+                    "record was deleted"
+                )
                 failed = True
             continue
 

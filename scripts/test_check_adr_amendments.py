@@ -73,16 +73,32 @@ class HistoricalMutationTests(unittest.TestCase):
         self.assertEqual([], checker.historical_mutations(old, new))
 
     def test_replaced_line_is_reported(self) -> None:
-        """Rewriting a historical line is a mutation at that HEAD line."""
+        """Rewriting a historical line reports its baseline and HEAD line."""
         old = ["alpha", "bravo", "charlie"]
         new = ["alpha", "bravo changed", "charlie"]
-        self.assertEqual([(2, "bravo")], checker.historical_mutations(old, new))
+        self.assertEqual([(2, 2, "bravo")], checker.historical_mutations(old, new))
 
     def test_deleted_line_is_reported(self) -> None:
-        """Removing a historical line is a mutation at that HEAD line."""
+        """Removing a historical line reports its baseline line and no HEAD line."""
         old = ["alpha", "bravo", "charlie"]
         new = ["alpha", "charlie"]
-        self.assertEqual([(2, "bravo")], checker.historical_mutations(old, new))
+        self.assertEqual([(2, None, "bravo")], checker.historical_mutations(old, new))
+
+    def test_insertions_before_mutation_report_distinct_baseline_and_head_lines(
+        self,
+    ) -> None:
+        """An insertion before a mutation shifts the HEAD line, not the baseline line."""
+        old = [f"line {n}" for n in range(1, 13)]
+        new = list(old)
+        # Insert 3 lines before baseline line 6 (0-indexed 5), well clear of
+        # the later mutation so the opcodes do not bundle the two edits.
+        new[5:5] = ["extra 1", "extra 2", "extra 3"]
+        # Mutate what was baseline line 10; it is now at HEAD line 13.
+        new[12] = "line 10 changed"
+        self.assertEqual(
+            [(10, 13, "line 10")],
+            checker.historical_mutations(old, new),
+        )
 
     def test_identical_files_have_no_mutations(self) -> None:
         """Unchanged accepted text is not a mutation."""
@@ -111,6 +127,185 @@ class AcceptedStatusTests(unittest.TestCase):
             + ["> Status: **Accepted** — quoted example"]
         )
         self.assertFalse(checker.is_accepted(body))
+
+
+class SupersededStatusTests(unittest.TestCase):
+    _SUPERSEDED_ADR = """# ADR-0003: Example
+
+> Status: **Superseded by ADR-0004** — November 2026
+
+## Decision
+
+Use one file per record.
+
+## Consequences
+
+Keep diffs small.
+
+**[Amended November 2026]**
+Superseded by ADR-0004; see docs/decisions/0004-adopt-protobot-v2.md.
+"""
+
+    def test_superseded_header_is_detected(self) -> None:
+        """Detect the Superseded status line used by transitioned ADRs."""
+        self.assertTrue(checker.is_superseded(self._SUPERSEDED_ADR))
+
+    def test_accepted_header_is_not_superseded(self) -> None:
+        """Accepted ADRs are not already in the superseded state."""
+        self.assertFalse(checker.is_superseded(_ACCEPTED_ADR))
+
+    def test_superseded_header_without_date_is_still_detected(self) -> None:
+        """Lenient header matching tolerates an undated Superseded baseline."""
+        text = self._SUPERSEDED_ADR.replace(
+            "> Status: **Superseded by ADR-0004** — November 2026",
+            "> Status: **Superseded by ADR-0004**",
+        )
+        self.assertTrue(checker.is_superseded(text))
+
+    def test_is_protected_covers_accepted_and_superseded(self) -> None:
+        """Both Accepted and Superseded ADRs remain protected from rewriting."""
+        self.assertTrue(checker.is_protected(_ACCEPTED_ADR))
+        self.assertTrue(checker.is_protected(self._SUPERSEDED_ADR))
+        self.assertFalse(checker.is_protected(_PROPOSED_ADR))
+
+
+class SupersessionTransitionTests(unittest.TestCase):
+    """Cover the authorized accepted-to-superseded status transition."""
+
+    def setUp(self) -> None:
+        self.old = [
+            "# ADR-0002: Example",
+            "",
+            "> Status: **Accepted** — September 2026",
+            "",
+            "## Decision",
+            "",
+            "Use one file per record.",
+            "",
+            "## Consequences",
+            "",
+            "Keep diffs small.",
+        ]
+        self.status_idx = 2  # 0-based index of the status line
+
+    def _with_status(self, status_line: str) -> list[str]:
+        new = list(self.old)
+        new[self.status_idx] = status_line
+        return new
+
+    def test_dated_transition_with_amendment_block_passes(self) -> None:
+        """An authorized transition with a valid appended amendment block has no mutations."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new += [
+            "",
+            "**[Amended November 2026]**",
+            "Superseded by ADR-0004; see docs/decisions/0004-adopt-protobot-v2.md.",
+        ]
+        self.assertEqual([], checker.historical_mutations(self.old, new))
+
+    def test_status_change_without_amendment_block_fails(self) -> None:
+        """A status transition with no appended amendment block is a mutation."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertEqual(
+            [(self.status_idx + 1, self.status_idx + 1, self.old[self.status_idx])],
+            mutations,
+        )
+
+    def test_undated_amendment_block_fails(self) -> None:
+        """An amendment marker with no year is not recognized, so the transition fails."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new += ["", "**[Amended]** Superseded by ADR-0004."]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertEqual(
+            [(self.status_idx + 1, self.status_idx + 1, self.old[self.status_idx])],
+            mutations,
+        )
+
+    def test_amendment_marker_inside_fenced_code_block_fails(self) -> None:
+        """A marker quoted inside a fenced code block does not authorize the transition."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new += [
+            "",
+            "```text",
+            "**[Amended November 2026]**",
+            "```",
+        ]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertEqual(
+            [(self.status_idx + 1, self.status_idx + 1, self.old[self.status_idx])],
+            mutations,
+        )
+
+    def test_amendment_block_before_last_baseline_line_fails(self) -> None:
+        """An amendment block inserted before the end of the baseline is not authorized."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new[self.status_idx + 1 : self.status_idx + 1] = [
+            "",
+            "**[Amended November 2026]**",
+            "Superseded by ADR-0004.",
+        ]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertTrue(
+            mutations, "an early amendment block must not authorize the transition"
+        )
+        self.assertIn(self.old[self.status_idx], [text for _b, _h, text in mutations])
+
+    def test_trailing_text_after_status_line_fails(self) -> None:
+        """Trailing text after the dated status line is not a recognized transition."""
+        new = self._with_status(
+            "> Status: **Superseded by ADR-0004** — November 2026 (draft)"
+        )
+        new += ["", "**[Amended November 2026]**", "Superseded by ADR-0004."]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertEqual(
+            [(self.status_idx + 1, self.status_idx + 1, self.old[self.status_idx])],
+            mutations,
+        )
+
+    def test_undated_superseded_status_header_fails(self) -> None:
+        """An undated Superseded status header is not an authorized transition."""
+        new = self._with_status("> Status: **Superseded by ADR-0004**")
+        new += ["", "**[Amended November 2026]**", "Superseded by ADR-0004."]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertEqual(
+            [(self.status_idx + 1, self.status_idx + 1, self.old[self.status_idx])],
+            mutations,
+        )
+
+    def test_status_change_combined_with_another_rewrite_fails(self) -> None:
+        """An authorized-looking transition still fails if other text is also rewritten."""
+        new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
+        new[6] = "Use JSONL storage instead."
+        new += ["", "**[Amended November 2026]**", "Superseded by ADR-0004."]
+        mutations = checker.historical_mutations(self.old, new)
+        reported_text = [text for _b, _h, text in mutations]
+        self.assertIn(self.old[self.status_idx], reported_text)
+        self.assertIn(self.old[6], reported_text)
+
+    def test_second_status_line_is_reported_with_no_baseline_line(self) -> None:
+        """Inserting an unrelated extra status line fails with a HEAD-only location."""
+        new = list(self.old)
+        new += ["", "> Status: **Superseded by ADR-0005** — November 2026"]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertEqual([(None, len(new), new[-1])], mutations)
+
+    def test_unmodified_adr_with_two_status_lines_passes(self) -> None:
+        """A baseline that already has two status lines is not flagged when unchanged."""
+        old = list(self.old) + ["", "> Status: **Accepted** — September 2026"]
+        new = list(old)
+        self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_sentinel_literal_in_body_does_not_suppress_detection(self) -> None:
+        """A literal amendment marker already in the body does not mask a rewrite."""
+        old = list(self.old) + [
+            "",
+            "Example marker: **[Amended January 2000]** (sentinel).",
+        ]
+        new = list(old)
+        new[6] = "Use JSONL storage instead."
+        mutations = checker.historical_mutations(old, new)
+        self.assertEqual([(7, 7, "Use one file per record.")], mutations)
 
 
 class PathFilterTests(unittest.TestCase):
@@ -708,6 +903,71 @@ class GitRepoCheckTests(unittest.TestCase):
             _git(self.root, "checkout", "main")
             _git(self.root, "branch", "-D", "disjoint")
             _git(self.root, "remote", "remove", "origin")
+
+    def test_authorized_supersession_transition_passes(self) -> None:
+        """An accepted-to-superseded transition with an appended block passes end to end."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            )
+            + "\n**[Amended November 2026]**\n"
+            "Superseded by ADR-0004; see docs/decisions/0004-example.md.\n",
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_superseded_status_change_without_amendment_fails(self) -> None:
+        """A status flip with no appended amendment block still fails end to end."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
+
+    def test_deleted_superseded_adr_fails(self) -> None:
+        """Protection continues after supersession: a superseded ADR cannot be deleted."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            )
+            + "\n**[Amended November 2026]**\nSuperseded by ADR-0004.\n",
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "supersede ADR")
+        path.unlink()
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("was deleted", output)
+
+    def test_renamed_superseded_adr_fails(self) -> None:
+        """Protection continues after supersession: a superseded ADR cannot be renamed."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "> Status: **Accepted** \u2014 September 2026",
+                "> Status: **Superseded by ADR-0004** \u2014 November 2026",
+            )
+            + "\n**[Amended November 2026]**\nSuperseded by ADR-0004.\n",
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "supersede ADR")
+        renamed_rel = "docs/decisions/0001-renamed.md"
+        _git(self.root, "mv", self.adr_rel.as_posix(), renamed_rel)
+        rc, output = self._check()
+        self.assertEqual(1, rc)
+        self.assertIn(f"was deleted (renamed to {renamed_rel})", output)
 
 
 class LiveRepoTests(unittest.TestCase):

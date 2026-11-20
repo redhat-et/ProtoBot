@@ -370,15 +370,6 @@
       "line": 1331,
       "message": "Weak language (hedging): 'as needed' \u2014 Replace 'as needed' with specific triggers",
       "severity": "info"
-    },
-    {
-      "fingerprint": "9ac2052ca695ae1d",
-      "rule_id": "context-budget",
-      "file_path": "AGENTS.md",
-      "message": "Estimated 4,009 tokens exceeds agents-md warn limit of 4,000",
-      "severity": "warning",
-      "value": 4009,
-      "baseline_mode": "ceiling"
     }
   ]
 }

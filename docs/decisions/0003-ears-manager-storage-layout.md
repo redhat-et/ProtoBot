@@ -1,6 +1,6 @@
 # ADR-0003: EARS Manager Storage Layout and Schema Version Keys
 
-> Status: **Accepted** — September 2026
+> Status: **Superseded by ADR-0004** — November 2026
 
 **Contents:**
 
@@ -98,3 +98,11 @@ keys, explicit null values, and custom tags before typed decoding.
 - [ADR-0002: EARS Specification Record Schema](0002-ears-specification-record-schema.md)
 - [System Components](../architecture/components.md#content-storage-model)
 - [Git and Project-Repository Integration](../architecture/git-integration.md#registered-artifact-paths)
+
+**[Amended November 2026]**
+ADR-0004 adopts ProtoBot V2 and deletes `ears-manager` and `.protobot/`
+rather than reworking this storage layout (removal PR R1, tracked in
+issue #406). This ADR's file stays in place per the supersession,
+rename, and deletion lifecycle in `AGENTS.md` Rule 7; only its status
+line changes. See [ADR-0004: Adopt ProtoBot
+V2](0004-adopt-protobot-v2.md) for the replacement decision.
