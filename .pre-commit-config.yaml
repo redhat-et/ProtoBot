@@ -185,6 +185,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^(scripts/(lint|test_lint)\.py|\.github/workflows/ci-workflow\.yaml)$
+      - id: test-pre-commit-cache
+        name: test-pre-commit-cache
+        entry: python3 scripts/test_pre_commit_cache.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(pre_commit_cache|test_pre_commit_cache)\.py|\.fullsend/harness/[^/]+\.ya?ml)$
       - id: adr-amendments
         name: adr-amendments
         entry: python3 scripts/check_adr_amendments.py

@@ -31,8 +31,8 @@ pin updater changes only:
 
 The pin updater does not regenerate workflow logic or change permissions,
 event filters, secrets, comments, or harness overlays; workflow synchronization
-happens separately. Update every discovered pin together, and do not ask the
-user to select or approve individual checksum or workflow-pin changes.
+happens separately. Update every discovered pin together; never ask the
+user to approve a subset.
 
 ## Upstream data trust boundary
 
@@ -99,9 +99,9 @@ fi
 ```
 
 The matching `fullsend-ai/agents` release supplies the harness bases. Inspect
-its release notes and relevant tag changes as well as the Fullsend CLI's notes.
+its release notes and tag changes as well as the CLI's notes.
 If no GitHub release or release notes exist for that tag, compare each
-overlay's current base tag with the target tag and record any migration or
+overlay's current base tag with the target tag and record migration or
 compatibility impact; missing notes do not mean no changes.
 The migration audit must inspect `.fullsend/config.yaml` and
 `.fullsend/config.base.yaml`, when present, against the selected release's
@@ -160,9 +160,9 @@ local behavior. See the [workflow synchronization
 contract](references/github-setup.md#generated-workflow-synchronization) for
 ProtoBot's `stop-fix` job and dispatch customizations. Do not apply ProtoBot's
 dispatch rules verbatim to another repository. Both generated workflow files
-and the complete set of integrity pins are required upgrade changes; do not
-ask the user to approve a subset. Synchronize both workflows to the
-selected-release content while retaining reviewed local additions.
+and the complete set of integrity pins are required upgrade changes.
+Synchronize both workflows to the selected-release content while retaining
+reviewed local additions.
 
 Review repository settings separately. Follow
 [the setup reference](references/github-setup.md) for report interpretation,
@@ -220,6 +220,10 @@ harness path is validated before fetching it. The script resolves
 all requested pins before writing, so validation or resolution failures leave
 files unchanged. It then atomically replaces each changed file separately,
 not as a multi-file filesystem transaction.
+
+On ProtoBot, `scripts/pre_commit_cache.py` also pins the release: update
+`AGENTS_REF`, `UPSTREAM_SCRIPT_SHA256`, and `PRECOMMIT_VERSION` there with
+the harness pins (`.fullsend/README.md#updating-the-pins`).
 
 For reusable-workflow pins, the target matches when both the 40-character
 commit SHA and release tag match. Single- and double-quoted references retain

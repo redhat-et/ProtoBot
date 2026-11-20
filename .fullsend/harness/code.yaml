@@ -1,0 +1,15 @@
+---
+base: "https://raw.githubusercontent.com/fullsend-ai/agents/v0.56.1/harness/code.yaml#sha256=2cf45a3a4409bee748cf0f0d5f1fb6cd7287677145f5f44d0b9e9b1fd19e93db"
+
+# Seed the offline pre-commit hook cache on the trusted runner before the
+# sandbox drops network access. See .fullsend/README.md.
+pre_script: scripts/pre-code-cache.sh
+
+host_files:
+    - src: /tmp/workspace/pre-commit-cache.tar.gz
+      dest: /tmp/protobot-pre-commit-cache.tar.gz
+      optional: true
+
+env:
+    sandbox:
+        PRE_COMMIT_HOME: /sandbox/.cache/pre-commit
