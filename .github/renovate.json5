@@ -104,11 +104,11 @@
     },
     {
       // Group pre-commit hook updates to reduce CI churn, merge queue
-      // latency, and retro agent dispatches. Exclude stbenjam/skillsaw
+      // latency, and retro agent dispatches. Exclude skillsaw
       // so it stays grouped with the Skillsaw config version.
       "description": "Group pre-commit hook updates",
       "matchManagers": ["pre-commit"],
-      "excludePackageNames": ["stbenjam/skillsaw"],
+      "excludePackageNames": ["skillsaw"],
       "groupName": "pre-commit hooks",
     },
     {
@@ -130,7 +130,6 @@
       "groupName": "skillsaw",
       "matchPackageNames": [
         "skillsaw",
-        "stbenjam/skillsaw",
       ],
     },
     {
