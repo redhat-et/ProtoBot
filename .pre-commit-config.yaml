@@ -145,10 +145,10 @@ repos:
         files: \.go$
       - id: test-check-portable-null-device
         name: test-check-portable-null-device
-        entry: python3 scripts/test_check_portable_null_device.py
+        entry: env GOWORK=off go test -C scripts/nulldevice ./...
         language: system
         pass_filenames: false
-        files: ^scripts/(check_portable_null_device|test_check_portable_null_device)\.py$
+        files: ^scripts/(check_portable_null_device\.py|nulldevice/.+)$
       - id: eval-corpus-schema
         name: eval-corpus-schema
         entry: python3 eval/corpus/validate.py
