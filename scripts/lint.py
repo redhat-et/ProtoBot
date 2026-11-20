@@ -181,6 +181,62 @@ def _configured_local_dependencies(
     return hooks
 
 
+def _default_python_language_version() -> str:
+    """Return the ``language_version`` pre-commit selects for Python.
+
+    Mirrors ``pre_commit.languages.python.get_default_version`` for the
+    interpreter running this wrapper. The returned name is also the
+    suffix pre-commit uses for the hook environment directory.
+    """
+    major = str(sys.version_info[0])
+    minor = f"{major}.{sys.version_info[1]}"
+    implementation = (
+        "python" if sys.implementation.name == "cpython" else sys.implementation.name
+    )
+    for potential in (minor, major):
+        executable = f"{implementation}{potential}"
+        if shutil.which(executable):
+            return executable
+    for executable_path in (sys.executable, os.path.realpath(sys.executable)):
+        executable = Path(executable_path.lower()).name.partition(".exe")[0]
+        if executable not in {"python", "pythonw"} and shutil.which(executable):
+            return executable
+    return "default"
+
+
+def _configured_local_python_environments(
+    config: dict[str, Any],
+    dependencies: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Return environment directories pre-commit requires for *dependencies*."""
+    environments = set()
+    defaults = config.get("default_language_version")
+    default_python = (
+        str(defaults.get("python", "default"))
+        if isinstance(defaults, dict)
+        else "default"
+    )
+    for repo in config.get("repos", []):
+        if repo.get("repo") != _LOCAL_REPO:
+            continue
+        for hook in repo.get("hooks", []):
+            hook_dependencies = tuple(
+                str(dependency)
+                for dependency in (hook.get("additional_dependencies") or [])
+            )
+            if hook_dependencies != dependencies:
+                continue
+            if hook.get("language") != "python":
+                continue
+            version = str(hook.get("language_version", "default"))
+            if version == "default":
+                version = default_python
+            if version == "default":
+                version = _default_python_language_version()
+            environments.add(f"py_env-{version}")
+    return tuple(sorted(environments))
+
+
 def _any_always_run(config: dict[str, Any]) -> bool:
     """Return True when any configured hook is marked ``always_run``."""
     for repo in config.get("repos", []):
@@ -201,20 +257,28 @@ def _cached_repos(pre_commit_home: Path) -> set[tuple[str, str]]:
 def _local_dependency_environment_is_installed(
     repo_path: Path,
     dependencies: tuple[str, ...],
+    environment_name: str | None = None,
 ) -> bool:
     """Return whether *repo_path* contains an installed environment for deps."""
     expected_state = {"additional_dependencies": list(dependencies)}
     try:
-        state_paths = repo_path.glob("*/.install_state_v1")
-        for state_path in state_paths:
+        if environment_name is None:
+            environments = [
+                entry
+                for entry in repo_path.iterdir()
+                if entry.is_dir() and _is_environment_dir(entry.name)
+            ]
+        else:
+            environments = [repo_path / environment_name]
+        for environment in environments:
+            if (environment / ".install_state_v2").is_file():
+                return True
+            state_path = environment / ".install_state_v1"
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 continue
-            if (
-                state == expected_state
-                and (state_path.parent / ".install_state_v2").is_file()
-            ):
+            if state == expected_state:
                 return True
     except OSError:
         return False
@@ -232,9 +296,23 @@ def _missing_local_dependency_environments(
         repo_name = f"{_LOCAL_REPO}:{','.join(dependencies)}"
         stored_path = cached_paths.get((repo_name, _LOCAL_REPO_VERSION))
         relative_path = _repository_relative_or_none(stored_path, pre_commit_home)
-        if relative_path is None or not _local_dependency_environment_is_installed(
-            pre_commit_home / relative_path, dependencies
-        ):
+        environments = _configured_local_python_environments(config, dependencies)
+        if relative_path is None:
+            missing.append((hook_id, dependencies))
+            continue
+        repo_path = pre_commit_home / relative_path
+        if environments:
+            installed = all(
+                _local_dependency_environment_is_installed(
+                    repo_path, dependencies, environment
+                )
+                for environment in environments
+            )
+        else:
+            installed = _local_dependency_environment_is_installed(
+                repo_path, dependencies
+            )
+        if not installed:
             missing.append((hook_id, dependencies))
     return missing
 

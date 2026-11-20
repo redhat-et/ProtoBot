@@ -321,7 +321,9 @@ class PreflightTests(unittest.TestCase):
         self,
     ) -> None:
         repo_path = self.home / "repo-local"
-        environment_path = repo_path / "py_env-python3.11"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
         environment_path.mkdir(parents=True)
         (environment_path / ".install_state_v1").write_text(
             json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
@@ -343,9 +345,11 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(0, rc)
         self.assertEqual("", buf.getvalue())
 
-    def test_incomplete_local_dependency_environment_is_missing(self) -> None:
+    def test_matching_v1_state_without_v2_is_installed(self) -> None:
         repo_path = self.home / "repo-local"
-        environment_path = repo_path / "py_env-python3.11"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
         environment_path.mkdir(parents=True)
         (environment_path / ".install_state_v1").write_text(
             json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
@@ -363,15 +367,62 @@ class PreflightTests(unittest.TestCase):
                 self.home,
                 _CONFIG_LOCAL_DEPENDENCIES,
             )
+        self.assertEqual(0, rc)
+        self.assertEqual("", buf.getvalue())
+
+    def test_v2_marker_without_v1_is_installed(self) -> None:
+        repo_path = self.home / "repo-local"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(0, rc)
+        self.assertEqual("", buf.getvalue())
+
+    def test_environment_for_another_python_version_is_missing(self) -> None:
+        repo_path = self.home / "repo-local"
+        environment_path = repo_path / "py_env-python0.0"
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v1").write_text(
+            json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
+            encoding="utf-8",
+        )
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
         self.assertEqual(1, rc)
         self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
 
     def test_undecodable_install_state_is_missing(self) -> None:
         repo_path = self.home / "repo-local"
-        environment_path = repo_path / "py_env-python3.11"
+        environment_path = (
+            repo_path / f"py_env-{checker._default_python_language_version()}"
+        )
         environment_path.mkdir(parents=True)
         (environment_path / ".install_state_v1").write_bytes(b"\xff")
-        (environment_path / ".install_state_v2").touch()
         _make_db(
             self.home / "db.db",
             [("local:pyyaml==6.0.3", "1", str(repo_path))],
