@@ -244,7 +244,7 @@ repos:
         description: checks json files for syntax parsable as json5 (with comments).
         entry: check-json5
         language: python
-        additional_dependencies: ["json5==0.17.3", "check-json5==1.4.1"]
+        additional_dependencies: ["json5==0.17.3", "check-json5==3.4.0"]
         types_or: [json, json5]
       - id: zizmor
         name: zizmor
