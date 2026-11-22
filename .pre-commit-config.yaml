@@ -29,7 +29,7 @@
 
 repos:
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: 341e2a331ba578029e66c2e01183e7a6b5ca9ab4  # frozen: v0.24.0
+    rev: c01a1853c19b175aee6a09f24e2ad9b748c485ad  # frozen: v0.24.1
     hooks:
       - id: markdownlint-cli2
         args: ["--config", ".github/markdownlint-cli2.yaml"]
@@ -47,7 +47,7 @@ repos:
       - id: hadolint
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 44507b236cb9d68cfe3e94cc8b5840cfd5988318  # frozen: 44.221.1
+    rev: 89f74b2ed90a0c52b809e8cf39611b49424cf948  # frozen: 44.235.1
     hooks:
       - id: renovate-config-validator
 
@@ -204,7 +204,7 @@ repos:
         description: Test shell scripts with shellcheck
         entry: shellcheck
         language: python
-        additional_dependencies: ["shellcheck-py==0.9.0.6"]
+        additional_dependencies: ["shellcheck-py==0.11.0.1"]
         types: [shell]
         require_serial: true  # shellcheck can detect sourcing this way
       # Prevent secrets from being committed
