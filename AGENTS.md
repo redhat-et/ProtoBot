@@ -33,17 +33,16 @@
 
 ## Context budget and prompt efficiency
 
-`AGENTS.md` enters every dispatched agent's prompt, capped by
-`context-budget`'s `agents-md` warn limit in `.skillsaw.yaml` and
-enforced downward by
-[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
+`AGENTS.md` enters every dispatched agent's prompt. The `agents-md`
+warn limit in `.skillsaw.yaml` caps it, and
+[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py)
+enforces the `.skillsaw-baseline.json` ceiling downward.
 
-1. **Respect the prompt context budget.** Do not raise a
-   `.skillsaw-baseline.json` ceiling for prose; after shrinking,
-   run `skillsaw baseline`
-   to ratchet it down. Lower `.skillsaw.yaml`'s
-   `agents-md` warn limit when `AGENTS.md` shrinks below it
-   (`.skillsaw.yaml:19-20`).
+1. **Respect the prompt context budget.** Never raise or delete a
+   `.skillsaw-baseline.json` ceiling row while it exists. After a
+   genuine prose shrink, lower the `agents-md` warn limit in
+   `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
+   downward (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
@@ -60,43 +59,43 @@ A governed scope defines a domain of applicability; its list or
 governed collection defines the sibling set. A **module README** is
 the top-level `README.md` of a directory with a `go.mod`.
 
-When creating or modifying a numbered rule in `AGENTS.md`, specification
-document under `docs/`, skill file under `.agents/skills/`, module
-README, or entry in a future governed scope, agents must follow these
-rules. Review agents must enforce them reflexively on `AGENTS.md` PRs
-creating, modifying, or consolidating entries.
+These rules apply to numbered rules in `AGENTS.md`, specification
+documents under `docs/`, skill files under `.agents/skills/`, module
+READMEs, and entries in future governed scopes. Review agents must
+enforce them reflexively on `AGENTS.md` changes.
 
 1. **Read all sibling entries first.** Read every other entry in the
    list or governed collection before drafting or revising one.
 
 2. **Reuse established terminology.** Match sibling entries' terms for
-   the same concepts. An undeclared alias for a term already used in the
-   same list or governed collection is a defect.
+   the same concepts. An undeclared alias for a term in the same list or
+   governed collection is a defect.
 
 3. **Review agents must check sibling-entry terminology.** When reviewing
    a PR creating or modifying an entry in a governed scope, verify
    that the new or changed entry reuses established sibling terminology
-   rather than inventing an alias. In a module README, also check for
-   drift between neighboring paragraphs and between a CLI flag and its
-   description. Findings should include terminology drift in the
+   rather than inventing an alias. In a module README, also check drift
+   between neighboring paragraphs and between a CLI flag and its
+   description. Findings must include terminology drift in the
    same list or governed collection, not only specification-hierarchy
-   keyword checks. For `AGENTS.md` modifications, verify prose
-   consolidations introduce no undeclared aliases for established terms
+   keyword checks. For `AGENTS.md`, verify prose consolidation
+   introduces no undeclared aliases for established terms
    or omitted grammatical referents in requirement clauses.
 
 4. **Match intra-entry restatement terminology.** When an entry
    restates a requirement's cases in a separate enforcement or
-   consequence clause, both statements must use identical terminology.
-   An undeclared alias or omitted term is a defect. Review agents must
-   check this restatement and include intra-entry terminology drift
-   findings, not only sibling-entry terminology matching.
+   consequence clause, both statements must use identical terminology;
+   an undeclared alias or omitted term is a defect. Review agents must
+   check this restatement and include intra-entry terminology drift,
+   not only sibling-entry terminology matching.
 
-### Examples of sibling entries
+### Rules for identifying sibling entries
 
-Numbered rules in `AGENTS.md` (other rules in the list); specification
-documents under `docs/` (other governed Markdown files); skill files under
-`.agents/skills/` (other skill files); module READMEs (other module READMEs
-and `docs/` specification documents describing the module).
+1. **Identify sibling entries.** Numbered rules in `AGENTS.md` (other
+   rules in the list); specification documents under `docs/` (other
+   governed Markdown files); skill files under `.agents/skills/`
+   (other skill files); module READMEs (other module READMEs and
+   `docs/` specification documents describing the module).
 
 ## Specification document hierarchy
 
@@ -130,8 +129,8 @@ not the list, defines membership.
   design influences.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
   versioned evaluation fixture schema and result contract.
-- [`docs/architecture/open-questions.md`][open-questions-doc] —
-  unresolved questions.
+- `docs/architecture/open-questions.md` — unresolved design
+  questions across all areas.
 - `docs/decisions/` — architecture decision records.
 
 [git-integration-doc]: docs/architecture/git-integration.md
@@ -140,7 +139,6 @@ not the list, defines membership.
 [ears-and-review-doc]: .agents/skills/eliciting-requirements/references/ears-and-review.md
 [drafting-table-wms-doc]: docs/architecture/drafting-table-wms.md
 [evaluation-corpus-doc]: docs/architecture/evaluation-corpus.md
-[open-questions-doc]: docs/architecture/open-questions.md
 [jobsite-sandbox-doc]: docs/architecture/jobsite-sandbox.md
 
 ### Rules for creating or modifying specification documents
@@ -230,8 +228,8 @@ must follow these rules:
    (`**[Amended Month Year]**`) with the change, its rationale, and
    references to updated architecture documents. Review agents must
    verify accepted decision text is never rewritten or replaced in
-   place, and amendments append the dated amendment block with the
-   change, its rationale, and
+   place, and amendments append the dated amendment block
+   (`**[Amended Month Year]**`) with the change, its rationale, and
    references to updated architecture documents.
 
 ## Agent skills
