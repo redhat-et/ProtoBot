@@ -1425,41 +1425,56 @@ def _run_pre_commit(argv: list[str]) -> int | None:
     """Run one ``pre-commit`` command and return its exit code.
 
     Returns None when the ``pre-commit`` binary cannot run — for
-    example it is not installed (``OSError``). The caller then fails
-    with the pinned version to install instead of a traceback.
+    example it is not installed (``OSError``). The caller reports
+    that failure once per wrapper run, not once per configuration.
     """
     try:
         return subprocess.run(argv, cwd=str(REPO_ROOT), check=False).returncode
-    except OSError as error:
-        print(
-            f"ERROR: cannot run pre-commit ({type(error).__name__}: {error}). "
-            f"Install the pinned version {PRE_COMMIT_VERSION}; "
-            "`scripts/lint.py --print-pre-commit-version` prints it.",
-            file=sys.stderr,
-        )
+    except OSError:
         return None
+
+
+def _report_missing_pre_commit() -> None:
+    """Report, once, that the ``pre-commit`` binary could not run."""
+    print(
+        "ERROR: cannot run pre-commit. Install the pinned version "
+        f"{PRE_COMMIT_VERSION}; `scripts/lint.py --print-pre-commit-version` "
+        "prints it.",
+        file=sys.stderr,
+    )
 
 
 def _run_each_config(paths: list[Path], scope_args: list[str]) -> int:
     """Run ``pre-commit run`` once per configuration and wait for it.
 
-    Every configuration runs even when an earlier one fails, so one
-    failing configuration cannot hide another's findings. When any
-    configuration fails, one stderr line names every failing
-    configuration, because the exit code alone cannot say which one
-    failed. Returns the first non-zero exit code, or 0 when every
-    configuration passes.
+    Every configuration runs even when an earlier one fails or could
+    not launch, so one failing configuration cannot hide another's
+    findings. When any configuration fails, one stderr line names
+    every failing configuration — launch failures included — because
+    the exit code alone cannot say which one failed. Returns 1 when
+    any configuration could not launch, the first non-zero exit code
+    when hooks failed, or 0 when every configuration passes.
     """
     # Flush so lines this wrapper already printed (for example the
     # cache restore notice) appear before the child's own output.
     sys.stdout.flush()
     sys.stderr.flush()
     first_rc = 0
+    launch_failed = False
+    launch_error_reported = False
     failed: list[Path] = []
     for path in paths:
         rc = _run_pre_commit(_pre_commit_run_command(path, scope_args))
         if rc is None:
-            return 1
+            # The binary could not launch. Report that once, record
+            # the configuration as failed, and keep going so the
+            # remaining configurations still run.
+            if not launch_error_reported:
+                _report_missing_pre_commit()
+                launch_error_reported = True
+            launch_failed = True
+            failed.append(path)
+            continue
         if rc != 0:
             if first_rc == 0:
                 first_rc = rc
@@ -1467,6 +1482,8 @@ def _run_each_config(paths: list[Path], scope_args: list[str]) -> int:
     if failed:
         listing = ", ".join(_relative(path) for path in failed)
         print(f"ERROR: these configurations failed: {listing}", file=sys.stderr)
+    if launch_failed:
+        return 1
     return first_rc
 
 
@@ -1485,6 +1502,7 @@ def _check_parity(pre_commit_home: Path, online: bool) -> int:
     for path in paths:
         rc = _run_pre_commit(["pre-commit", "validate-config", str(path)])
         if rc is None:
+            _report_missing_pre_commit()
             return 1
         if rc != 0 and first_rc == 0:
             first_rc = rc

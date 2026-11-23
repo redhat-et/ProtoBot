@@ -2724,19 +2724,82 @@ class MainCliMappingTests(unittest.TestCase):
         self.assertNotIn("these configurations failed", buf.getvalue())
 
     def test_missing_pre_commit_binary_fails_with_the_pinned_version(self) -> None:
-        # A missing pre-commit binary must not raise a traceback; the
-        # error names the pinned version to install.
+        # A missing pre-commit binary must not raise a traceback. Both
+        # configurations are attempted, one clear error names the
+        # pinned version, and the summary names both configurations.
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError("pre-commit")
             buf = io.StringIO()
             with contextlib.redirect_stderr(buf):
                 rc = checker.main(["--all-files"])
         self.assertEqual(1, rc)
-        self.assertEqual(1, mock_run.call_count)
+        self.assertEqual(2, mock_run.call_count)
         message = buf.getvalue()
         self.assertIn("cannot run pre-commit", message)
+        self.assertEqual(1, message.count("cannot run pre-commit"))
         self.assertIn(checker.PRE_COMMIT_VERSION, message)
         self.assertIn("--print-pre-commit-version", message)
+        self.assertIn(
+            "ERROR: these configurations failed: .pre-commit-config.yaml, "
+            ".github/pre-commit-ci.yaml",
+            message,
+        )
+
+    def test_launch_failure_still_runs_the_remaining_configurations(self) -> None:
+        # The gate configuration cannot launch; the CI configuration
+        # must still be attempted, and the summary must name only the
+        # gate.
+        with patch.object(
+            checker, "_run_pre_commit", side_effect=[None, 0]
+        ) as mock_run_pre_commit:
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(
+            [
+                [
+                    "pre-commit",
+                    "run",
+                    "--config",
+                    str(checker.CONFIG_PATH),
+                    "--all-files",
+                ],
+                [
+                    "pre-commit",
+                    "run",
+                    "--config",
+                    str(checker.CI_CONFIG_PATH),
+                    "--all-files",
+                ],
+            ],
+            [c.args[0] for c in mock_run_pre_commit.call_args_list],
+        )
+        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn(
+            "ERROR: these configurations failed: .pre-commit-config.yaml", message
+        )
+        self.assertNotIn(".github/pre-commit-ci.yaml", message)
+
+    def test_launch_failure_of_every_configuration_names_both(self) -> None:
+        # Both configurations cannot launch: one clear error (not one
+        # per configuration), the summary names both, and the return
+        # value is 1.
+        with patch.object(
+            checker, "_run_pre_commit", return_value=None
+        ) as mock_run_pre_commit:
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(2, mock_run_pre_commit.call_count)
+        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn(
+            "ERROR: these configurations failed: .pre-commit-config.yaml, "
+            ".github/pre-commit-ci.yaml",
+            message,
+        )
+        self.assertEqual(1, message.count("cannot run pre-commit"))
 
 
 class MainEnvironmentTests(unittest.TestCase):

@@ -27,14 +27,17 @@ Rules (ADR-0005):
   and the resolved script path stays inside ``scripts/``. Every import
   in the entry script, at any nesting depth, must be a standard-library
   module or resolve to a repository file. Imports resolve the way
-  Python resolves them: bare imports search the entry script's
-  directory first and ``scripts/`` second; ``scripts.``-prefixed
-  imports resolve from the repository root; a package ``__init__.py``
-  wins over a same-named module file; namespace directories are
-  allowed along a path whose leaf module file exists; a ``from``
-  import of a name that the package initializer binds is an attribute,
-  not a submodule; and relative imports resolve against the importing
-  file's package, failing closed when they escape ``scripts/`` or
+  Python resolves them: a bare import searches only the base of the
+  file being scanned -- the entry script's directory for the entry
+  script, and the directory its package was imported from for a
+  reached module -- with no implicit ``scripts/`` fallback;
+  ``scripts.``-prefixed imports resolve from the repository root; a
+  package ``__init__.py`` wins over a same-named module file;
+  namespace directories are allowed along a path whose leaf module
+  file exists; a ``from`` import of a name that the package
+  initializer binds is an attribute, not a submodule; and relative
+  imports resolve from the qualified package name of the importing
+  file, failing closed when they go above the top-level package or
   resolve to no file. Repository files are inspected transitively for
   the imports that execute at import time: class bodies count.
   Function and method bodies are not scanned, because they do not
@@ -87,19 +90,31 @@ class GateReport:
     diagnostics: list[str]
 
 
+@dataclass(frozen=True)
+class ScanFrame:
+    """One repository file in the import scan.
+
+    ``file`` is the repo-relative path. ``package`` is the qualified
+    package name the file belongs to; ``None`` marks the entry script
+    and top-level modules, which have no package. ``base`` is the
+    ``sys.path``-style directory that the qualified name resolves from.
+    """
+
+    file: str
+    package: str | None
+    base: str
+
+
 @dataclass
 class ScanState:
     """State carried through one gate-script import scan.
 
-    ``repo_root`` anchors every path. ``entry_directory`` is the
-    directory of the gate entry script: Python puts it first on
-    ``sys.path``, so bare imports resolve there before ``scripts/``.
-    ``visited`` holds repository files already inspected, and
-    ``diagnostics`` collects the rendered import violations.
+    ``repo_root`` anchors every path. ``visited`` holds repository
+    files already inspected, and ``diagnostics`` collects the rendered
+    import violations.
     """
 
     repo_root: Path
-    entry_directory: str
     visited: set[str]
     diagnostics: list[str]
 
@@ -406,19 +421,19 @@ def _import_diagnostics(script: str, tree: ast.Module, repo_root: Path) -> list[
     rules. The visited set holds repository-file paths, so each file is
     inspected once and the recursion stays bounded.
     """
-    state = ScanState(
-        repo_root=repo_root,
-        entry_directory=_parent_directory(script),
-        visited={script},
-        diagnostics=[],
+    entry = ScanFrame(
+        file=script,
+        package=None,
+        base=_parent_directory(script),
     )
-    _scan_imports(_all_imports(tree), (script,), state)
+    state = ScanState(repo_root=repo_root, visited={script}, diagnostics=[])
+    _scan_imports(_all_imports(tree), (entry,), state)
     return state.diagnostics
 
 
 def _scan_imports(
     imports: list[ast.Import | ast.ImportFrom],
-    chain: tuple[str, ...],
+    chain: tuple[ScanFrame, ...],
     state: ScanState,
 ) -> None:
     """Inspect *imports* and every repository file they load."""
@@ -430,23 +445,28 @@ def _scan_imports(
             _scan_from_import(node, chain, state)
 
 
-def _scan_dotted_import(dotted: str, chain: tuple[str, ...], state: ScanState) -> None:
+def _scan_dotted_import(
+    dotted: str,
+    chain: tuple[ScanFrame, ...],
+    state: ScanState,
+) -> None:
     """Inspect one dotted module name of an ``import`` statement.
 
-    ``sys.path`` order applies: the entry script's directory first,
-    then ``scripts/``. A name that resolves nowhere and whose root is
+    A bare name searches only the base of the file being scanned (the
+    last frame of *chain*): Python searches ``sys.path``, never a
+    sibling directory. ``scripts.``-prefixed names resolve from the
+    repository root. A name that resolves nowhere and whose root is
     not standard library is a third-party import.
     """
     if dotted == "scripts" or dotted.startswith("scripts."):
         files = _module_files_in_base("", dotted, state.repo_root)
-        _scan_file_list(files, chain, state)
+        _scan_file_list(files, "", chain, state)
         return
     root = dotted.split(".")[0]
-    for base in (state.entry_directory, "scripts"):
-        files = _module_files_in_base(base, dotted, state.repo_root)
-        if files:
-            _scan_file_list(files, chain, state)
-            return
+    files = _module_files_in_base(chain[-1].base, dotted, state.repo_root)
+    if files:
+        _scan_file_list(files, chain[-1].base, chain, state)
+        return
     if root not in sys.stdlib_module_names:
         problem = _third_party_detail(root)
         state.diagnostics.append(_import_diagnostic(chain, problem, THIRD_PARTY_FIX))
@@ -454,7 +474,7 @@ def _scan_dotted_import(dotted: str, chain: tuple[str, ...], state: ScanState) -
 
 def _scan_from_import(
     node: ast.ImportFrom,
-    chain: tuple[str, ...],
+    chain: tuple[ScanFrame, ...],
     state: ScanState,
 ) -> None:
     """Inspect one ``from`` import statement."""
@@ -463,12 +483,11 @@ def _scan_from_import(
         return
     module = node.module or ""
     root = module.split(".")[0]
-    bases = [""] if root == "scripts" else [state.entry_directory, "scripts"]
-    for base in bases:
-        files = _from_import_files(node, module, base, state.repo_root)
-        if files:
-            _scan_file_list(files, chain, state)
-            return
+    base = "" if root == "scripts" else chain[-1].base
+    files = _from_import_files(node, module, base, state.repo_root)
+    if files:
+        _scan_file_list(files, base, chain, state)
+        return
     if root not in sys.stdlib_module_names:
         problem = _third_party_detail(root)
         state.diagnostics.append(_import_diagnostic(chain, problem, THIRD_PARTY_FIX))
@@ -476,37 +495,66 @@ def _scan_from_import(
 
 def _scan_relative_import(
     node: ast.ImportFrom,
-    chain: tuple[str, ...],
+    chain: tuple[ScanFrame, ...],
     state: ScanState,
 ) -> None:
     """Inspect one relative ``from`` import statement.
 
-    The import resolves against the package of the file being
-    inspected (the last entry of *chain*), one directory up per dot
-    beyond the first. A base outside ``scripts/``, or a target that
-    resolves to no repository file, fails closed.
+    The import resolves from the qualified package of the file being
+    scanned (the last frame of *chain*), one package up per dot beyond
+    the first. Traversal above the top-level package, or a target
+    whose own module file is missing, fails closed.
     """
-    base = _relative_base(node.level, chain[-1])
-    if base is None:
+    frame = chain[-1]
+    package = _relative_package(node.level, frame.package)
+    if package is None:
         problem = (
-            f'uses relative import "{_relative_render(node)}" that escapes '
-            "the scripts/ directory"
+            f'uses relative import "{_relative_render(node)}" that goes above '
+            "the top-level package"
         )
         state.diagnostics.append(_import_diagnostic(chain, problem, "fix the import"))
         return
     targets = [node.module] if node.module else [alias.name for alias in node.names]
     for target in targets:
-        files = _module_files_in_base(base, target, state.repo_root)
+        qualified = f"{package}.{target}"
+        files = _relative_target_files(frame.base, qualified, state.repo_root)
         if not files:
             problem = (
                 f'uses relative import "{_relative_render(node)}" that resolves '
-                f'to no repository file for "{target}" under "{base}"'
+                f'to no repository file for "{qualified}"'
             )
             state.diagnostics.append(
                 _import_diagnostic(chain, problem, "fix the import or add the module")
             )
             continue
-        _scan_file_list(files, chain, state)
+        _scan_file_list(files, frame.base, chain, state)
+
+
+def _relative_package(level: int, package: str | None) -> str | None:
+    """Return the package that a relative import resolves from.
+
+    ``None`` means the file has no package (the entry script or a
+    top-level module), or the import goes above the top-level package.
+    """
+    if package is None:
+        return None
+    parts = package.split(".")
+    if level - 1 >= len(parts):
+        return None
+    return ".".join(parts[: len(parts) - (level - 1)])
+
+
+def _relative_target_files(base: str, qualified: str, repo_root: Path) -> list[str]:
+    """Return the files for one relative target, requiring its own leaf.
+
+    An ancestor package file alone does not satisfy a relative import:
+    the target module itself must exist.
+    """
+    files = _module_files_in_base(base, qualified, repo_root)
+    stem = "/".join(([base] if base else []) + qualified.split("."))
+    if f"{stem}.py" in files or f"{stem}/__init__.py" in files:
+        return files
+    return []
 
 
 def _relative_render(node: ast.ImportFrom) -> str:
@@ -514,29 +562,59 @@ def _relative_render(node: ast.ImportFrom) -> str:
     return f"{'.' * node.level}{node.module or ''}"
 
 
-def _scan_file_list(files: list[str], chain: tuple[str, ...], state: ScanState) -> None:
-    """Inspect every repository file in *files*, extending the chain."""
+def _scan_file_list(
+    files: list[str],
+    base: str,
+    chain: tuple[ScanFrame, ...],
+    state: ScanState,
+) -> None:
+    """Inspect every repository file in *files*, extending the chain.
+
+    A file already in the chain is skipped: it was inspected where the
+    chain first reached it.
+    """
+    chained = {frame.file for frame in chain}
     current = chain
     for module_file in files:
-        current = _scan_repository_file(module_file, current, state)
+        if module_file in chained:
+            continue
+        chained.add(module_file)
+        frame = _scan_frame(module_file, base)
+        current = _scan_repository_file(frame, current, state)
+
+
+def _scan_frame(module_file: str, base: str) -> ScanFrame:
+    """Return the scan frame for one resolved repository file.
+
+    The qualified module name comes from the path relative to *base*.
+    A package ``__init__.py`` belongs to its own package; a plain
+    module belongs to its parent package.
+    """
+    relative = module_file[len(base) + 1 :] if base else module_file
+    if relative.endswith("/__init__.py"):
+        package = relative[: -len("/__init__.py")].replace("/", ".")
+    else:
+        parts = relative[: -len(".py")].split("/")
+        package = ".".join(parts[:-1]) if len(parts) > 1 else None
+    return ScanFrame(file=module_file, package=package, base=base)
 
 
 def _scan_repository_file(
-    module_file: str,
-    chain: tuple[str, ...],
+    frame: ScanFrame,
+    chain: tuple[ScanFrame, ...],
     state: ScanState,
-) -> tuple[str, ...]:
+) -> tuple[ScanFrame, ...]:
     """Parse one repository file and return the chain extended with it.
 
     An already-visited file is not parsed again, but it still extends
     the chain, so a submodule diagnostic names the package files that
     import it.
     """
-    extended = (*chain, module_file)
-    if module_file in state.visited:
+    extended = (*chain, frame)
+    if frame.file in state.visited:
         return extended
-    state.visited.add(module_file)
-    tree = _parse_repository_module(module_file, state.repo_root)
+    state.visited.add(frame.file)
+    tree = _parse_repository_module(frame.file, state.repo_root)
     if tree is not None:
         _scan_imports(_module_scope_imports(tree), extended, state)
     return extended
@@ -685,23 +763,6 @@ def _import_binds(alias: ast.alias, name: str) -> bool:
     return alias.name.split(".")[0] == name
 
 
-def _relative_base(level: int, current_file: str) -> str | None:
-    """Return the package directory a relative import resolves against.
-
-    The base is the directory of *current_file*, one directory up per
-    dot beyond the first. ``None`` means the base escapes the
-    ``scripts/`` tree.
-    """
-    directory = _parent_directory(current_file)
-    for _ in range(level - 1):
-        if not directory.startswith("scripts/") or directory == "scripts":
-            return None
-        directory = _parent_directory(directory)
-    if directory == "scripts" or directory.startswith("scripts/"):
-        return directory
-    return None
-
-
 def _parent_directory(path: str) -> str:
     """Return the directory part of one repo-relative POSIX path."""
     return path.rsplit("/", 1)[0] if "/" in path else ""
@@ -754,16 +815,16 @@ def _statement_imports(node: ast.AST) -> list[ast.Import | ast.ImportFrom]:
 
 
 def _import_diagnostic(
-    chain: tuple[str, ...],
+    chain: tuple[ScanFrame, ...],
     problem: str,
     fix: str,
 ) -> str:
     """Return one rendered import diagnostic with its file chain."""
     through = ""
     if len(chain) > 1:
-        links = " -> ".join(f'"{path}"' for path in chain[1:])
+        links = " -> ".join(f'"{frame.file}"' for frame in chain[1:])
         through = f" through {links}"
-    return f'entry script "{chain[0]}" {problem}{through}; {fix}'
+    return f'entry script "{chain[0].file}" {problem}{through}; {fix}'
 
 
 def _third_party_detail(module: str) -> str:

@@ -399,7 +399,6 @@ class CheckConfigTests(unittest.TestCase):
         sources = {
             "from . import helper": "from . import helper\n",
             "from .helper import value": "from .helper import value\n",
-            "from ..other import value": "from ..other import value\n",
         }
         for label, child_source in sources.items():
             with self.subTest(case=label):
@@ -410,21 +409,44 @@ class CheckConfigTests(unittest.TestCase):
                 self.write_script("scripts/pkg/__init__.py", "")
                 self.write_script("scripts/pkg/child.py", child_source)
                 self.write_script("scripts/pkg/helper.py", "import os\n")
-                self.write_script("scripts/other.py", "import os\n")
 
                 self.assertEqual([], self.run_checker().diagnostics)
 
-    def test_relative_import_escape_fails(self) -> None:
-        """Reject a relative import that escapes the scripts/ tree."""
+    def test_relative_import_parent_package_sibling_resolves(self) -> None:
+        """Resolve ``from ..sibling`` inside ``pkg.sub.child`` to ``pkg.sibling``."""
         self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
-        self.write_widget_scripts("import pkg.child\n")
+        self.write_widget_scripts("import pkg.sub.child\n")
         self.write_script("scripts/pkg/__init__.py", "")
-        self.write_script("scripts/pkg/child.py", "from ... import value\n")
+        self.write_script("scripts/pkg/sub/__init__.py", "")
+        self.write_script("scripts/pkg/sub/child.py", "from ..sibling import value\n")
+        self.write_script("scripts/pkg/sibling.py", "import yaml\n")
 
         diagnostics = self.run_checker().diagnostics
 
         self.assertEqual(1, len(diagnostics))
-        self.assertIn("escapes the scripts/ directory", diagnostics[0])
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/pkg/sibling.py", diagnostics[0])
+
+    def test_relative_import_above_top_level_fails(self) -> None:
+        """Reject a relative import that goes above the top-level package."""
+        sources = {
+            "two dots in pkg.child": "from ..other import value\n",
+            "three dots in pkg.child": "from ... import value\n",
+        }
+        for label, child_source in sources.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts("import pkg.child\n")
+                self.write_script("scripts/pkg/__init__.py", "")
+                self.write_script("scripts/pkg/child.py", child_source)
+                self.write_script("scripts/other.py", "import os\n")
+
+                diagnostics = self.run_checker().diagnostics
+
+                self.assertEqual(1, len(diagnostics))
+                self.assertIn("above the top-level package", diagnostics[0])
 
     def test_relative_import_missing_target_fails(self) -> None:
         """Reject a relative import that resolves to no repository file."""
@@ -529,17 +551,17 @@ class CheckConfigTests(unittest.TestCase):
         self.assertIn("scripts/tools/helper.py", diagnostics[0])
         self.assertNotIn("scripts/helper.py", diagnostics[0])
 
-    def test_bare_import_falls_back_to_scripts(self) -> None:
-        """Resolve a bare import against scripts/ when the entry directory has none."""
+    def test_bare_import_outside_entry_directory_fails(self) -> None:
+        """Reject a bare import that only scripts/ would satisfy."""
         self.write_config(gate_config(TOOLS_CHECKER_HOOK, TOOLS_COMPANION_HOOK))
         self.write_tools_scripts("import helper\n")
-        self.write_script("scripts/helper.py", "import yaml\n")
+        self.write_script("scripts/helper.py", "import os\n")
 
         diagnostics = self.run_checker().diagnostics
 
         self.assertEqual(1, len(diagnostics))
-        self.assertIn("yaml", diagnostics[0])
-        self.assertIn("scripts/helper.py", diagnostics[0])
+        self.assertIn("helper", diagnostics[0])
+        self.assertIn("outside the standard library and the repository", diagnostics[0])
 
     def test_system_entry_with_shell_operator_fails(self) -> None:
         """Reject chained commands, pipelines, and command substitution."""
