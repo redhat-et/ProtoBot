@@ -38,12 +38,11 @@ warn limit in `.skillsaw.yaml` caps it, and
 [`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py)
 enforces the `.skillsaw-baseline.json` ceiling downward.
 
-1. **Respect the prompt context budget.** Never raise or delete a
-   `.skillsaw-baseline.json` ceiling row while it exists. Deletion is a
-   manual-compliance policy; the checker evaluates only ceiling keys
-   present in the current file. After a genuine prose shrink, lower the
-   `agents-md` warn limit in `.skillsaw.yaml`, then run `skillsaw
-   baseline` to ratchet the ceiling downward (`.skillsaw.yaml:27`).
+1. **Respect the prompt context budget.** Do not raise a
+   `.skillsaw-baseline.json` ceiling to fit new prose. After a genuine
+   shrink, lower the `agents-md` warn limit in `.skillsaw.yaml`, then run
+   `skillsaw baseline` to ratchet the ceiling downward
+   (`.skillsaw.yaml:27`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
@@ -62,8 +61,8 @@ defines the sibling set. A **module README** is the top-level
 
 These rules apply to numbered rules in `AGENTS.md`, specification
 documents under `docs/`, skill files under `.agents/skills/`, module
-READMEs, and future governed-scope entries. Review agents must enforce
-them reflexively on `AGENTS.md` changes.
+READMEs, and entries in any future governed scope; review agents must
+enforce them reflexively on `AGENTS.md`.
 
 1. **Read all sibling entries first.** Read every other entry in the
    list or governed collection before drafting or revision.
@@ -73,26 +72,26 @@ them reflexively on `AGENTS.md` changes.
    governed collection is a defect.
 
 3. **Review agents must check sibling-entry terminology.** When reviewing
-   a PR that creates or modifies a governed-scope entry, verify the
-   entry reuses established sibling terminology rather than an alias. In
-   a module README, also check drift between neighboring paragraphs and
-   between a CLI flag and its description. Findings must include such
-   drift in the same list or governed collection, not only
+   a PR that creates or modifies an entry in a governed scope, verify
+   the entry reuses established sibling terminology rather than an alias.
+   For module READMEs, check drift between neighboring paragraphs and
+   between a CLI flag and its description. Findings should include
+   terminology drift in the same list or governed collection, not only
    specification-hierarchy keyword checks. For every `AGENTS.md`
    modification, verify no undeclared aliases for established terms or
    omitted grammatical referents.
 
 4. **Match intra-entry restatement terminology.** When an entry
-   restates a requirement's cases in a separate enforcement or
-   consequence clause, both statements must use identical terminology;
+   restates a requirement's cases in an enforcement or consequence
+   clause, both statements must use identical terminology;
    an undeclared alias or omitted term is a defect. Review agents must
-   check this restatement for intra-entry terminology drift, not only
-   sibling-entry terminology matching.
+   check restatements. Findings should include intra-entry terminology
+   drift, not only sibling-entry terminology matching.
 
-Examples: numbered rules in `AGENTS.md` (other rules); specification
-documents under `docs/` (other governed Markdown files); skill files
-under `.agents/skills/` (other skill files); module READMEs (other
-module READMEs and `docs/` specification documents describing the
+Examples: numbered `AGENTS.md` rules (other rules in the list); `docs/`
+specification documents (other governed Markdown files); `.agents/skills/`
+skill files (other skill files); module READMEs
+(other module READMEs and `docs/` specification documents describing the
 module).
 
 ## Specification document hierarchy
@@ -123,8 +122,8 @@ not the list, defines membership.
 - [`docs/architecture/agent-harness/`][agent-harness-doc] — Agent
   Harness Adapter Contract (`adapter-contract.md`) and bindings
   (`opencode.md`, `claude-code.md`, `codex.md`).
-- `docs/architecture/related-work.md` — internal and external
-  design influences.
+- [`docs/architecture/related-work.md`](docs/architecture/related-work.md) —
+  internal and external projects informing the design.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
   versioned evaluation fixture schema and result contract.
 - `docs/architecture/open-questions.md` — unresolved design
@@ -196,7 +195,7 @@ must follow these rules:
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
    registered specification artifact, Rule 4 identifies staleness in
-   it, or a PR modifies
+   such an artifact, or a PR modifies
    [.protobot/project.yaml](.protobot/project.yaml), inspect the
    affected registered specification artifact or project configuration
    for hand edits under Rule 5.
@@ -213,7 +212,7 @@ must follow these rules:
    metadata-only artifact-registry changes require no artifact
    operation. Reviewers must flag identifiable hand edits, not claim CLI
    provenance from an operation record. Findings should include each
-   diagnostic and any hand edit in that registered specification
+   listed diagnostic and any hand edit in that registered specification
    artifact or [.protobot/project.yaml](.protobot/project.yaml), and
    Rule 4 staleness findings for a registered specification artifact
    must prescribe `ears-manager artifact put`, not a hand edit.
