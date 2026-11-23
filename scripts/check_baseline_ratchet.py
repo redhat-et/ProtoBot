@@ -309,7 +309,11 @@ def _ceiling_number(value: object, file_path: str, source: str) -> int:
 def ceiling_values(
     data: dict[str, Any], source: str
 ) -> dict[tuple[str, str], list[int]]:
-    """Index ceiling entries as ``(file_path, rule_id) -> [values]``.
+    """Index ceiling entries as ``(file_path, rule_id) -> [value]``.
+
+    Each ``(file_path, rule_id)`` pair may appear at most once. A duplicate is
+    rejected as ambiguous instead of being resolved by a tie-break rule, so
+    every comparison sees one ceiling value per key.
 
     ``file_path`` must be a repo-relative path without parent directory (``..``)
     segments. It is normalized with ``os.path.normpath`` and converted to a
@@ -357,17 +361,33 @@ def ceiling_values(
             raise BaselineRatchetError(
                 f"ERROR: {clean_source} ceiling for {clean_path} has an invalid file_path"
             )
-        index.setdefault((normalized_path, rule_id), []).append(number)
+        key = (normalized_path, rule_id)
+        if key in index:
+            clean_rule = sanitize_log_string(rule_id)
+            raise BaselineRatchetError(
+                f"ERROR: {clean_source} has more than one ceiling for "
+                f"{clean_path} ({clean_rule}); each (file_path, rule_id) pair "
+                "must appear at most once"
+            )
+        index[key] = [number]
     return index
 
 
 def compare_ceilings(
-    head: dict[str, Any], base: dict[str, Any], repo_root: Path | None = None
+    head: dict[str, Any],
+    base: dict[str, Any],
+    repo_root: Path | None = None,
+    head_index: dict[tuple[str, str], list[int]] | None = None,
 ) -> list[str]:
     """Return diagnostics for ceiling regressions between *head* and *base*.
 
-    An existing key's highest head value must be ``<=`` its lowest base value.
-    New ``(file_path, rule_id)`` keys present only in *head* are allowed.
+    An existing key's head value must be ``<=`` its base value. New
+    ``(file_path, rule_id)`` keys present only in *head* are allowed.
+
+    *head_index* may be supplied by a caller that already indexed *head* with
+    :func:`ceiling_values`; otherwise it is built here. Duplicate keys are
+    rejected by :func:`ceiling_values`, so each key has exactly one value and
+    the comparison needs no tie-break rule.
 
     When *repo_root* is given, a base ceiling missing from *head* is rejected
     if its file still exists. If the file was deleted, dropping the ceiling is
@@ -376,15 +396,16 @@ def compare_ceilings(
     supplies the repository root.
     """
     diagnostics: list[str] = []
-    head_index = ceiling_values(head, "working tree")
+    if head_index is None:
+        head_index = ceiling_values(head, "working tree")
     base_index = ceiling_values(base, "base branch")
     for key in sorted(head_index):
         file_path, _rule_id = key
         base_numbers = base_index.get(key)
         if not base_numbers:
             continue
-        base_val = min(base_numbers)
-        head_val = max(head_index[key])
+        base_val = base_numbers[0]
+        head_val = head_index[key][0]
         if head_val > base_val:
             clean_path = sanitize_log_string(file_path)
             diagnostics.append(
@@ -411,6 +432,26 @@ def compare_ceilings(
     return diagnostics
 
 
+def _agents_md_limit_entry(config: dict[str, Any]) -> tuple[bool, object]:
+    """Return ``(present, value)`` for ``limits.agents-md`` in *config*.
+
+    ``present`` distinguishes an absent key from a key whose value is not a
+    valid limit, so callers can report the actual problem.
+    """
+    rules = config.get("rules")
+    if not isinstance(rules, dict):
+        return False, None
+    context_budget = rules.get(CONTEXT_BUDGET_RULE_ID)
+    if not isinstance(context_budget, dict):
+        return False, None
+    limits = context_budget.get("limits")
+    if not isinstance(limits, dict):
+        return False, None
+    if AGENTS_MD_LIMIT_KEY not in limits:
+        return False, None
+    return True, limits[AGENTS_MD_LIMIT_KEY]
+
+
 def agents_md_warn_limit(config: dict[str, Any]) -> int | None:
     """Return ``limits.agents-md``'s numeric warn limit from *config*.
 
@@ -419,16 +460,7 @@ def agents_md_warn_limit(config: dict[str, Any]) -> int | None:
     checked here; the mapping between other file paths and skillsaw categories
     is intentionally left to skillsaw itself.
     """
-    rules = config.get("rules")
-    if not isinstance(rules, dict):
-        return None
-    context_budget = rules.get(CONTEXT_BUDGET_RULE_ID)
-    if not isinstance(context_budget, dict):
-        return None
-    limits = context_budget.get("limits")
-    if not isinstance(limits, dict):
-        return None
-    entry = limits.get(AGENTS_MD_LIMIT_KEY)
+    _present, entry = _agents_md_limit_entry(config)
     if isinstance(entry, bool):
         return None
     if isinstance(entry, int):
@@ -479,17 +511,40 @@ def compare_warn_limits(
 ) -> list[str]:
     """Return AGENTS.md warn-threshold parity diagnostics.
 
-    If the working-tree baseline tracks the ``AGENTS.md`` context-budget
-    ceiling and ``.skillsaw.yaml`` is present, its ``agents-md`` warn limit
-    must be numeric and ``<=`` the recorded ceiling.
+    When the working-tree baseline tracks the ``AGENTS.md`` context-budget
+    ceiling, ``.skillsaw.yaml`` must exist and its ``agents-md`` warn limit
+    must be numeric and ``<=`` the recorded ceiling. A missing config fails
+    closed: otherwise deleting ``.skillsaw.yaml`` would silently disable the
+    parity invariant.
     """
     agents_key = (AGENTS_MD_RELATIVE_PATH, CONTEXT_BUDGET_RULE_ID)
-    if agents_key not in head_index or config is None:
+    if agents_key not in head_index:
         return []
     clean_path = sanitize_log_string(AGENTS_MD_RELATIVE_PATH)
-    ceiling = min(head_index[agents_key])
+    ceiling = head_index[agents_key][0]
+    if config is None:
+        return [
+            (
+                f"ERROR: {SKILLSAW_CONFIG_RELATIVE_PATH} is missing while the "
+                f"working-tree baseline tracks the {clean_path} context-budget "
+                "ceiling; the agents-md warn limit cannot be verified against "
+                f"baseline ceiling ({ceiling})."
+            )
+        ]
+    present, entry = _agents_md_limit_entry(config)
     warn = agents_md_warn_limit(config)
     if warn is None:
+        if present:
+            clean_entry = sanitize_log_string(repr(entry))
+            return [
+                (
+                    "ERROR: .skillsaw.yaml context-budget warn limit for "
+                    f"{clean_path} in "
+                    f"rules.context-budget.limits.{AGENTS_MD_LIMIT_KEY} is not "
+                    f"a numeric warn limit (found {clean_entry}). Configure an "
+                    f"integer warn limit at or below baseline ceiling ({ceiling})."
+                )
+            ]
         return [
             (
                 "ERROR: .skillsaw.yaml context-budget warn limit for "
@@ -611,7 +666,9 @@ def check_repo(repo_root: Path, base_ref: str | None = None) -> tuple[int, list[
         head = {"violations": []}
     try:
         head_index = ceiling_values(head, "working tree")
-        diagnostics = compare_ceilings(head, base, repo_root=repo_root)
+        diagnostics = compare_ceilings(
+            head, base, repo_root=repo_root, head_index=head_index
+        )
         diagnostics += compare_warn_limits(head_index, load_skillsaw_config(repo_root))
         n_ceilings = sum(len(values) for values in head_index.values())
     except BaselineRatchetError as error:

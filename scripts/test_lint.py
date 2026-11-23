@@ -27,6 +27,28 @@ else:
 _RUNTIME = "runtime"
 
 
+def _expected_python_env_name() -> str:
+    """Return pre-commit's python environment suffix, computed independently."""
+    try:
+        from pre_commit.languages.python import get_default_version
+    except ImportError:
+        return f"python{sys.version_info.major}.{sys.version_info.minor}"
+    return get_default_version()
+
+
+def _add_environment_health(environment_path: Path) -> None:
+    """Add the pyvenv.cfg and bin/python pre-commit's health check requires."""
+    environment_path.mkdir(parents=True, exist_ok=True)
+    (environment_path / "pyvenv.cfg").write_text(
+        f"version_info = {sys.version_info.major}.{sys.version_info.minor}."
+        f"{sys.version_info.micro}.final.0\n",
+        encoding="utf-8",
+    )
+    bin_dir = environment_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    os.symlink(sys.executable, bin_dir / "python")
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run a git command in *repo* and fail the test on a non-zero exit."""
     return subprocess.run(
@@ -208,6 +230,70 @@ class ConfiguredLocalDependenciesTests(unittest.TestCase):
         }
         self.assertEqual([], checker._configured_local_dependencies(config))
 
+    def test_skips_languages_without_an_environment(self) -> None:
+        """A system hook never installs a dependency environment."""
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "system-hook",
+                            "language": "system",
+                            "additional_dependencies": ["pyyaml==6.0.3"],
+                        }
+                    ],
+                }
+            ]
+        }
+        self.assertEqual([], checker._configured_local_dependencies(config))
+
+
+class PythonLanguageVersionTests(unittest.TestCase):
+    def test_matches_pre_commit_default_version(self) -> None:
+        """Pin the copied logic to pre-commit's own default-version contract."""
+        try:
+            from pre_commit.languages.python import get_default_version
+        except ImportError:
+            self.skipTest("pre-commit is not installed")
+
+        self.assertEqual(
+            get_default_version(), checker._default_python_language_version()
+        )
+
+    def test_uses_versioned_interpreter_found_on_path(self) -> None:
+        """Select the versioned executable when pre-commit would find it."""
+        expected = f"python{sys.version_info.major}.{sys.version_info.minor}"
+
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name == expected else None
+
+        with patch("shutil.which", side_effect=which):
+            self.assertEqual(expected, checker._default_python_language_version())
+
+    def test_explicit_language_version_names_environment(self) -> None:
+        """An explicit language_version selects that environment directory."""
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "explicit",
+                            "language": "python",
+                            "language_version": "python3.11",
+                            "additional_dependencies": ["pyyaml==6.0.3"],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        self.assertEqual(
+            ("py_env-python3.11",),
+            checker._configured_local_python_environments(config, ("pyyaml==6.0.3",)),
+        )
+
 
 class AnyAlwaysRunTests(unittest.TestCase):
     def test_true_when_a_hook_declares_always_run(self) -> None:
@@ -317,14 +403,37 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("dependency-hook: pyyaml==6.0.3", message)
         self.assertIn("pre-commit install-hooks", message)
 
+    def test_offline_skips_hooks_whose_language_has_no_environment(self) -> None:
+        """A system hook's additional_dependencies need no environment."""
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "system-hook",
+                            "language": "system",
+                            "additional_dependencies": ["pyyaml==6.0.3"],
+                        }
+                    ],
+                }
+            ]
+        }
+        _make_db(self.home / "db.db", [])
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(False, self.home, config)
+
+        self.assertEqual(0, rc)
+        self.assertNotIn("local hook dependency environment", buf.getvalue())
+
     def test_offline_passes_with_installed_local_dependency_environment(
         self,
     ) -> None:
         repo_path = self.home / "repo-local"
-        environment_path = (
-            repo_path / f"py_env-{checker._default_python_language_version()}"
-        )
-        environment_path.mkdir(parents=True)
+        environment_path = repo_path / f"py_env-{_expected_python_env_name()}"
+        _add_environment_health(environment_path)
         (environment_path / ".install_state_v1").write_text(
             json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
             encoding="utf-8",
@@ -347,10 +456,8 @@ class PreflightTests(unittest.TestCase):
 
     def test_matching_v1_state_without_v2_is_installed(self) -> None:
         repo_path = self.home / "repo-local"
-        environment_path = (
-            repo_path / f"py_env-{checker._default_python_language_version()}"
-        )
-        environment_path.mkdir(parents=True)
+        environment_path = repo_path / f"py_env-{_expected_python_env_name()}"
+        _add_environment_health(environment_path)
         (environment_path / ".install_state_v1").write_text(
             json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
             encoding="utf-8",
@@ -372,10 +479,8 @@ class PreflightTests(unittest.TestCase):
 
     def test_v2_marker_without_v1_is_installed(self) -> None:
         repo_path = self.home / "repo-local"
-        environment_path = (
-            repo_path / f"py_env-{checker._default_python_language_version()}"
-        )
-        environment_path.mkdir(parents=True)
+        environment_path = repo_path / f"py_env-{_expected_python_env_name()}"
+        _add_environment_health(environment_path)
         (environment_path / ".install_state_v2").touch()
         _make_db(
             self.home / "db.db",
@@ -392,10 +497,31 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(0, rc)
         self.assertEqual("", buf.getvalue())
 
+    def test_v2_marker_without_health_payload_is_missing(self) -> None:
+        """A marker alone must not pass: pre-commit would rebuild the env."""
+        repo_path = self.home / "repo-local"
+        environment_path = repo_path / f"py_env-{_expected_python_env_name()}"
+        environment_path.mkdir(parents=True)
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(1, rc)
+        self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
+
     def test_environment_for_another_python_version_is_missing(self) -> None:
         repo_path = self.home / "repo-local"
         environment_path = repo_path / "py_env-python0.0"
-        environment_path.mkdir(parents=True)
+        _add_environment_health(environment_path)
         (environment_path / ".install_state_v1").write_text(
             json.dumps({"additional_dependencies": ["pyyaml==6.0.3"]}),
             encoding="utf-8",
@@ -418,10 +544,8 @@ class PreflightTests(unittest.TestCase):
 
     def test_undecodable_install_state_is_missing(self) -> None:
         repo_path = self.home / "repo-local"
-        environment_path = (
-            repo_path / f"py_env-{checker._default_python_language_version()}"
-        )
-        environment_path.mkdir(parents=True)
+        environment_path = repo_path / f"py_env-{_expected_python_env_name()}"
+        _add_environment_health(environment_path)
         (environment_path / ".install_state_v1").write_bytes(b"\xff")
         _make_db(
             self.home / "db.db",
@@ -2364,6 +2488,68 @@ class PreflightRestoreTests(unittest.TestCase):
             "Restored the offline pre-commit cache",
             raw.getvalue().decode("utf-8"),
         )
+
+
+class StoredRepositoryPathTests(unittest.TestCase):
+    """Stored repository paths must be direct children of the cache root."""
+
+    def setUp(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.root = Path(temporary_directory.name).resolve()
+        self.cache_root = self.root / "cache"
+        self.staging = self.root / "staging"
+        self.staging.mkdir()
+
+    def test_stored_path_at_cache_root_is_rejected(self) -> None:
+        rejection = checker._staged_repository_rejection(
+            str(self.cache_root), self.staging, self.cache_root, require_manifest=False
+        )
+
+        self.assertIsNotNone(rejection)
+        self.assertIn("not a direct child", rejection)
+
+    def test_nested_stored_path_is_rejected(self) -> None:
+        stored = str(self.cache_root / "a" / "b")
+        rejection = checker._staged_repository_rejection(
+            stored, self.staging, self.cache_root, require_manifest=False
+        )
+
+        self.assertIsNotNone(rejection)
+        self.assertIn("not a direct child", rejection)
+
+    def test_direct_child_is_accepted(self) -> None:
+        (self.staging / "repo1").mkdir()
+
+        rejection = checker._staged_repository_rejection(
+            str(self.cache_root / "repo1"),
+            self.staging,
+            self.cache_root,
+            require_manifest=False,
+        )
+
+        self.assertIsNone(rejection)
+
+    def test_live_path_at_cache_root_has_no_relative_path(self) -> None:
+        relative = checker._repository_relative_or_none(
+            str(self.cache_root), self.cache_root
+        )
+
+        self.assertIsNone(relative)
+
+    def test_live_nested_path_has_no_relative_path(self) -> None:
+        relative = checker._repository_relative_or_none(
+            str(self.cache_root / "a" / "b"), self.cache_root
+        )
+
+        self.assertIsNone(relative)
+
+    def test_live_direct_child_is_relative(self) -> None:
+        relative = checker._repository_relative_or_none(
+            str(self.cache_root / "repo1"), self.cache_root
+        )
+
+        self.assertEqual(Path("repo1"), relative)
 
 
 class EnvironmentDirTests(unittest.TestCase):

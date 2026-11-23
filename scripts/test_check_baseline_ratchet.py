@@ -194,11 +194,21 @@ class CompareCeilingsTests(unittest.TestCase):
 
         self.assertEqual([], checker.compare_ceilings(head, base))
 
-    def test_duplicate_head_entries_use_the_maximum(self) -> None:
-        """Reject when any duplicate head value exceeds the base."""
+    def test_duplicate_head_entries_are_rejected_as_ambiguous(self) -> None:
+        """Reject duplicate ceiling keys instead of choosing a tie-break."""
+        head = _baseline(_ceiling(value=4000), _ceiling(value=4100))
+
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(head, "working tree")
+
+        self.assertIn("more than one ceiling for AGENTS.md", str(raised.exception))
+
+    def test_supplied_head_index_is_used_instead_of_rebuilding_it(self) -> None:
+        """Use the caller's head index so the working tree is indexed once."""
         diagnostics = checker.compare_ceilings(
-            _baseline(_ceiling(value=4000), _ceiling(value=4100)),
+            _baseline(),
             _baseline(_ceiling(value=4000)),
+            head_index={("AGENTS.md", "context-budget"): [4100]},
         )
 
         self.assertEqual(1, len(diagnostics))
@@ -322,8 +332,8 @@ class WarnLimitTests(unittest.TestCase):
 
         self.assertEqual([], diagnostics)
 
-    def test_missing_numeric_warn_limit_is_rejected(self) -> None:
-        """Fail closed when the agents-md limit has no numeric warn value."""
+    def test_present_non_numeric_warn_limit_is_rejected(self) -> None:
+        """Report a present limit whose value is not numeric as the wrong type."""
         for entry in ({}, {"warn": "4000"}, {"warn": True}, None, True):
             with self.subTest(entry=entry):
                 diagnostics = checker.compare_warn_limits(
@@ -332,8 +342,21 @@ class WarnLimitTests(unittest.TestCase):
                 )
 
                 self.assertEqual(1, len(diagnostics))
-                self.assertIn("is missing from", diagnostics[0])
+                self.assertIn("is not a numeric warn limit", diagnostics[0])
                 self.assertIn("limits.agents-md", diagnostics[0])
+
+    def test_absent_warn_limit_is_reported_as_missing(self) -> None:
+        """Report an absent agents-md key as missing, not as the wrong type."""
+        config = {"rules": {"context-budget": {"limits": {"other-file": 4000}}}}
+
+        diagnostics = checker.compare_warn_limits(
+            {("AGENTS.md", "context-budget"): [4000]},
+            config,
+        )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("is missing from", diagnostics[0])
+        self.assertNotIn("is not a numeric warn limit", diagnostics[0])
 
     def test_non_agents_context_budget_ceiling_is_ignored(self) -> None:
         """Do not infer skillsaw categories for other tracked context-budget files."""
@@ -344,14 +367,16 @@ class WarnLimitTests(unittest.TestCase):
 
         self.assertEqual([], diagnostics)
 
-    def test_missing_config_skips_warn_parity(self) -> None:
-        """Skip parity when .skillsaw.yaml is absent."""
+    def test_missing_config_fails_closed(self) -> None:
+        """Fail closed when .skillsaw.yaml is absent but AGENTS.md is tracked."""
         diagnostics = checker.compare_warn_limits(
             {("AGENTS.md", "context-budget"): [4000]},
             None,
         )
 
-        self.assertEqual([], diagnostics)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn(".skillsaw.yaml is missing", diagnostics[0])
+        self.assertIn("baseline ceiling (4000)", diagnostics[0])
 
 
 class LoadSkillsawConfigTests(unittest.TestCase):
@@ -830,6 +855,7 @@ class CheckRepoTests(unittest.TestCase):
         self._git("config", "user.name", "Ratchet Test")
         self._git("config", "commit.gpgsign", "false")
         self._write_baseline(_baseline(_ceiling(value=4000)))
+        self._write_config(3950)
         self._git("add", checker.BASELINE_RELATIVE_PATH)
         self._git("commit", "-m", "base ceiling")
 
@@ -848,6 +874,18 @@ class CheckRepoTests(unittest.TestCase):
         path = self.root / checker.BASELINE_RELATIVE_PATH
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
+    def _write_config(self, warn: int) -> None:
+        """Write a minimal .skillsaw.yaml with the given agents-md warn limit."""
+        path = self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH
+        path.write_text(
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            f"        warn: {warn}\n",
+            encoding="utf-8",
+        )
+
     def test_increase_against_base_ref_fails(self) -> None:
         """Fail when the working-tree ceiling exceeds the committed base."""
         self._write_baseline(_baseline(_ceiling(value=4100)))
@@ -862,6 +900,7 @@ class CheckRepoTests(unittest.TestCase):
     def test_decrease_against_base_ref_passes(self) -> None:
         """Pass when the working-tree ceiling is lowered."""
         self._write_baseline(_baseline(_ceiling(value=3900)))
+        self._write_config(3900)
 
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
 
@@ -950,6 +989,25 @@ class CheckRepoTests(unittest.TestCase):
 
         self.assertEqual(1, exit_code)
         self.assertIn("invalid YAML in .skillsaw.yaml", messages[0])
+
+    def test_missing_config_with_tracked_agents_ceiling_fails_closed(self) -> None:
+        """Fail closed when .skillsaw.yaml is deleted but AGENTS.md is tracked."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).unlink()
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn(".skillsaw.yaml is missing", messages[0])
+
+    def test_missing_config_without_tracked_agents_ceiling_passes(self) -> None:
+        """Allow an absent .skillsaw.yaml when no AGENTS.md ceiling is tracked."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).unlink()
+        self._write_baseline(_baseline())
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
 
     def test_merge_base_missing_uses_named_ref_in_source_label(self) -> None:
         """Use the named ref as the source label when merge-base returns None."""

@@ -42,12 +42,12 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
 `.skillsaw.yaml`, enforced downward by
 [`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
 
-1. **Respect the prompt context budget.** Do not raise a
-   `.skillsaw-baseline.json` ceiling value to fit new prose; after a
-   genuine prose shrink, regenerate the baseline with
-   `skillsaw baseline` so the ceiling ratchets downward. The
-   `agents-md` warn limit in `.skillsaw.yaml` is lowered when
-   `AGENTS.md` shrinks below it (`.skillsaw.yaml:19-20`).
+1. **Respect the prompt context budget.** Do not raise or delete a
+   `.skillsaw-baseline.json` ceiling row while its file exists. After a
+   genuine prose shrink, lower the `agents-md` warn limit in
+   `.skillsaw.yaml` first, then regenerate the baseline with
+   `skillsaw baseline` so the ceiling ratchets downward
+   (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset a new rule or
    explanation by consolidating existing prose or extracting
    detail into an on-demand skill under `.agents/skills/`.

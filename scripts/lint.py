@@ -83,6 +83,31 @@ _MAX_EXTRACTED_BYTES = 4 * 1024 * 1024 * 1024
 _NON_CLONED_REPOS = {"local", "meta"}
 _LOCAL_REPO = "local"
 _LOCAL_REPO_VERSION = "1"
+# Languages whose hooks get a pre-commit environment directory, and so can
+# carry an ``additional_dependencies`` environment to verify offline. Languages
+# without one (``system``, ``unsupported``, ``unsupported_script``, ``fail``,
+# ``pygrep``, ``docker_image``) never install a dependency environment;
+# checking for one would report a missing environment pre-commit never creates.
+_LANGUAGES_WITH_ENVIRONMENT = frozenset(
+    {
+        "conda",
+        "coursier",
+        "dart",
+        "docker",
+        "dotnet",
+        "golang",
+        "haskell",
+        "julia",
+        "lua",
+        "node",
+        "perl",
+        "python",
+        "r",
+        "ruby",
+        "rust",
+        "swift",
+    }
+)
 
 
 # ── Environment helpers ─────────────────────────────────────────
@@ -162,14 +187,17 @@ def _configured_local_dependencies(
 ) -> list[tuple[str, tuple[str, ...]]]:
     """Return ``[(hook_id, dependencies), ...]`` for local hooks.
 
-    Only hooks that declare ``additional_dependencies`` need an installed
-    environment in the pre-commit cache.
+    Only hooks that declare ``additional_dependencies`` and whose language
+    installs a pre-commit environment need an installed environment in the
+    cache.
     """
     hooks = []
     for repo in config.get("repos", []):
         if repo.get("repo") != _LOCAL_REPO:
             continue
         for hook in repo.get("hooks", []):
+            if hook.get("language") not in _LANGUAGES_WITH_ENVIRONMENT:
+                continue
             dependencies = hook.get("additional_dependencies") or []
             if dependencies:
                 hooks.append(
@@ -259,7 +287,15 @@ def _local_dependency_environment_is_installed(
     dependencies: tuple[str, ...],
     environment_name: str | None = None,
 ) -> bool:
-    """Return whether *repo_path* contains an installed environment for deps."""
+    """Return whether *repo_path* contains an installed environment for deps.
+
+    An install-state marker alone is not enough: pre-commit also requires the
+    environment's health check to pass. Python environments must hold a
+    readable ``pyvenv.cfg`` and a ``bin/python`` symlink to a platform
+    interpreter, mirroring ``_interpreter_link_rejection``. A marker without
+    that payload would make pre-commit rebuild the environment at hook time,
+    which needs the network this pre-flight exists to avoid.
+    """
     expected_state = {"additional_dependencies": list(dependencies)}
     try:
         if environment_name is None:
@@ -271,18 +307,48 @@ def _local_dependency_environment_is_installed(
         else:
             environments = [repo_path / environment_name]
         for environment in environments:
-            if (environment / ".install_state_v2").is_file():
-                return True
-            state_path = environment / ".install_state_v1"
-            try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                continue
-            if state == expected_state:
+            if _environment_install_state_matches(environment, expected_state) and (
+                not _is_python_environment_dir(environment.name)
+                or _python_environment_is_healthy(environment)
+            ):
                 return True
     except OSError:
         return False
     return False
+
+
+def _environment_install_state_matches(
+    environment: Path, expected_state: dict[str, object]
+) -> bool:
+    """Return whether *environment* carries pre-commit's install state."""
+    if (environment / ".install_state_v2").is_file():
+        return True
+    state_path = environment / ".install_state_v1"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return state == expected_state
+
+
+def _is_python_environment_dir(name: str) -> bool:
+    """Return whether *name* is a pre-commit Python environment directory."""
+    return name == "py_env" or name.startswith("py_env-")
+
+
+def _python_environment_is_healthy(environment: Path) -> bool:
+    """Return whether a Python environment passes a static health check."""
+    cfg = environment / "pyvenv.cfg"
+    if cfg.is_symlink() or not cfg.is_file():
+        return False
+    try:
+        values = _read_pyvenv_cfg(cfg)
+    except (OSError, UnicodeDecodeError):
+        return False
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    recorded = _pyvenv_major_minor(values.get("version_info", "")) or ""
+    interpreter = environment / "bin" / "python"
+    return _interpreter_link_rejection(interpreter, current, recorded) is None
 
 
 def _missing_local_dependency_environments(
@@ -621,16 +687,20 @@ def _repository_relative_or_none(stored: object, cache_root: Path) -> Path | Non
 
     Used for live rows, whose stored path was validated when the row
     was staged; an unusable value simply carries no environments to
-    compare.
+    compare. Like :func:`_staged_repository_rejection`, the stored path
+    must be a direct child of the cache root: pre-commit creates every
+    repository directory directly under the cache root, so a root-level
+    or nested path is not a directory the environment checks inspect.
     """
     if not isinstance(stored, str) or not stored or not os.path.isabs(stored):
         return None
     if ".." in Path(stored).parts:
         return None
     try:
-        return _repository_relative(stored, cache_root)
+        relative = _repository_relative(stored, cache_root)
     except ValueError:
         return None
+    return relative if len(relative.parts) == 1 else None
 
 
 # The environment directory names pre-commit 4.5.1 uses, matched
@@ -694,11 +764,11 @@ def _staged_repository_rejection(
     """Return why a staged repository row cannot be used, or None.
 
     The stored value must be an absolute path string without ``..``
-    components inside the cache root used at build time — ``cache_root``
-    under the path contract — and the staged tree must hold that
-    directory as a real directory: a symlink, or a directory whose
-    resolved path leaves the staging tree, is rejected, because the
-    archive's symlink members may point anywhere. Cloned repositories
+    components that is a direct child of the cache root used at build
+    time — ``cache_root`` under the path contract — and the staged tree
+    must hold that directory as a real directory: a symlink, or a
+    directory whose resolved path leaves the staging tree, is rejected,
+    because the archive's symlink members may point anywhere. Cloned repositories
     must also hold a ``.pre-commit-hooks.yaml``, or pre-commit later
     fails to load the repository's hook manifest; rows for ``local``,
     ``local:`` keys, and ``meta`` carry no manifest, so
@@ -720,6 +790,14 @@ def _staged_repository_rejection(
         and normalized_root not in normalized_stored.parents
     ):
         return f"the stored path {stored} is outside the cache root {cache_root}"
+    if normalized_stored.parent != normalized_root:
+        # pre-commit creates each repository directory directly under the
+        # cache root. A root-level path (or a deeper one) would place the
+        # hook environment where ``_python_env_dirs`` never looks.
+        return (
+            f"the stored path {stored} is not a direct child of the cache "
+            f"root {cache_root}"
+        )
     staged_dir = staging / _repository_relative(stored, cache_root)
     if staged_dir.is_symlink():
         return f"the repository directory {staged_dir} is a symlink"
@@ -1494,7 +1572,8 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "validate .pre-commit-config.yaml and confirm every configured "
-            "hook repository revision is present in the offline cache, "
+            "hook repository revision and every local hook dependency "
+            "environment are present in the offline cache, "
             "without running any hooks"
         ),
     )
@@ -1557,8 +1636,9 @@ def main(argv: list[str] | None = None) -> int:
         if validate_rc == 0:
             print(
                 "PARITY CHECK PASSED: .pre-commit-config.yaml is valid and "
-                "every configured hook repository revision is present in "
-                f"the offline cache ({pre_commit_home})."
+                "every configured hook repository revision and local hook "
+                "dependency environment is present in the offline cache "
+                f"({pre_commit_home})."
             )
         return validate_rc
 
