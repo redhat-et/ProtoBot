@@ -453,7 +453,8 @@ a decision. If the hook fails open, native command-prefix permissions
 do not replace the guard's argument and shell-syntax checks; later checks
 catch registered-artifact digest mismatches, registered artifact
 path/canonical-content deltas without a matching proposed operation, and
-unregistration of a default-branch artifact. Structured-store integrity
+unregistration of an artifact registered on the comparison base.
+Structured-store integrity
 checks catch content changes only while their recorded digests remain
 intact. These checks do not prove that `ears-manager artifact put` was
 invoked or establish writer provenance for `.protobot/` control files,

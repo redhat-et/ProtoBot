@@ -184,10 +184,13 @@ cd ears-manager
 go run ./cmd/ears-manager --output json check
 ```
 
-CI fetches the default branch so `check` can tell approved from proposed
-change sets and verifies that already-approved change-set manifests remain
-unchanged, then runs `ears-manager --output json check`. A non-zero
-exit fails the merge gate. The `ears-manager` validation diagnostics use the
+On pull requests, CI checks out the PR head and fetches the default branch so
+`check` can tell approved from proposed change sets and verify that
+already-approved change-set manifests remain unchanged. It passes their merge
+base to `ears-manager --output json check --base-ref <merge-base>`, which
+compares artifact deltas against that merge base while evaluating change-set
+approval and freshness against the default branch. A non-zero exit fails the
+merge gate. The `ears-manager` validation diagnostics use the
 same codes, exit statuses, and JSON shape locally and in CI; the separate
 manifest guard reports changed paths in the Actions log. For matching
 approved/proposed classification, keep the local default-branch ref current;

@@ -10,15 +10,19 @@ import (
 )
 
 // checkArtifactOperationDeltas compares registered paths and canonical text
-// with the default-branch tree. A missing base config gives project init an
-// empty registry, but current artifacts are still compared with tree files.
-// Registry metadata other than path and text is intentionally outside this check.
-func checkArtifactOperationDeltas(root string, snapshot specvalidation.Snapshot, proposed map[string]bool) *commandFailure {
-	defaultHead, failure := defaultBranchHead(root, snapshot.Config.Repository)
+// with the artifact comparison base: the commit named by artifactBase, or
+// the default-branch head when artifactBase is empty. A missing base config
+// gives project init an empty registry, but current artifacts are still
+// compared with tree files. Registry metadata other than path and text is
+// intentionally outside this check. Only this delta honors --base-ref;
+// change-set approval and proposed base freshness always read the default
+// branch.
+func checkArtifactOperationDeltas(root string, snapshot specvalidation.Snapshot, proposed map[string]bool, artifactBase string) *commandFailure {
+	baseCommit, failure := artifactComparisonBase(root, snapshot.Config.Repository, artifactBase)
 	if failure != nil {
 		return failure
 	}
-	baseArtifacts, failure := defaultBranchArtifacts(root, defaultHead, snapshot.ConfigPath)
+	baseArtifacts, failure := baseCommitArtifacts(root, baseCommit, snapshot.ConfigPath, artifactBase)
 	if failure != nil {
 		return failure
 	}
@@ -28,11 +32,11 @@ func checkArtifactOperationDeltas(root string, snapshot specvalidation.Snapshot,
 	}
 	operations := proposedArtifactOperations(snapshot, proposed)
 
-	diagnostics, failure := existingArtifactOperationDiagnostics(root, defaultHead, snapshot.ConfigPath, baseArtifacts, currentArtifacts, operations)
+	diagnostics, failure := existingArtifactOperationDiagnostics(root, baseCommit, snapshot.ConfigPath, artifactBase, baseArtifacts, currentArtifacts, operations)
 	if failure != nil {
 		return failure
 	}
-	newDiagnostics, failure := newArtifactRegistrationDiagnostics(root, defaultHead, snapshot.ConfigPath, baseArtifacts, currentArtifacts, operations)
+	newDiagnostics, failure := newArtifactRegistrationDiagnostics(root, baseCommit, snapshot.ConfigPath, artifactBase, baseArtifacts, currentArtifacts, operations)
 	if failure != nil {
 		return failure
 	}
@@ -41,8 +45,44 @@ func checkArtifactOperationDeltas(root string, snapshot specvalidation.Snapshot,
 	return failureFromDiagnostics(diagnostics)
 }
 
-func defaultBranchArtifacts(root, defaultHead, configPath string) (map[string]records.ArtifactEntry, *commandFailure) {
-	configData, present, regular, failure := gitTreeFile(root, defaultHead, configPath)
+// artifactComparisonBase returns the commit that the artifact-operation
+// delta compares against: artifactBase when check --base-ref named one,
+// otherwise the default-branch head. The default-branch head is resolved
+// and required either way, because every full or scoped check requires a
+// resolvable default branch; with --base-ref the resolved head is simply
+// not the artifact comparison base.
+func artifactComparisonBase(root string, repository records.RepositoryConfig, artifactBase string) (string, *commandFailure) {
+	defaultHead, failure := defaultBranchHead(root, repository)
+	if failure != nil {
+		return "", failure
+	}
+	if artifactBase != "" {
+		return artifactBase, nil
+	}
+	return defaultHead, nil
+}
+
+// artifactBaseLabel names the artifact comparison base in diagnostics: the
+// commit that check --base-ref selected, or the default branch.
+func artifactBaseLabel(artifactBase string) string {
+	if artifactBase != "" {
+		return fmt.Sprintf("the base commit %s", artifactBase)
+	}
+	return "the default branch"
+}
+
+// baseConfigurationFailureMessage reports that the project configuration
+// which the artifact comparison base holds could not be supplied. The
+// default branch keeps its established message text.
+func baseConfigurationFailureMessage(artifactBase, problem string) string {
+	if artifactBase == "" {
+		return "The default-branch project configuration " + problem
+	}
+	return fmt.Sprintf("The project configuration of the base commit %s %s", artifactBase, problem)
+}
+
+func baseCommitArtifacts(root, baseCommit, configPath, artifactBase string) (map[string]records.ArtifactEntry, *commandFailure) {
+	configData, present, regular, failure := gitTreeFile(root, baseCommit, configPath)
 	if failure != nil {
 		return nil, failure
 	}
@@ -51,11 +91,11 @@ func defaultBranchArtifacts(root, defaultHead, configPath string) (map[string]re
 		return artifacts, nil
 	}
 	if !regular {
-		return nil, projectFailure("project.default_configuration_invalid", "The default-branch project configuration is not a regular file.")
+		return nil, projectFailure("project.default_configuration_invalid", baseConfigurationFailureMessage(artifactBase, "is not a regular file."))
 	}
 	var config records.ProjectConfig
 	if err := storage.Decode(configData, &config); err != nil {
-		return nil, projectFailure("project.default_configuration_invalid", "The default-branch project configuration could not be decoded.")
+		return nil, projectFailure("project.default_configuration_invalid", baseConfigurationFailureMessage(artifactBase, "could not be decoded."))
 	}
 	for _, artifact := range config.Artifacts {
 		artifacts[artifact.ID] = artifact
@@ -63,32 +103,32 @@ func defaultBranchArtifacts(root, defaultHead, configPath string) (map[string]re
 	return artifacts, nil
 }
 
-func existingArtifactOperationDiagnostics(root, defaultHead, configPath string, baseArtifacts, currentArtifacts map[string]records.ArtifactEntry, operations map[string]bool) ([]specvalidation.Diagnostic, *commandFailure) {
+func existingArtifactOperationDiagnostics(root, baseCommit, configPath, artifactBase string, baseArtifacts, currentArtifacts map[string]records.ArtifactEntry, operations map[string]bool) ([]specvalidation.Diagnostic, *commandFailure) {
 	diagnostics := make([]specvalidation.Diagnostic, 0)
 	baseIDs := sortedArtifactIDs(baseArtifacts)
 	for _, id := range baseIDs {
 		baseArtifact := baseArtifacts[id]
 		currentArtifact, registered := currentArtifacts[id]
 		if !registered {
-			diagnostics = append(diagnostics, unregisteredArtifactDiagnostic(configPath, id))
+			diagnostics = append(diagnostics, unregisteredArtifactDiagnostic(configPath, id, artifactBase))
 			continue
 		}
 		changed := baseArtifact.Path != currentArtifact.Path
 		if !changed {
 			var failure *commandFailure
-			changed, failure = artifactContentDiffersFromDefault(root, defaultHead, currentArtifact)
+			changed, failure = artifactContentDiffersFromBase(root, baseCommit, currentArtifact)
 			if failure != nil {
 				return nil, failure
 			}
 		}
 		if changed && !operations[id] {
-			diagnostics = append(diagnostics, missingArtifactOperationDiagnostic(configPath, id))
+			diagnostics = append(diagnostics, missingArtifactOperationDiagnostic(configPath, id, artifactBase))
 		}
 	}
 	return diagnostics, nil
 }
 
-func newArtifactRegistrationDiagnostics(root, defaultHead, configPath string, baseArtifacts, currentArtifacts map[string]records.ArtifactEntry, operations map[string]bool) ([]specvalidation.Diagnostic, *commandFailure) {
+func newArtifactRegistrationDiagnostics(root, baseCommit, configPath, artifactBase string, baseArtifacts, currentArtifacts map[string]records.ArtifactEntry, operations map[string]bool) ([]specvalidation.Diagnostic, *commandFailure) {
 	diagnostics := make([]specvalidation.Diagnostic, 0)
 	currentIDs := sortedArtifactIDs(currentArtifacts)
 	for _, id := range currentIDs {
@@ -96,12 +136,12 @@ func newArtifactRegistrationDiagnostics(root, defaultHead, configPath string, ba
 			continue
 		}
 		// A new registry ID is not a delta if this path and content already exist unchanged.
-		changed, failure := artifactContentDiffersFromDefault(root, defaultHead, currentArtifacts[id])
+		changed, failure := artifactContentDiffersFromBase(root, baseCommit, currentArtifacts[id])
 		if failure != nil {
 			return nil, failure
 		}
 		if changed && !operations[id] {
-			diagnostics = append(diagnostics, missingArtifactOperationDiagnostic(configPath, id))
+			diagnostics = append(diagnostics, missingArtifactOperationDiagnostic(configPath, id, artifactBase))
 		}
 	}
 	return diagnostics, nil
@@ -136,8 +176,8 @@ func proposedArtifactOperations(snapshot specvalidation.Snapshot, proposed map[s
 	return operations
 }
 
-func artifactContentDiffersFromDefault(root, defaultHead string, artifact records.ArtifactEntry) (bool, *commandFailure) {
-	baseContent, present, regular, failure := gitTreeFile(root, defaultHead, artifact.Path)
+func artifactContentDiffersFromBase(root, baseCommit string, artifact records.ArtifactEntry) (bool, *commandFailure) {
+	baseContent, present, regular, failure := gitTreeFile(root, baseCommit, artifact.Path)
 	if failure != nil {
 		return false, failure
 	}
@@ -188,26 +228,33 @@ func sortedArtifactIDs(artifacts map[string]records.ArtifactEntry) []string {
 	return ids
 }
 
-func missingArtifactOperationDiagnostic(path, id string) specvalidation.Diagnostic {
+func missingArtifactOperationDiagnostic(path, id, artifactBase string) specvalidation.Diagnostic {
+	// The default-branch hint keeps its established text byte-for-byte.
+	// A named base commit cannot be cleared by reconciling the local
+	// default branch, so its hint names the selected base instead.
+	hint := fmt.Sprintf("Add an artifact operation for %q to a proposed change set. If the operation is already approved on the canonical remote, reconcile the local default branch with the Source Control Manager's repo_state, then rerun check.", id)
+	if artifactBase != "" {
+		hint = fmt.Sprintf("Add an artifact operation for %q to a proposed change set, or rerun check without --base-ref when the delta comes from the selected base commit %s.", id, artifactBase)
+	}
 	return specvalidation.Diagnostic{
 		Code:     "artifact.operation_missing",
 		Severity: "error",
 		Path:     path,
 		RecordID: id,
 		Field:    fmt.Sprintf("artifacts[id=%s].operation", id),
-		Message:  fmt.Sprintf("Registered artifact %q differs from the default branch but has no operation in a proposed change set.", id),
-		Hint:     fmt.Sprintf("Add an artifact operation for %q to a proposed change set. If the operation is already approved on the canonical remote, reconcile the local default branch with the Source Control Manager's repo_state, then rerun check.", id),
+		Message:  fmt.Sprintf("Registered artifact %q differs from %s but has no operation in a proposed change set.", id, artifactBaseLabel(artifactBase)),
+		Hint:     hint,
 	}
 }
 
-func unregisteredArtifactDiagnostic(path, id string) specvalidation.Diagnostic {
+func unregisteredArtifactDiagnostic(path, id, artifactBase string) specvalidation.Diagnostic {
 	return specvalidation.Diagnostic{
 		Code:     "artifact.unregistered",
 		Severity: "error",
 		Path:     path,
 		RecordID: id,
 		Field:    fmt.Sprintf("artifacts[id=%s]", id),
-		Message:  fmt.Sprintf("Artifact %q is registered on the default branch but is absent from the current registry.", id),
+		Message:  fmt.Sprintf("Artifact %q is registered on %s but is absent from the current registry.", id, artifactBaseLabel(artifactBase)),
 		Hint:     "Restore the artifact registration; registered artifacts cannot be unregistered.",
 	}
 }

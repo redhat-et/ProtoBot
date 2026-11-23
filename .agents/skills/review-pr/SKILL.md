@@ -23,11 +23,13 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   author-actionable finding solely for that state. A completed failure
   belongs in the review verdict, with the local check and Rule 6 inspection
   used to identify the actual diagnostic.
-- Before detailed specification analysis, run `ears-manager check` on a
-  checkout or worktree of the recorded PR head. Treat `DEFAULT_MOVED` or
-  `BASE_COMMIT_STALE` as blocking freshness findings and stop detailed
-  specification analysis. Other `ears-manager check` diagnostics do not
-  replace the Rule 6 inspection below.
+- Before detailed specification analysis, run
+  `ears-manager check --base-ref "$(git merge-base <default-branch-ref> HEAD)"`
+  on a checkout or worktree of the recorded PR head, where the merge base is
+  with the default branch ([#547](https://github.com/redhat-et/ProtoBot/issues/547)).
+  Treat `DEFAULT_MOVED` or `BASE_COMMIT_STALE` as blocking freshness findings
+  and stop detailed specification analysis. Other `ears-manager check`
+  diagnostics do not replace the Rule 6 inspection below.
 - Read the full diff. Then read every file the diff cites or depends on. For
   design documents, read the sibling documents end to end. Contradictions
   live in the parts that nobody cites.
@@ -38,37 +40,41 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   registered specification artifact, or when Rule 4 identifies staleness
   in a registered specification artifact, inspect each such registered
   specification artifact for hand edits under Rule 5 and run
-  `ears-manager check` on a checkout or worktree of the recorded PR head; a
-  check on the base branch is not evidence. Require it to pass without
-  `artifact.digest_mismatch`, `artifact.operation_missing`, or
-  `artifact.unregistered`. The check requires each registered artifact path
-  or canonical-content delta to have a matching `artifact_id` in an
-  `artifact_operations[]` entry in any proposed change set, and rejects
-  unregistration of an artifact-registry entry present on the default
-  branch. This confirms manifest association only; it does not prove
-  `ears-manager artifact put` was invoked. Reviewers must flag hand edits
-  they can identify, not claim CLI provenance from an operation record.
-  Separately, whenever a PR modifies
-  [.protobot/project.yaml](../../../.protobot/project.yaml), inspect the
-  project configuration under Rule 5 of the specification-document rules in
-  `AGENTS.md` and flag any hand edit, even if no registered specification
-  artifact is changed. In particular, inspect diffs to
-  `repository.canonical_remote`, `repository.default_branch`, and
-  `artifacts[]` metadata (`owner`, `validator`, and `kind`); a hand edit to
-  any of these fields is a finding. Run `ears-manager check` on a checkout or
-  worktree of the recorded PR head; a check on the base branch is not
-  evidence. Require it to pass without `artifact.digest_mismatch`,
+  `ears-manager check --base-ref "$(git merge-base <default-branch-ref> HEAD)"`
+  on a checkout or worktree of the recorded PR head, where the merge base is
+  with the default branch (a check on the base branch is not evidence).
+  Require it to pass without `artifact.digest_mismatch`,
+  `artifact.operation_missing`, or `artifact.unregistered`. The check
+  requires each registered artifact path or canonical-content delta to
+  have a matching `artifact_id` in an `artifact_operations[]` entry in
+  any proposed change set, and rejects unregistration of an
+  artifact-registry entry present on the comparison base. This confirms
+  manifest association only; it does not prove `ears-manager artifact put`
+  was invoked. Reviewers must flag hand edits they can identify, not
+  claim CLI provenance from an operation record. Separately, whenever a PR
+  modifies [.protobot/project.yaml](../../../.protobot/project.yaml),
+  inspect the project configuration under Rule 5 of the
+  specification-document rules in `AGENTS.md` and flag any hand edit, even
+  if no registered specification artifact is changed. In particular,
+  inspect diffs to `repository.canonical_remote`,
+  `repository.default_branch`, and `artifacts[]` metadata (`owner`,
+  `validator`, and `kind`); a hand edit to any of these fields is a
+  finding. Run
+  `ears-manager check --base-ref "$(git merge-base <default-branch-ref> HEAD)"`
+  on a checkout or worktree of the recorded PR head, where the merge base is
+  with the default branch (a check on the base branch is not evidence).
+  Require it to pass without `artifact.digest_mismatch`,
   `artifact.operation_missing`, or `artifact.unregistered`. Metadata-only
-  changes to an artifact-registry
-  entry do not by themselves require an artifact operation, and a zero-exit
-  check is not evidence that these fields were tool-authored. Findings should
-  include each listed diagnostic when a PR creates or modifies a registered
-  specification artifact, or when Rule 4 identifies staleness in a registered
-  specification artifact; any hand edit identified while inspecting
-  a registered specification artifact when a PR creates or modifies a
-  registered specification artifact, or when Rule 4 identifies staleness in
-  a registered specification artifact; each listed diagnostic and any hand
-  edit identified in [.protobot/project.yaml](../../../.protobot/project.yaml)
+  changes to an artifact-registry entry do not by themselves require an
+  artifact operation, and a zero-exit check is not evidence that these
+  fields were tool-authored. Findings should include each listed diagnostic
+  when a PR creates or modifies a registered specification artifact, or
+  when Rule 4 identifies staleness in a registered specification artifact;
+  any hand edit identified while inspecting a registered specification
+  artifact when a PR creates or modifies a registered specification
+  artifact, or when Rule 4 identifies staleness in a registered
+  specification artifact; each listed diagnostic and any hand edit
+  identified in [.protobot/project.yaml](../../../.protobot/project.yaml)
   whenever a PR modifies
   [.protobot/project.yaml](../../../.protobot/project.yaml), even if no
   registered specification artifact is changed; and, when Rule 4 identifies

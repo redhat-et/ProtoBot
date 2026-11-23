@@ -213,7 +213,7 @@ func runChangeSetShow(args []string) (any, Mutation, *commandFailure) {
 // working tree is not read, so an uncommitted edit does not change the result.
 // A commit without the project configuration holds no manifest either.
 func runChangeSetShowAt(id, at string) (any, Mutation, *commandFailure) {
-	commit, failure := parseRevisionOption(at)
+	commit, failure := parseRevisionOption("at", at)
 	if failure != nil {
 		return nil, Mutation{}, failure
 	}
