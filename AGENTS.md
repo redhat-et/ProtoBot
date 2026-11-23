@@ -3,17 +3,17 @@
 - All pre-commit tests must pass before committing changes. In sandboxed
   environments without network access, use `python scripts/lint.py` as a
   wrapper around `pre-commit run`.
-  Key flags: `--all-files` (all tracked files), `--files FILE [FILE ...]`
+  Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
   (specific files), `--check-parity` (validate config and offline hook
   cache), `--online-if-ci` (allow network when CI=true).
-  For offline runs, pre-install the tools. Pre-populate the hook cache
+  For offline runs, pre-install tools and pre-populate the hook cache
   (bootstrap with `pre-commit install-hooks`).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
   target this repository.
 - Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
-  there so Claude Code finds the same skills; do not add skills
+  there so Claude Code finds them; do not add skills
   under `.claude/` directly.
 
 ## Workflow files and CI boundaries
@@ -21,17 +21,16 @@
 Agents must follow these rules:
 
 1. **Workflow file restrictions.** Fullsend agents running via
-   GitHub workflows must not create or modify any file under
+   GitHub workflows must not create or modify files under
    `.github/workflows/`. Local coding agents may create or modify
-   files under `.github/workflows/`, except as restricted by
-   Rule 2, when the change requires it and the user authorizes it.
+   them, except as restricted by Rule 2, when the change requires
+   it and the user authorizes it.
 
-2. **Defer CI integration for new modules.** When implementing an issue
-   that introduces a new Go module, package, or tool, implement the
-   code, local test suites, and module-local configs (`go.mod`,
-   `.golangci.yml`), but do not create or modify
-   [`.github/workflows/ci-workflow.yaml`][ci-workflow] — that is
-   reserved for manual human pull requests.
+2. **Defer CI integration for new modules.** When introducing a new
+   Go module, package, or tool, implement code, local test suites,
+   and module-local configs (`go.mod`, `.golangci.yml`), but do not
+   create or modify [`.github/workflows/ci-workflow.yaml`][ci-workflow]
+   — that is reserved for manual human pull requests.
 
 [ci-workflow]: .github/workflows/ci-workflow.yaml
 
@@ -48,26 +47,27 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
    `.skillsaw.yaml` first, then regenerate the baseline with
    `skillsaw baseline` so the ceiling ratchets downward
    (`.skillsaw.yaml:19-20`).
-2. **Consolidate or extract when adding prose.** Offset a new rule or
-   explanation by consolidating existing prose or extracting
+2. **Consolidate or extract when adding prose.** Offset new rules or
+   explanations by consolidating existing prose or extracting
    detail into an on-demand skill under `.agents/skills/`.
 3. **Review agents must recognize budget consolidation.** Treat prose
-   consolidation offsetting a new `AGENTS.md` addition as required
-   budget compliance, not scope creep, provided no governance
-   requirement, defined keyword, or diagnostic name is omitted.
+   consolidation offsetting an `AGENTS.md` addition as budget
+   compliance, not scope creep, provided no governance requirement,
+   defined keyword, or diagnostic name is omitted.
 
 ## Rules for creating or modifying sibling entries
 
 A governed scope defines a domain of applicability; a list
 or governed collection defines the sibling set within that domain.
-When creating or modifying any numbered rule in `AGENTS.md`, any
-specification document under `docs/`, any skill file under
-`.agents/skills/`, or an entry in any future governed scope, agents must
-follow these rules:
+A **module README** is the top-level `README.md` of a directory
+with a `go.mod`. When creating or modifying a numbered rule
+in `AGENTS.md`, specification document under `docs/`, skill file
+under `.agents/skills/`, module README, or entry in any future
+governed scope, agents must follow these rules:
 
-1. **Read all sibling entries first.** Before drafting or
-   revising an entry, read every other entry in the same list
-   or governed collection.
+1. **Read all sibling entries first.** Read every other
+   entry in the list or governed collection before drafting
+   or revising one.
 
 2. **Reuse established terminology.** Match sibling
    entries' terms for the same concepts. An undeclared alias
@@ -78,7 +78,9 @@ follow these rules:
    When reviewing a PR that creates or modifies an entry in
    a governed scope, verify that the new or changed entry
    reuses established sibling terminology rather than inventing
-   an alias. Findings should include terminology drift within
+   an alias. In a module README, also check for drift
+   between neighboring paragraphs and between a CLI flag and its
+   description. Findings should include terminology drift within
    the same list or governed collection, not only
    specification-hierarchy keyword checks.
 
@@ -94,7 +96,8 @@ follow these rules:
 Examples of sibling entries: numbered rules in `AGENTS.md` (other
 rules in the list); specification documents under `docs/` (other
 governed Markdown files); skill files under `.agents/skills/`
-(other skill files).
+(other skill files); module READMEs (other module READMEs and
+`docs/` specification documents that describe the module).
 
 ## Specification document hierarchy
 
@@ -121,9 +124,9 @@ membership is the `docs/` prefix, not the list.
   sequence diagrams, and testing strategy.
 - `docs/architecture/drafting-table-ux.md` — stable interaction
   contract for the first local Drafting Table.
-- [`docs/architecture/agent-harness/`][agent-harness-doc] — the Agent
-  Harness Adapter Contract (`adapter-contract.md`) and its harness
-  bindings (`opencode.md`, `claude-code.md`, `codex.md`).
+- [`docs/architecture/agent-harness/`][agent-harness-doc] — Agent
+  Harness Adapter Contract (`adapter-contract.md`) and bindings
+  (`opencode.md`, `claude-code.md`, `codex.md`).
 - `docs/architecture/related-work.md` — internal and external
   projects informing the design.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
@@ -142,7 +145,7 @@ membership is the `docs/` prefix, not the list.
 
 ### Rules for creating or modifying specification documents
 
-When creating or modifying any document under `docs/`, agents
+When creating or modifying documents under `docs/`, agents
 must follow these rules:
 
 1. **Account for all components, interfaces, and constraints.**
@@ -158,7 +161,7 @@ must follow these rules:
    deployment topology (single-player, multi-player, web),
    security posture (credential isolation, sandbox
    constraints), and persistent state (all stores in the
-   Architecture) must be covered where relevant.
+   Architecture) where relevant.
 
 3. **Review agents must check cross-document coverage.** When
    reviewing a PR that creates or modifies a specification
@@ -171,7 +174,7 @@ must follow these rules:
    register new capabilities where `components.md` enumerates
    them, avoid conflicting with principles in `overview.md`
    or `components.md` (e.g., the harness-agnostic
-   Toolkit principle in `components.md`), and match defined
+   Toolkit principle), and match defined
    ProtoBot keywords and relationship terms; an undeclared
    alias for a defined keyword is a defect.
 
@@ -179,8 +182,8 @@ must follow these rules:
    elsewhere.** When a PR changes a contract, lifecycle, or
    behavior description in a specification document, search
    all other governed Markdown documents under `docs/` for
-   existing prose describing the same behavior, and flag any
-   that were not updated to match.
+   prose describing the same behavior, and flag any
+   not updated to match.
 
 5. **Update registered specification artifacts through
    `ears-manager artifact put`.** Registered specification artifacts
@@ -210,9 +213,9 @@ must follow these rules:
    rejects unregistration of an artifact-registry entry present on the
    default branch. It confirms manifest association only, not that
    `ears-manager artifact put` was invoked; metadata-only changes to an
-   artifact-registry entry do not by themselves require an artifact
-   operation. Reviewers must flag hand edits they can identify, not
-   claim CLI provenance from an operation record. Findings should
+   artifact-registry entry do not require an artifact operation.
+   Reviewers must flag identifiable hand edits, not claim CLI
+   provenance from an operation record. Findings should
    include each listed diagnostic and any hand edit identified in the
    inspected registered specification artifact or
    [.protobot/project.yaml](.protobot/project.yaml); and, when Rule 4
@@ -228,16 +231,15 @@ must follow these rules:
    (`**[Amended Month Year]**`) with the change, its rationale, and
    references to updated architecture documents. Review agents must
    verify that accepted decision text is never rewritten or replaced
-   in place, and that when design evolution amends an accepted
-   architecture decision record, the change appends the dated
-   amendment block (`**[Amended Month Year]**`) with the change, its
-   rationale, and references to updated architecture documents.
+   in place, and that amendments append the dated amendment block
+   (`**[Amended Month Year]**`) with the change, its rationale, and
+   references to updated architecture documents.
 
 ## Agent skills
 
 ### Rules for creating or modifying skill files
 
-When creating or modifying any skill file under `.agents/skills/`,
+When creating or modifying skill files under `.agents/skills/`,
 agents must follow these rules:
 
 1. **Follow the formatting conventions observed in sibling files.**
@@ -247,11 +249,10 @@ agents must follow these rules:
    formatting with sibling skills is a defect.
 
 2. **Match structural conventions, not behavioral fields.**
-   Structural formatting conventions should match siblings,
-   but behavioral fields like dispatch parameters must be determined
-   by the skill's own requirements. Copying behavioral
-   configuration from a sibling can produce incorrect dispatch
-   or workflow behavior.
+   Formatting conventions should match siblings, but behavioral
+   fields like dispatch parameters must be determined by the
+   skill's own requirements. Copying behavioral configuration
+   can produce incorrect dispatch or workflow behavior.
 
 3. **Link a GitHub issue or justify why none is needed.**
    When reversing or correcting a business rule, link an
@@ -262,7 +263,7 @@ agents must follow these rules:
    a defect. Diffs reversing or correcting a gating
    condition or gated action (e.g., status moves) are in
    scope; other edits are not. Scope is determined by the
-   diff, not by how the author characterizes the PR
+   diff, not author characterization
    (default in-scope if uncertain).
 
 4. **Review agents must check for a linked issue or
@@ -272,14 +273,14 @@ agents must follow these rules:
    incorrect prior behavior and impact, or a PR-description
    justification with that substance and why no issue was
    filed. Reject comments, vacuous justifications, and
-   non-substantive issues, defaulting in-scope if uncertain.
+   non-substantive issues (default in-scope if uncertain).
    Findings should include missing or inadequate issues and
    justifications, not only formatting and
    specification-hierarchy checks.
 
 ### Aligning skills with the specification hierarchy
 
-A skill that implements or describes a ProtoBot or Specification
+A skill implementing or describing a ProtoBot or Specification
 Toolkit capability must remain consistent with every governed
 Markdown document under `docs/`. When creating, modifying, or
 reviewing such a skill, agents must:
@@ -305,11 +306,10 @@ reviewing such a skill, agents must:
    by layer: host-independent elicitation skills emit portable-response
    fields defined in [`ears-and-review.md`][ears-and-review-doc]
    ("Portable Response", including `Responsible system`). Cite the
-   [Adapter Contract][agent-harness-doc] only for host-mapping the
-   subset of those fields it names (`Affected interfaces`,
-   `Observable at the named boundary alone`) onto ADR-0002
-   persistence fields (`applies_to`, `verification.mode`). Do not
-   demand persistence fields from host-independent skills;
+   [Adapter Contract][agent-harness-doc] only for host-mapping named
+   fields (`Affected interfaces`, `Observable at the named boundary alone`)
+   onto ADR-0002 persistence fields (`applies_to`, `verification.mode`).
+   Do not demand persistence fields from host-independent skills;
    emit required properties as fields, not only as prose.
 
 5. **Review agents must check skill-to-spec alignment.** When

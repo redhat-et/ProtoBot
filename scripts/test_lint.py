@@ -198,6 +198,88 @@ class ConfiguredReposTests(unittest.TestCase):
             repos,
         )
 
+    def test_includes_local_hooks_with_additional_dependencies(self) -> None:
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "pkg-a",
+                            "language": "python",
+                            "additional_dependencies": ["tool-a==1.0.0"],
+                        },
+                        {
+                            "id": "pkg-b",
+                            "language": "python",
+                            "additional_dependencies": [
+                                "tool-b==2.0.0",
+                                "dep-c==3.0.0",
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+        repos = checker._configured_repos(config)
+        self.assertEqual(
+            [
+                ("local:tool-a==1.0.0", "1"),
+                ("local:tool-b==2.0.0,dep-c==3.0.0", "1"),
+            ],
+            repos,
+        )
+
+    def test_skips_local_hooks_with_pygrep_or_system_language(self) -> None:
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "pygrep-hook",
+                            "language": "pygrep",
+                            "additional_dependencies": ["ignored==1.0.0"],
+                        },
+                        {
+                            "id": "system-hook",
+                            "language": "system",
+                            "additional_dependencies": ["ignored==2.0.0"],
+                        },
+                        {
+                            "id": "no-deps",
+                            "language": "python",
+                        },
+                    ],
+                }
+            ]
+        }
+        self.assertEqual([], checker._configured_repos(config))
+
+    def test_deduplicates_identical_local_dependencies(self) -> None:
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "hook-1",
+                            "language": "python",
+                            "additional_dependencies": ["shared==1.0.0"],
+                        },
+                        {
+                            "id": "hook-2",
+                            "language": "python",
+                            "additional_dependencies": ["shared==1.0.0"],
+                        },
+                    ],
+                }
+            ]
+        }
+        self.assertEqual(
+            [("local:shared==1.0.0", "1")], checker._configured_repos(config)
+        )
+
     def test_empty_config(self) -> None:
         self.assertEqual([], checker._configured_repos({}))
 
@@ -389,7 +471,12 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("https://example.invalid/bar @ bbbb", message)
 
     def test_offline_reports_missing_local_dependency_environment(self) -> None:
-        _make_db(self.home / "db.db", [])
+        repo_path = self.home / "repo-local"
+        repo_path.mkdir()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf):
             rc = checker._preflight(
@@ -561,6 +648,58 @@ class PreflightTests(unittest.TestCase):
             )
         self.assertEqual(1, rc)
         self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
+
+    def test_offline_fails_closed_on_empty_cache_with_local_python_hook(self) -> None:
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "yamllint",
+                            "language": "python",
+                            "additional_dependencies": ["yamllint==1.38.0"],
+                        }
+                    ],
+                }
+            ]
+        }
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(False, self.home, config)
+        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn("local:yamllint==1.38.0 @ 1", message)
+        self.assertIn("pre-commit install-hooks", message)
+
+    def test_offline_passes_when_local_python_hook_is_cached(self) -> None:
+        config = {
+            "repos": [
+                {
+                    "repo": "local",
+                    "hooks": [
+                        {
+                            "id": "yamllint",
+                            "language": "python",
+                            "additional_dependencies": ["yamllint==1.38.0"],
+                        }
+                    ],
+                }
+            ]
+        }
+        repo_path = self.home / "repo-local"
+        environment_path = repo_path / f"py_env-{_expected_python_env_name()}"
+        _add_environment_health(environment_path)
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:yamllint==1.38.0", "1", str(repo_path))],
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(False, self.home, config)
+        self.assertEqual(0, rc)
+        self.assertEqual("", buf.getvalue())
 
 
 class PreflightRestoreTests(unittest.TestCase):
@@ -3028,7 +3167,7 @@ class MainCheckParityTests(unittest.TestCase):
                 rc = checker.main(["--check-parity"])
         self.assertEqual(1, rc)
         mock_run.assert_not_called()
-        self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
+        self.assertIn("local:pyyaml==6.0.3 @ 1", buf.getvalue())
 
     def test_online_check_parity_skips_cache_but_still_validates(self) -> None:
         # No db.db at all; --online must bypass the cache gate.

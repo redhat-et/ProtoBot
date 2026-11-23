@@ -168,17 +168,38 @@ def _load_config() -> dict[str, Any]:
 
 
 def _configured_repos(config: dict[str, Any]) -> list[tuple[str, str]]:
-    """Return ``[(repo_url, rev), ...]`` for cloned hook repositories.
+    """Return ``[(repo_url, rev), ...]`` for configured hook repositories and environments.
 
-    Skips ``repo: local`` and ``repo: meta`` entries, which pre-commit
-    never fetches over the network.
+    Includes cloned hook repositories and ``repo: local`` hooks that pin
+    dependencies via ``additional_dependencies``. Skips ``repo: meta``
+    and local hooks whose language installs no pre-commit environment,
+    which require no environment in the cache.
     """
-    repos = []
+    repos: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for entry in config.get("repos", []):
         repo = entry.get("repo", "")
-        if repo in _NON_CLONED_REPOS:
+        if repo == "meta":
             continue
-        repos.append((repo, entry.get("rev", "")))
+        if repo == "local":
+            for hook in entry.get("hooks", []):
+                if hook.get("language") not in _LANGUAGES_WITH_ENVIRONMENT:
+                    continue
+                deps = hook.get("additional_dependencies")
+                if not deps:
+                    continue
+                key = f"local:{','.join(deps)}"
+                ref = "1"
+                pair = (key, ref)
+                if pair not in seen:
+                    seen.add(pair)
+                    repos.append(pair)
+            continue
+        rev = entry.get("rev", "")
+        pair = (repo, rev)
+        if pair not in seen:
+            seen.add(pair)
+            repos.append(pair)
     return repos
 
 
@@ -278,7 +299,16 @@ def _any_always_run(config: dict[str, Any]) -> bool:
 
 
 def _cached_repos(pre_commit_home: Path) -> set[tuple[str, str]]:
-    """Return ``{(repo, ref), ...}`` recorded in *pre_commit_home*."""
+    """Return ``{(repo, ref), ...}`` already cloned or installed in *pre_commit_home*.
+
+    Reads the ``repos`` table from pre-commit's own ``db.db`` SQLite
+    store directly (see ``pre_commit.store.Store``), so this check
+    needs no network access and no dependency on pre-commit's internal
+    Python API. Cloned hook repositories are stored with their bare
+    repository URL and revision, while ``repo: local`` hooks with
+    ``additional_dependencies`` are stored with keys of the form
+    ``local:<dep1,dep2,...>`` and ref ``1``.
+    """
     return set(_cached_repo_paths(pre_commit_home))
 
 
@@ -463,6 +493,19 @@ def _preflight(online: bool, pre_commit_home: Path, config: dict[str, Any]) -> i
     missing_local = _missing_local_dependency_environments(
         config, cached_paths, pre_commit_home
     )
+    # A missing ``local:`` row is already reported as a missing repository
+    # revision; report the environment form only when the row exists but its
+    # environment does not.
+    missing_repo_pairs = set(missing_repos)
+    missing_local = [
+        (hook_id, dependencies)
+        for hook_id, dependencies in missing_local
+        if (
+            f"{_LOCAL_REPO}:{','.join(dependencies)}",
+            _LOCAL_REPO_VERSION,
+        )
+        not in missing_repo_pairs
+    ]
     if missing_repos:
         _report_missing_repos(missing_repos, pre_commit_home)
     if missing_local:
