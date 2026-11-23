@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -47,6 +48,33 @@ def _add_environment_health(environment_path: Path) -> None:
     bin_dir = environment_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     os.symlink(sys.executable, bin_dir / "python")
+
+
+def _pre_commit_interpreters() -> list[str]:
+    """Return interpreters that may have pre-commit installed, in order."""
+    candidates = []
+    executable = shutil.which("pre-commit")
+    if executable is not None:
+        try:
+            first_line = (
+                Path(executable)
+                .read_text(encoding="utf-8", errors="replace")
+                .splitlines()[0]
+            )
+        except (OSError, IndexError):
+            first_line = ""
+        if first_line.startswith("#!"):
+            parts = shlex.split(first_line[2:].strip())
+            if parts:
+                if Path(parts[0]).name == "env" and len(parts) > 1:
+                    if Path(parts[1]).name.startswith("python"):
+                        resolved = shutil.which(parts[1])
+                        if resolved is not None:
+                            candidates.append(resolved)
+                elif Path(parts[0]).name.startswith("python"):
+                    candidates.append(parts[0])
+    candidates.append(sys.executable)
+    return list(dict.fromkeys(candidates))
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -331,17 +359,150 @@ class ConfiguredLocalDependenciesTests(unittest.TestCase):
         self.assertEqual([], checker._configured_local_dependencies(config))
 
 
+class PythonEnvironmentHealthTests(unittest.TestCase):
+    """The pre-flight health check mirrors pre-commit's own requirements."""
+
+    def setUp(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.environment = Path(temporary_directory.name) / "py_env-test"
+        _add_environment_health(self.environment)
+
+    def _current_python(self) -> str:
+        return (
+            f"{sys.version_info.major}.{sys.version_info.minor}."
+            f"{sys.version_info.micro}.final.0"
+        )
+
+    def _append_cfg(self, line: str) -> None:
+        cfg = self.environment / "pyvenv.cfg"
+        cfg.write_text(cfg.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
+
+    def test_missing_version_info_is_unhealthy(self) -> None:
+        (self.environment / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+
+        self.assertFalse(checker._python_environment_is_healthy(self.environment))
+        self.assertFalse(
+            checker._python_environment_is_healthy(
+                self.environment, verify_version=True
+            )
+        )
+
+    def test_relative_base_executable_is_unhealthy(self) -> None:
+        self._append_cfg("base-executable = python3")
+
+        self.assertFalse(checker._python_environment_is_healthy(self.environment))
+
+    def test_absolute_base_executable_path_is_healthy(self) -> None:
+        """A pyenv or uv-managed base interpreter is a valid live environment."""
+        self._append_cfg("base-executable = /opt/python3")
+        original_is_file = Path.is_file
+
+        def is_file_with_python3(path):
+            if str(path) == "/opt/python3":
+                return True
+            return original_is_file(path)
+
+        with (
+            patch.object(
+                Path, "is_file", side_effect=is_file_with_python3, autospec=True
+            ),
+            patch.object(
+                checker,
+                "_probe_interpreter",
+                side_effect=[
+                    (self._current_python(), None),
+                    (self._current_python(), None),
+                ],
+            ),
+        ):
+            self.assertTrue(
+                checker._python_environment_is_healthy(
+                    self.environment, verify_version=True
+                )
+            )
+
+    def test_missing_base_executable_is_unhealthy(self) -> None:
+        self._append_cfg("base-executable = /opt/missing-python")
+        original_is_file = Path.is_file
+
+        def is_file_without_missing(path):
+            if str(path) == "/opt/missing-python":
+                return False
+            return original_is_file(path)
+
+        with (
+            patch.object(
+                Path, "is_file", side_effect=is_file_without_missing, autospec=True
+            ),
+            patch.object(
+                checker,
+                "_probe_interpreter",
+                return_value=(self._current_python(), None),
+            ),
+        ):
+            self.assertFalse(
+                checker._python_environment_is_healthy(
+                    self.environment, verify_version=True
+                )
+            )
+
+    def test_mismatched_base_executable_version_is_unhealthy(self) -> None:
+        self._append_cfg("base-executable = /usr/bin/python3")
+        original_is_file = Path.is_file
+
+        def is_file_with_python3(path):
+            if str(path) == "/usr/bin/python3":
+                return True
+            return original_is_file(path)
+
+        with (
+            patch.object(
+                Path, "is_file", side_effect=is_file_with_python3, autospec=True
+            ),
+            patch.object(
+                checker,
+                "_probe_interpreter",
+                side_effect=[(self._current_python(), None), ("9.9.9.final.0", None)],
+            ),
+        ):
+            self.assertFalse(
+                checker._python_environment_is_healthy(
+                    self.environment, verify_version=True
+                )
+            )
+
+
 class PythonLanguageVersionTests(unittest.TestCase):
     def test_matches_pre_commit_default_version(self) -> None:
         """Pin the copied logic to pre-commit's own default-version contract."""
-        try:
-            from pre_commit.languages.python import get_default_version
-        except ImportError:
-            self.skipTest("pre-commit is not installed")
-
-        self.assertEqual(
-            get_default_version(), checker._default_python_language_version()
+        repo_root = Path(__file__).resolve().parent.parent
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(repo_root / 'scripts')!r})\n"
+            "from pre_commit.languages.python import get_default_version\n"
+            "import lint as checker\n"
+            "assert get_default_version() == "
+            "checker._default_python_language_version()\n"
         )
+        for interpreter in _pre_commit_interpreters():
+            result = subprocess.run(
+                [interpreter, "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                return
+            if (
+                "ModuleNotFoundError" not in result.stderr
+                and "ImportError" not in result.stderr
+            ):
+                self.fail(
+                    "pre-commit version comparison failed under "
+                    f"{interpreter}: {result.stderr}"
+                )
+        self.skipTest("pre-commit is not installed")
 
     def test_uses_versioned_interpreter_found_on_path(self) -> None:
         """Select the versioned executable when pre-commit would find it."""
@@ -488,6 +649,7 @@ class PreflightTests(unittest.TestCase):
         message = buf.getvalue()
         self.assertIn("local hook dependency environment", message)
         self.assertIn("dependency-hook: pyyaml==6.0.3", message)
+        self.assertNotIn("local:pyyaml==6.0.3 @ 1", message)
         self.assertIn("pre-commit install-hooks", message)
 
     def test_offline_skips_hooks_whose_language_has_no_environment(self) -> None:
@@ -696,6 +858,7 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(1, rc)
         message = buf.getvalue()
         self.assertIn("local:yamllint==1.38.0 @ 1", message)
+        self.assertNotIn("local hook dependency environment", message)
         self.assertIn("pre-commit install-hooks", message)
 
     def test_offline_passes_when_local_python_hook_is_cached(self) -> None:
@@ -841,6 +1004,80 @@ class PreflightRestoreTests(unittest.TestCase):
             ("https://example.invalid/foo", "aaaa"),
             ("https://example.invalid/bar", "bbbb"),
         ]
+
+    _LOCAL_ROW = ("local:pyyaml==6.0.3", "1")
+
+    def _build_local_dependency_tarball(self, cfg_lines: list[str]) -> None:
+        """Write a tarball with the configured local dependency environment."""
+        packed = self.root / "packed"
+        repo_dir = packed / "repo-local"
+        environment = repo_dir / f"py_env-python{self._current_interpreter()}"
+        (environment / "bin").mkdir(parents=True)
+        (environment / "pyvenv.cfg").write_text(
+            "\n".join(cfg_lines) + "\n", encoding="utf-8"
+        )
+        os.symlink(sys.executable, environment / "bin" / "python")
+        (environment / ".install_state_v2").touch()
+        _make_db(
+            packed / "db.db",
+            [self._LOCAL_ROW],
+            {self._LOCAL_ROW: str(self.home / "repo-local")},
+        )
+        with tarfile.open(self.tarball, "w:gz") as tar:
+            for path in sorted(packed.rglob("*")):
+                tar.add(path, arcname=path.relative_to(packed), recursive=False)
+
+    def test_stale_patch_live_environment_triggers_restore(self) -> None:
+        """The restore trigger uses the same dynamic check as the gate."""
+        repo_dir = self.home / "repo-local"
+        environment = repo_dir / f"py_env-python{self._current_interpreter()}"
+        _add_environment_health(environment)
+        (environment / "pyvenv.cfg").write_text(
+            f"version_info = {self._stale_patch_version()}\n", encoding="utf-8"
+        )
+        (environment / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [self._LOCAL_ROW],
+            {self._LOCAL_ROW: str(repo_dir)},
+        )
+        self._build_local_dependency_tarball(
+            [f"version_info = {self._current_python()}"]
+        )
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_LOCAL_DEPENDENCIES
+            )
+
+        self.assertEqual(0, rc, stderr.getvalue())
+        self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
+
+    def test_archive_environment_without_version_info_is_not_promoted(self) -> None:
+        """An archive that the next pre-flight would reject stays unpromoted."""
+        self._build_local_dependency_tarball(["home = /usr"])
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = checker._preflight_with_restore(
+                False, self.home, _CONFIG_LOCAL_DEPENDENCIES
+            )
+
+        self.assertEqual(1, rc)
+        self.assertIn(
+            "cannot provide the configured local hook dependency environment",
+            stderr.getvalue(),
+        )
+        self.assertNotIn("Restored", stdout.getvalue())
+        self.assertTrue(self.tarball.exists())
 
     def test_cold_cache_with_valid_tarball_restores_and_passes(self) -> None:
         self._build_tarball(self._config_rows())

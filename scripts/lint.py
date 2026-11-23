@@ -381,9 +381,13 @@ def _python_environment_is_healthy(
 ) -> bool:
     """Return whether a Python environment passes a health check.
 
-    The static checks (``pyvenv.cfg``, interpreter symlink) always run. With
-    *verify_version*, ``bin/python`` is executed and its reported version must
-    equal ``pyvenv.cfg`` exactly, as pre-commit's own health check requires.
+    The static checks (``pyvenv.cfg`` with ``version_info``, interpreter
+    symlink, and an absolute ``base-executable``) always run. With
+    *verify_version*, ``bin/python`` and the base executable are executed,
+    and both must agree with ``pyvenv.cfg`` exactly, as pre-commit's own
+    health check requires. Unlike the archive validator, a live environment
+    may name a pyenv or uv-managed base interpreter, so only the dynamic
+    check constrains its path.
     """
     cfg = environment / "pyvenv.cfg"
     if cfg.is_symlink() or not cfg.is_file():
@@ -392,15 +396,27 @@ def _python_environment_is_healthy(
         values = _read_pyvenv_cfg(cfg)
     except (OSError, UnicodeDecodeError):
         return False
+    version_info = values.get("version_info", "")
+    if not version_info:
+        return False
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
-    recorded = _pyvenv_major_minor(values.get("version_info", "")) or ""
+    recorded = _pyvenv_major_minor(version_info) or ""
     interpreter = environment / "bin" / "python"
     if _interpreter_link_rejection(interpreter, current, recorded) is not None:
+        return False
+    base_executable = values.get("base-executable")
+    if base_executable is not None and (
+        not base_executable or not Path(base_executable).is_absolute()
+    ):
         return False
     if not verify_version:
         return True
     reported, failure = _probe_interpreter(interpreter)
-    return failure is None and reported == values.get("version_info")
+    if failure is not None or reported != version_info:
+        return False
+    if base_executable is None:
+        return True
+    return _base_executable_version_rejection(base_executable, reported) is None
 
 
 def _missing_local_dependency_environments(
@@ -1196,11 +1212,15 @@ def _verify_and_normalize_env(
         )
         if base_path_result:
             return base_path_result
-    # 7. Version gate: a cache built for another interpreter is only
+    # 7. A missing version_info would be rejected by pre-commit's own
+    #    health check; report it as unverified rather than promoting it.
+    if not version_info:
+        return _EnvCheckResult("pyvenv.cfg has no version_info")
+    # 8. Version gate: a cache built for another interpreter is only
     #    reported by the interpreter-mismatch warning.
-    if not version_info or _pyvenv_major_minor(version_info) != current:
+    if _pyvenv_major_minor(version_info) != current:
         return None
-    # 8. Dynamic checks.
+    # 9. Dynamic checks.
     reported, probe_failure = _probe_interpreter(interpreter)
     if probe_failure:
         return _EnvCheckResult(probe_failure)
@@ -1570,7 +1590,10 @@ def _preflight_with_restore(
         cached_paths = _cached_repo_paths(pre_commit_home)
         missing_repos = _missing_repos(configured, set(cached_paths))
         missing_local = _missing_local_dependency_environments(
-            config, cached_paths, pre_commit_home
+            config,
+            cached_paths,
+            pre_commit_home,
+            verify_interpreter=True,
         )
         if (missing_repos or missing_local) and _restore_cache(
             pre_commit_home, set(configured), config

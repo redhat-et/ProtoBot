@@ -31,6 +31,7 @@ Usage::
 from __future__ import annotations
 
 import os
+import shlex
 import sqlite3
 import sys
 from pathlib import Path
@@ -47,17 +48,44 @@ def _python_environment_version() -> str:
     return get_default_version()
 
 
-def _write_local_environment(repo_dir: Path) -> None:
-    """Write a Python environment that passes the pre-flight health check."""
+def _hook_executable(entry: str) -> str | None:
+    """Return the executable name a hook ``entry`` invokes, if any."""
+    try:
+        words = shlex.split(entry)
+    except ValueError:
+        words = entry.split()
+    if not words:
+        return None
+    executable = Path(words[0]).name
+    return executable or None
+
+
+def _write_local_environment(repo_dir: Path, entries: tuple[str, ...] = ()) -> None:
+    """Write a Python environment that passes the pre-flight health check.
+
+    Each hook ``entry`` also gets an executable stub in ``bin``: pre-commit
+    merges the config's ``language: python`` and ``entry`` over the fake
+    manifest, so it looks for those executables in this environment.
+    """
     environment = repo_dir / f"py_env-{_python_environment_version()}"
-    (environment / "bin").mkdir(parents=True)
+    bin_dir = environment / "bin"
+    bin_dir.mkdir(parents=True)
     (environment / "pyvenv.cfg").write_text(
         f"version_info = {sys.version_info.major}.{sys.version_info.minor}."
         f"{sys.version_info.micro}.final.0\n",
         encoding="utf-8",
     )
-    os.symlink(sys.executable, environment / "bin" / "python")
+    os.symlink(sys.executable, bin_dir / "python")
     (environment / ".install_state_v2").touch()
+    for entry in entries:
+        executable = _hook_executable(entry)
+        if executable is None:
+            continue
+        stub = bin_dir / executable
+        if os.path.lexists(stub):
+            continue
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
 
 
 def build(repo_root: Path, cache_dir: Path) -> None:
@@ -84,6 +112,7 @@ def build(repo_root: Path, cache_dir: Path) -> None:
             config = yaml.safe_load(fh)
 
         local_rows: dict[str, Path] = {}
+        local_entries: dict[str, list[str]] = {}
         for index, entry in enumerate(config.get("repos", [])):
             repo = entry.get("repo", "")
             if repo == "meta":
@@ -97,12 +126,15 @@ def build(repo_root: Path, cache_dir: Path) -> None:
                     if repo_name not in local_rows:
                         local_dir = cache_dir / f"fake_local_{len(local_rows)}"
                         local_dir.mkdir()
-                        _write_local_environment(local_dir)
                         local_rows[repo_name] = local_dir
+                        local_entries[repo_name] = []
                         conn.execute(
                             "INSERT INTO repos (repo, ref, path) VALUES (?, ?, ?)",
                             (repo_name, "1", str(local_dir)),
                         )
+                    hook_entry = hook.get("entry")
+                    if isinstance(hook_entry, str):
+                        local_entries[repo_name].append(hook_entry)
                 continue
             rev = entry.get("rev", "")
             fake_repo_dir = cache_dir / f"fake_repo_{index}"
@@ -122,6 +154,8 @@ def build(repo_root: Path, cache_dir: Path) -> None:
                 "INSERT INTO repos (repo, ref, path) VALUES (?, ?, ?)",
                 (repo, rev, str(fake_repo_dir)),
             )
+        for repo_name, local_dir in local_rows.items():
+            _write_local_environment(local_dir, tuple(local_entries[repo_name]))
         conn.commit()
     finally:
         conn.close()

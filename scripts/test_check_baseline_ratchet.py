@@ -144,6 +144,20 @@ class CompareCeilingsTests(unittest.TestCase):
 
         self.assertEqual([], diagnostics)
 
+    def test_dropped_ceiling_for_dangling_symlink_is_rejected(self) -> None:
+        """A broken symlink still occupies the tracked path."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            os.symlink(repo_root / "missing-target", repo_root / "AGENTS.md")
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(_ceiling(value=4000)),
+                repo_root=repo_root,
+            )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("was removed while the file still exists", diagnostics[0])
+
     def test_dropped_ceiling_is_skipped_without_repo_root(self) -> None:
         """Skip dropped-ceiling detection when file existence cannot be checked."""
         diagnostics = checker.compare_ceilings(

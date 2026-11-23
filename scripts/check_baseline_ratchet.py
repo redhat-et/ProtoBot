@@ -419,7 +419,7 @@ def compare_ceilings(
             if key in head_index:
                 continue
             file_path, rule_id = key
-            if not (repo_root / file_path).exists():
+            if not os.path.lexists(repo_root / file_path):
                 continue
             clean_path = sanitize_log_string(file_path)
             clean_rule = sanitize_log_string(rule_id)
