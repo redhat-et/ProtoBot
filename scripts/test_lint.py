@@ -3368,7 +3368,11 @@ def _run_commands_by_step(text: str) -> list[list[str]]:
     the inline value, or every non-empty stripped line of the indented
     block that follows. The key may be quoted or spaced
     (``"run":``, ``'run':``, ``run :``) and the step may be a
-    sequence item with no name (``- run:``). Comment parts are removed
+    sequence item with no name (``- run:``). A block ends at the first
+    non-blank line that is not indented deeper than the ``run`` key
+    itself: for a ``- run: |`` item the key sits after the dash, so a
+    sibling field such as ``name:`` at the key's indentation ends the
+    block instead of becoming a command. Comment parts are removed
     first, so a comment that names a command does not count and a step
     name never becomes a command. The helper parses text only, so the
     tests need no PyYAML.
@@ -3381,14 +3385,17 @@ def _run_commands_by_step(text: str) -> list[list[str]]:
         if key is None:
             index += 1
             continue
-        indent = key.group(1)
         value = key.group(3) or ""
+        # The column where the run key (or its quote) starts; a block
+        # must be indented deeper than this, not merely deeper than a
+        # sequence dash.
+        block_prefix = " " * (key.start(2) + 1)
         commands: list[str] = []
         if value[:1] in ("|", ">"):
             index += 1
             while index < len(lines):
                 block_line = lines[index]
-                if block_line.strip() and not block_line.startswith(indent + " "):
+                if block_line.strip() and not block_line.startswith(block_prefix):
                     break
                 if block_line.strip():
                     commands.append(block_line.strip())
@@ -3479,6 +3486,20 @@ def _direct_runs_in_job(text: str, job_id: str) -> list[str]:
         command
         for command in _run_commands_joined(job)
         if _has_direct_pre_commit_run(command)
+    ]
+
+
+def _direct_run_invocations(commands: list[str]) -> list[str]:
+    """Return every direct ``pre-commit run`` invocation in *commands*.
+
+    One command line can hold several invocations — for example
+    ``pre-commit run -a; pre-commit run -a`` — and each match counts,
+    so the rehearsal contract counts invocations, not lines.
+    """
+    return [
+        match
+        for command in commands
+        for match in _DIRECT_PRE_COMMIT_RUN.findall(command)
     ]
 
 
@@ -3609,6 +3630,32 @@ class RunCommandsByStepTests(unittest.TestCase):
             with self.subTest(command=command):
                 if command != "pre-commit gc":
                     self.assertTrue(_has_direct_pre_commit_run(command))
+
+    def test_unnamed_block_stops_at_sibling_keys(self) -> None:
+        # A `- run: |` block ends at a sibling field at the run key's
+        # indentation; the sibling value must not become a command,
+        # even when its text names `pre-commit run`.
+        snippet = (
+            "      - run: |\n"
+            "          echo only this\n"
+            "        name: Explain pre-commit run\n"
+            "      - name: Next step\n"
+            "        run: pre-commit gc\n"
+        )
+        self.assertEqual(
+            [
+                ["echo only this"],
+                ["pre-commit gc"],
+            ],
+            _run_commands_by_step(snippet),
+        )
+        # The name: value never reaches the commands, so the
+        # outside-job direct-run check does not reject this workflow.
+        commands = _run_commands(snippet)
+        self.assertNotIn("name: Explain pre-commit run", commands)
+        self.assertEqual(
+            [], [command for command in commands if _has_direct_pre_commit_run(command)]
+        )
 
     def test_join_continuations_merges_backslash_lines(self) -> None:
         self.assertEqual(
@@ -3759,11 +3806,11 @@ class CiWorkflowContractTests(unittest.TestCase):
     def test_gate_rehearsal_direct_run_step_runs_twice(self) -> None:
         # The one direct-run step holds exactly two runs: one in the
         # job environment, one under env -i to catch hooks that read
-        # environment variables. The count comes from every step form,
-        # including `- run:` items with no name, so a third direct run
-        # cannot hide.
+        # environment variables. The count covers every step form,
+        # including `- run:` items with no name, and counts every
+        # invocation, not just the lines that hold one.
         direct_runs = _direct_runs_in_job(self.text, self._GATE_REHEARSAL_JOB)
-        self.assertEqual(2, len(direct_runs))
+        self.assertEqual(2, len(_direct_run_invocations(direct_runs)))
         under_env_i = [command for command in direct_runs if _runs_under_env_i(command)]
         self.assertEqual(1, len(under_env_i))
         # The other direct run must not run under env -i.
@@ -3794,8 +3841,32 @@ class CiWorkflowContractTests(unittest.TestCase):
         )
         self.assertEqual(
             3,
-            len(_direct_runs_in_job(workflow, self._GATE_REHEARSAL_JOB)),
+            len(
+                _direct_run_invocations(
+                    _direct_runs_in_job(workflow, self._GATE_REHEARSAL_JOB)
+                )
+            ),
         )
+
+    def test_two_invocations_on_one_line_are_counted_separately(self) -> None:
+        # Regression test: one line can hold several direct
+        # invocations. Before the count used every match, the line
+        # counted once and this workflow passed the "exactly two"
+        # contract with three invocations.
+        workflow = (
+            "jobs:\n"
+            "  gate-rehearsal:\n"
+            "    steps:\n"
+            "      - name: Rehearse the gate\n"
+            "        run: |\n"
+            "          pre-commit run -a; pre-commit run -a\n"
+            "          env -i pre-commit run -a\n"
+        )
+        direct_runs = _direct_runs_in_job(workflow, self._GATE_REHEARSAL_JOB)
+        # Two command lines hold the invocations...
+        self.assertEqual(2, len(direct_runs))
+        # ...but three invocations run, so the contract rejects it.
+        self.assertEqual(3, len(_direct_run_invocations(direct_runs)))
 
     def test_gate_rehearsal_direct_run_step_guards_each_run(self) -> None:
         # Each direct run is bracketed: strict shell settings at the

@@ -44,6 +44,16 @@ WIDGET_COMPANION_HOOK = (
     "        entry: python3 scripts/test_check_widget.py\n"
     "        language: system\n"
 )
+TOOLS_CHECKER_HOOK = (
+    "      - id: check-widget\n"
+    "        entry: python3 scripts/tools/check_widget.py\n"
+    "        language: system\n"
+)
+TOOLS_COMPANION_HOOK = (
+    "      - id: test-check-widget\n"
+    "        entry: python3 scripts/tools/test_check_widget.py\n"
+    "        language: system\n"
+)
 REMOTE_REPO_CONFIG = (
     "repos:\n"
     "  - repo: https://github.com/pre-commit/pre-commit-hooks\n"
@@ -145,6 +155,11 @@ class CheckConfigTests(unittest.TestCase):
         """Write the widget checker and its companion test script."""
         self.write_script("scripts/check_widget.py", checker_source)
         self.write_script("scripts/test_check_widget.py", STDLIB_SCRIPT_SOURCE)
+
+    def write_tools_scripts(self, checker_source: str) -> None:
+        """Write the tools checker and its companion test script."""
+        self.write_script("scripts/tools/check_widget.py", checker_source)
+        self.write_script("scripts/tools/test_check_widget.py", STDLIB_SCRIPT_SOURCE)
 
     def run_checker(self) -> checker.GateReport:
         """Check the temporary gate configuration."""
@@ -364,6 +379,167 @@ class CheckConfigTests(unittest.TestCase):
         self.write_script("scripts/helper.py", "def load():\n    import yaml\n")
 
         self.assertEqual([], self.run_checker().diagnostics)
+
+    def test_relative_import_resolves_and_scans_helper(self) -> None:
+        """Resolve a relative import against the importing package."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import pkg.child\n")
+        self.write_script("scripts/pkg/__init__.py", "")
+        self.write_script("scripts/pkg/child.py", "from . import helper\n")
+        self.write_script("scripts/pkg/helper.py", "import yaml\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/pkg/helper.py", diagnostics[0])
+
+    def test_relative_import_forms_resolve(self) -> None:
+        """Resolve each relative import form against the right package."""
+        sources = {
+            "from . import helper": "from . import helper\n",
+            "from .helper import value": "from .helper import value\n",
+            "from ..other import value": "from ..other import value\n",
+        }
+        for label, child_source in sources.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts("import pkg.child\n")
+                self.write_script("scripts/pkg/__init__.py", "")
+                self.write_script("scripts/pkg/child.py", child_source)
+                self.write_script("scripts/pkg/helper.py", "import os\n")
+                self.write_script("scripts/other.py", "import os\n")
+
+                self.assertEqual([], self.run_checker().diagnostics)
+
+    def test_relative_import_escape_fails(self) -> None:
+        """Reject a relative import that escapes the scripts/ tree."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import pkg.child\n")
+        self.write_script("scripts/pkg/__init__.py", "")
+        self.write_script("scripts/pkg/child.py", "from ... import value\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("escapes the scripts/ directory", diagnostics[0])
+
+    def test_relative_import_missing_target_fails(self) -> None:
+        """Reject a relative import that resolves to no repository file."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import pkg.child\n")
+        self.write_script("scripts/pkg/__init__.py", "")
+        self.write_script("scripts/pkg/child.py", "from . import missing_helper\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("missing_helper", diagnostics[0])
+        self.assertIn("no repository file", diagnostics[0])
+
+    def test_from_import_of_bound_name_skips_submodule(self) -> None:
+        """Treat a name the package initializer binds as an attribute."""
+        initializers = {
+            "assignment": "child = None\n",
+            "function": "def child():\n    return 1\n",
+            "class": "class child:\n    pass\n",
+            "import alias": "import os as child\n",
+        }
+        for label, initializer in initializers.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts("from pkg import child\n")
+                self.write_script("scripts/pkg/__init__.py", initializer)
+                self.write_script("scripts/pkg/child.py", "import yaml\n")
+
+                self.assertEqual([], self.run_checker().diagnostics)
+
+    def test_from_import_of_unbound_name_loads_submodule(self) -> None:
+        """Scan the submodule that a package initializer does not bind."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("from pkg import child\n")
+        self.write_script("scripts/pkg/__init__.py", "other = None\n")
+        self.write_script("scripts/pkg/child.py", "import yaml\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/pkg/child.py", diagnostics[0])
+
+    def test_package_initializer_wins_over_module_file(self) -> None:
+        """Load the package initializer before a same-named module file."""
+        cases = {
+            "initializer is loaded": ("import os\n", "import yaml\n", False),
+            "module file is not loaded": ("import yaml\n", "import os\n", True),
+        }
+        for label, (initializer, module_source, fails) in cases.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts("import pkg\n")
+                self.write_script("scripts/pkg/__init__.py", initializer)
+                self.write_script("scripts/pkg.py", module_source)
+
+                diagnostics = self.run_checker().diagnostics
+
+                if fails:
+                    self.assertEqual(1, len(diagnostics))
+                    self.assertIn("yaml", diagnostics[0])
+                    self.assertIn("scripts/pkg/__init__.py", diagnostics[0])
+                else:
+                    self.assertEqual([], diagnostics)
+
+    def test_namespace_package_child_resolves(self) -> None:
+        """Resolve a submodule through a package without an initializer."""
+        sources = {
+            "dotted import": "import pkg.child\n",
+            "from import": "from pkg import child\n",
+        }
+        for label, checker_source in sources.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts(checker_source)
+                self.write_script("scripts/pkg/child.py", "import yaml\n")
+
+                diagnostics = self.run_checker().diagnostics
+
+                self.assertEqual(1, len(diagnostics))
+                self.assertIn("yaml", diagnostics[0])
+                self.assertIn("scripts/pkg/child.py", diagnostics[0])
+
+    def test_entry_directory_resolves_bare_import_first(self) -> None:
+        """Resolve a bare import from the entry script's directory first."""
+        self.write_config(gate_config(TOOLS_CHECKER_HOOK, TOOLS_COMPANION_HOOK))
+        self.write_tools_scripts("import helper\n")
+        self.write_script("scripts/tools/helper.py", "import yaml\n")
+        self.write_script("scripts/helper.py", "import os\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/tools/helper.py", diagnostics[0])
+        self.assertNotIn("scripts/helper.py", diagnostics[0])
+
+    def test_bare_import_falls_back_to_scripts(self) -> None:
+        """Resolve a bare import against scripts/ when the entry directory has none."""
+        self.write_config(gate_config(TOOLS_CHECKER_HOOK, TOOLS_COMPANION_HOOK))
+        self.write_tools_scripts("import helper\n")
+        self.write_script("scripts/helper.py", "import yaml\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/helper.py", diagnostics[0])
 
     def test_system_entry_with_shell_operator_fails(self) -> None:
         """Reject chained commands, pipelines, and command substitution."""
