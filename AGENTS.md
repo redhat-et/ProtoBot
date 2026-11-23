@@ -39,10 +39,11 @@ warn limit in `.skillsaw.yaml` caps it, and
 enforces the `.skillsaw-baseline.json` ceiling downward.
 
 1. **Respect the prompt context budget.** Never raise or delete a
-   `.skillsaw-baseline.json` ceiling row while it exists. After a
-   genuine prose shrink, lower the `agents-md` warn limit in
-   `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
-   downward (`.skillsaw.yaml:19-20`).
+   `.skillsaw-baseline.json` ceiling row while it exists. Deletion is a
+   manual-compliance policy; the checker evaluates only ceiling keys
+   present in the current file. After a genuine prose shrink, lower the
+   `agents-md` warn limit in `.skillsaw.yaml`, then run `skillsaw
+   baseline` to ratchet the ceiling downward (`.skillsaw.yaml:27`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
@@ -55,47 +56,44 @@ enforces the `.skillsaw-baseline.json` ceiling downward.
 
 ## Rules for creating or modifying sibling entries
 
-A governed scope defines a domain of applicability; its list or
-governed collection defines the sibling set. A **module README** is
-the top-level `README.md` of a directory with a `go.mod`.
+A governed scope defines applicability; its list or governed collection
+defines the sibling set. A **module README** is the top-level
+`README.md` of a directory with a `go.mod`.
 
 These rules apply to numbered rules in `AGENTS.md`, specification
 documents under `docs/`, skill files under `.agents/skills/`, module
-READMEs, and entries in future governed scopes. Review agents must
-enforce them reflexively on `AGENTS.md` changes.
+READMEs, and future governed-scope entries. Review agents must enforce
+them reflexively on `AGENTS.md` changes.
 
 1. **Read all sibling entries first.** Read every other entry in the
-   list or governed collection before drafting or revising one.
+   list or governed collection before drafting or revision.
 
 2. **Reuse established terminology.** Match sibling entries' terms for
-   the same concepts. An undeclared alias for a term in the same list or
+   shared concepts. An undeclared alias for a term in the same list or
    governed collection is a defect.
 
 3. **Review agents must check sibling-entry terminology.** When reviewing
-   a PR creating or modifying an entry in a governed scope, verify
-   that the new or changed entry reuses established sibling terminology
-   rather than inventing an alias. In a module README, also check drift
-   between neighboring paragraphs and between a CLI flag and its
-   description. Findings must include terminology drift in the
-   same list or governed collection, not only specification-hierarchy
-   keyword checks. For every `AGENTS.md` modification, verify the
-   change introduces no undeclared aliases for established terms or
-   omitted grammatical referents in the modified prose.
+   a PR that creates or modifies a governed-scope entry, verify the
+   entry reuses established sibling terminology rather than an alias. In
+   a module README, also check drift between neighboring paragraphs and
+   between a CLI flag and its description. Findings must include such
+   drift in the same list or governed collection, not only
+   specification-hierarchy keyword checks. For every `AGENTS.md`
+   modification, verify no undeclared aliases for established terms or
+   omitted grammatical referents.
 
 4. **Match intra-entry restatement terminology.** When an entry
    restates a requirement's cases in a separate enforcement or
    consequence clause, both statements must use identical terminology;
    an undeclared alias or omitted term is a defect. Review agents must
-   check this restatement and include intra-entry terminology drift,
-   not only sibling-entry terminology matching.
+   check this restatement for intra-entry terminology drift, not only
+   sibling-entry terminology matching.
 
-### Rules for identifying sibling entries
-
-1. **Identify sibling entries.** Numbered rules in `AGENTS.md` (other
-   rules in the list); specification documents under `docs/` (other
-   governed Markdown files); skill files under `.agents/skills/`
-   (other skill files); module READMEs (other module READMEs and
-   `docs/` specification documents describing the module).
+Examples: numbered rules in `AGENTS.md` (other rules); specification
+documents under `docs/` (other governed Markdown files); skill files
+under `.agents/skills/` (other skill files); module READMEs (other
+module READMEs and `docs/` specification documents describing the
+module).
 
 ## Specification document hierarchy
 
