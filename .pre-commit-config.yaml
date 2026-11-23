@@ -47,7 +47,7 @@ repos:
       - id: hadolint
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 89f74b2ed90a0c52b809e8cf39611b49424cf948  # frozen: 44.235.1
+    rev: 2174fac6031cdbe089e85cb2974b1cf903752b94  # frozen: 44.236.4
     hooks:
       - id: renovate-config-validator
 
@@ -177,7 +177,7 @@ repos:
         description: "Run 'ruff check' for extremely fast Python linting"
         entry: ruff check --force-exclude
         language: python
-        additional_dependencies: ["ruff==0.17.4"]
+        additional_dependencies: ["ruff==0.17.5"]
         types_or: [python, pyi, jupyter]
         require_serial: true
         exclude: ^validator/vendor/
@@ -187,7 +187,7 @@ repos:
         description: "Run 'ruff format' for extremely fast Python formatting"
         entry: ruff format --force-exclude
         language: python
-        additional_dependencies: ["ruff==0.17.4"]
+        additional_dependencies: ["ruff==0.17.5"]
         types_or: [python, pyi, jupyter, markdown]
         require_serial: true
         exclude: ^validator/vendor/
