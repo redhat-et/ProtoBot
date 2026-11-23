@@ -1,7 +1,8 @@
 # AGENTS
 
-- All pre-commit tests must pass before committing changes. In offline sandboxes, use `python scripts/lint.py` as a
-  wrapper around `pre-commit run`.
+- All pre-commit tests must pass before committing changes. In offline
+  sandboxes, use `python scripts/lint.py` as a wrapper around
+  `pre-commit run`.
   Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
   (specific files), `--check-parity` (validate config and offline hook
   cache), `--online-if-ci` (allow network when CI=true).
@@ -194,10 +195,11 @@ must follow these rules:
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
-   registered specification artifact or [.protobot/project.yaml](.protobot/project.yaml),
-   or when Rule 4 identifies staleness in a registered specification
-   artifact, inspect the affected artifact or project configuration
-   for hand edits under Rule 5. Run `ears-manager check` on a checkout
+   registered specification artifact or
+   [.protobot/project.yaml](.protobot/project.yaml), or when Rule 4
+   identifies staleness in a registered specification artifact, inspect
+   the affected artifact or project configuration for hand edits under
+   Rule 5. Run `ears-manager check` on a checkout
    or worktree of the recorded PR head — a check on the base branch is
    not evidence — and require it to pass without
    `artifact.digest_mismatch`, `artifact.operation_missing`, or
