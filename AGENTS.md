@@ -1,20 +1,17 @@
 # AGENTS
 
-- All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py` as a
+- All pre-commit tests must pass before committing changes. In offline sandboxes, use `python scripts/lint.py` as a
   wrapper around `pre-commit run`.
   Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
   (specific files), `--check-parity` (validate config and offline hook
   cache), `--online-if-ci` (allow network when CI=true).
-  For offline runs, pre-install tools and pre-populate the hook cache
-  (bootstrap with `pre-commit install-hooks`).
+  For offline runs, pre-install tools and populate hook cache
+  (`pre-commit install-hooks`).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
-- The upstream repository is `redhat-et/protobot`. Ensure pull requests
-  target this repository.
+- Pull requests must target the upstream repository `redhat-et/protobot`.
 - Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
-  there so Claude Code finds them; do not add skills
-  under `.claude/` directly.
+  there; do not add skills under `.claude/` directly.
 
 ## Workflow files and CI boundaries
 
@@ -45,8 +42,7 @@ budget-capped by the `context-budget` rule's `agents-md` warn limit in
    `.skillsaw-baseline.json` ceiling to fit new prose; after a
    genuine shrink, regenerate the baseline with `skillsaw baseline`
    so the ceiling ratchets downward. The `agents-md` warn limit in
-   `.skillsaw.yaml` is lowered when `AGENTS.md` shrinks below it
-   (`.skillsaw.yaml:19-20`).
+   `.skillsaw.yaml` is lowered when `AGENTS.md` shrinks below it.
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating existing prose or extracting
    detail into an on-demand skill under `.agents/skills/`.
@@ -152,7 +148,7 @@ must follow these rules:
    New or revised specification documents must account for every
    component, interface, and constraint enumerated in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md`, and must address, not
+   `docs/architecture/overview.md`, and address, not
    silently omit, those relevant to the document's scope.
 
 2. **Verify deployment topology, security posture, and
@@ -187,22 +183,20 @@ must follow these rules:
 
 5. **Update registered specification artifacts through
    `ears-manager artifact put`.** Registered specification artifacts
-   (`docs/vision.md`, `docs/architecture.md`, and any other artifact
+   (`docs/vision.md`, `docs/architecture.md`, and others
    registered in `.protobot/project.yaml`) and
    `.protobot/project.yaml` must never be edited by hand.
-   When a PR creates or modifies a registered specification artifact,
-   or when Rule 4 identifies staleness in a registered specification
-   artifact, apply the update exclusively via
+   When a PR creates, modifies, or Rule 4 identifies staleness in a
+   registered specification artifact, apply the update exclusively via
    `ears-manager artifact put` within an active change set. Run
    formatters and linters before `ears-manager artifact put`, and
    verify with `ears-manager check` before committing.
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
-   registered specification artifact, when Rule 4 identifies staleness
-   in a registered specification artifact, or when a PR modifies
-   [.protobot/project.yaml](.protobot/project.yaml), inspect the
-   affected registered specification artifact or project configuration
+   registered specification artifact or [.protobot/project.yaml](.protobot/project.yaml),
+   or when Rule 4 identifies staleness in a registered specification
+   artifact, inspect the affected artifact or project configuration
    for hand edits under Rule 5. Run `ears-manager check` on a checkout
    or worktree of the recorded PR head — a check on the base branch is
    not evidence — and require it to pass without
