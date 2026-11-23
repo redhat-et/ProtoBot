@@ -316,6 +316,8 @@ def _local_dependency_environment_is_installed(
     repo_path: Path,
     dependencies: tuple[str, ...],
     environment_name: str | None = None,
+    *,
+    verify_interpreter: bool = False,
 ) -> bool:
     """Return whether *repo_path* contains an installed environment for deps.
 
@@ -325,6 +327,12 @@ def _local_dependency_environment_is_installed(
     interpreter, mirroring ``_interpreter_link_rejection``. A marker without
     that payload would make pre-commit rebuild the environment at hook time,
     which needs the network this pre-flight exists to avoid.
+
+    *verify_interpreter* additionally probes ``bin/python`` and requires its
+    exact version to match ``pyvenv.cfg``, mirroring pre-commit's health check.
+    The live-cache pre-flight sets it; staged restores leave it off because
+    :func:`_normalize_pyvenv_patch_versions` repairs the recorded version
+    before promotion.
     """
     expected_state = {"additional_dependencies": list(dependencies)}
     try:
@@ -339,7 +347,9 @@ def _local_dependency_environment_is_installed(
         for environment in environments:
             if _environment_install_state_matches(environment, expected_state) and (
                 not _is_python_environment_dir(environment.name)
-                or _python_environment_is_healthy(environment)
+                or _python_environment_is_healthy(
+                    environment, verify_version=verify_interpreter
+                )
             ):
                 return True
     except OSError:
@@ -366,8 +376,15 @@ def _is_python_environment_dir(name: str) -> bool:
     return name == "py_env" or name.startswith("py_env-")
 
 
-def _python_environment_is_healthy(environment: Path) -> bool:
-    """Return whether a Python environment passes a static health check."""
+def _python_environment_is_healthy(
+    environment: Path, *, verify_version: bool = False
+) -> bool:
+    """Return whether a Python environment passes a health check.
+
+    The static checks (``pyvenv.cfg``, interpreter symlink) always run. With
+    *verify_version*, ``bin/python`` is executed and its reported version must
+    equal ``pyvenv.cfg`` exactly, as pre-commit's own health check requires.
+    """
     cfg = environment / "pyvenv.cfg"
     if cfg.is_symlink() or not cfg.is_file():
         return False
@@ -378,7 +395,12 @@ def _python_environment_is_healthy(environment: Path) -> bool:
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
     recorded = _pyvenv_major_minor(values.get("version_info", "")) or ""
     interpreter = environment / "bin" / "python"
-    return _interpreter_link_rejection(interpreter, current, recorded) is None
+    if _interpreter_link_rejection(interpreter, current, recorded) is not None:
+        return False
+    if not verify_version:
+        return True
+    reported, failure = _probe_interpreter(interpreter)
+    return failure is None and reported == values.get("version_info")
 
 
 def _missing_local_dependency_environments(
@@ -387,6 +409,7 @@ def _missing_local_dependency_environments(
     pre_commit_home: Path,
     *,
     repository_root: Path | None = None,
+    verify_interpreter: bool = False,
 ) -> list[tuple[str, tuple[str, ...]]]:
     """Return local hooks whose dependency environment is not installed.
 
@@ -408,13 +431,18 @@ def _missing_local_dependency_environments(
         if environments:
             installed = all(
                 _local_dependency_environment_is_installed(
-                    repo_path, dependencies, environment
+                    repo_path,
+                    dependencies,
+                    environment,
+                    verify_interpreter=verify_interpreter,
                 )
                 for environment in environments
             )
         else:
             installed = _local_dependency_environment_is_installed(
-                repo_path, dependencies
+                repo_path,
+                dependencies,
+                verify_interpreter=verify_interpreter,
             )
         if not installed:
             missing.append((hook_id, dependencies))
@@ -491,7 +519,7 @@ def _preflight(online: bool, pre_commit_home: Path, config: dict[str, Any]) -> i
     cached_paths = _cached_repo_paths(pre_commit_home)
     missing_repos = _missing_repos(_configured_repos(config), set(cached_paths))
     missing_local = _missing_local_dependency_environments(
-        config, cached_paths, pre_commit_home
+        config, cached_paths, pre_commit_home, verify_interpreter=True
     )
     # A missing ``local:`` row is already reported as a missing repository
     # revision; report the environment form only when the row exists but its

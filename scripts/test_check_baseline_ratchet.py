@@ -404,6 +404,20 @@ class LoadSkillsawConfigTests(unittest.TestCase):
         self.assertIsNotNone(config)
         self.assertEqual(3950, checker.agents_md_warn_limit(config or {}))
 
+    def test_empty_config_is_rejected(self) -> None:
+        """Fail closed when .skillsaw.yaml parses to None (e.g. an empty file)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+                "",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(checker.BaselineRatchetError) as raised:
+                checker.load_skillsaw_config(repo_root)
+
+        self.assertIn("must be a YAML mapping", str(raised.exception))
+
     def test_invalid_yaml_is_rejected(self) -> None:
         """Fail closed when .skillsaw.yaml is unparseable."""
         with tempfile.TemporaryDirectory() as tmp_dir:

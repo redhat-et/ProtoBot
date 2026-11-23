@@ -301,6 +301,7 @@ repos:
         name: baseline-ratchet
         entry: python scripts/check_baseline_ratchet.py
         language: python
+        # The checker imports PyYAML to verify the AGENTS.md warn limit.
         additional_dependencies:
           - pyyaml==6.0.3
         pass_filenames: false
@@ -311,6 +312,7 @@ repos:
         name: test-baseline-ratchet
         entry: python scripts/test_check_baseline_ratchet.py
         language: python
+        # The tests import PyYAML through the checker.
         additional_dependencies:
           - pyyaml==6.0.3
         pass_filenames: false

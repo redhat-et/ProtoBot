@@ -605,6 +605,32 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(1, rc)
         self.assertIn("dependency-hook: pyyaml==6.0.3", buf.getvalue())
 
+    def test_environment_with_stale_patch_version_is_missing(self) -> None:
+        """A live env whose interpreter disagrees with pyvenv.cfg is rebuilt."""
+        repo_path = self.home / "repo-local"
+        environment_path = repo_path / f"py_env-{_expected_python_env_name()}"
+        _add_environment_health(environment_path)
+        (environment_path / "pyvenv.cfg").write_text(
+            f"version_info = {sys.version_info.major}.{sys.version_info.minor}."
+            f"{sys.version_info.micro + 1}.final.0\n",
+            encoding="utf-8",
+        )
+        (environment_path / ".install_state_v2").touch()
+        _make_db(
+            self.home / "db.db",
+            [("local:pyyaml==6.0.3", "1", str(repo_path))],
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = checker._preflight(
+                False,
+                self.home,
+                _CONFIG_LOCAL_DEPENDENCIES,
+            )
+        self.assertEqual(1, rc)
+        self.assertIn("local hook dependency environment", buf.getvalue())
+
     def test_environment_for_another_python_version_is_missing(self) -> None:
         repo_path = self.home / "repo-local"
         environment_path = repo_path / "py_env-python0.0"
