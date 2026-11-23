@@ -2688,6 +2688,41 @@ class MainCliMappingTests(unittest.TestCase):
                 self.assertEqual(2, mock_run.call_count)
                 self.assertEqual(expected, rc)
 
+    def test_failing_configurations_are_named(self) -> None:
+        # The exit code alone cannot say which configuration failed;
+        # one stderr line names every failing configuration, and a
+        # fully passing run prints no such line.
+        for return_codes, expected_line in (
+            (
+                [0, 3],
+                "ERROR: these configurations failed: .github/pre-commit-ci.yaml",
+            ),
+            (
+                [1, 2],
+                (
+                    "ERROR: these configurations failed: .pre-commit-config.yaml, "
+                    ".github/pre-commit-ci.yaml"
+                ),
+            ),
+        ):
+            with self.subTest(return_codes=return_codes):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.side_effect = [
+                        subprocess.CompletedProcess(args=[], returncode=code)
+                        for code in return_codes
+                    ]
+                    buf = io.StringIO()
+                    with contextlib.redirect_stderr(buf):
+                        checker.main(["--all-files"])
+                self.assertIn(expected_line, buf.getvalue())
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(0, rc)
+        self.assertNotIn("these configurations failed", buf.getvalue())
+
     def test_missing_pre_commit_binary_fails_with_the_pinned_version(self) -> None:
         # A missing pre-commit binary must not raise a traceback; the
         # error names the pinned version to install.

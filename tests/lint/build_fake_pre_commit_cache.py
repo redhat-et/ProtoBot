@@ -57,7 +57,7 @@ _CONFIG_PATHS = (".pre-commit-config.yaml", ".github/pre-commit-ci.yaml")
 # Upgrade by asking pre-commit itself for its default version.
 
 
-def _entry_names(hook: dict[str, object]) -> str | None:
+def _entry_name(hook: dict[str, object]) -> str | None:
     """Return the command name *hook* runs, or None without one."""
     entry = hook.get("entry")
     if not isinstance(entry, str) or not entry.strip():
@@ -85,7 +85,7 @@ def _collect_env_hooks(
             continue
         deps = hook.get("additional_dependencies") or []
         key = f"local:{','.join(deps)}" if deps else "local"
-        entry_name = _entry_names(hook)
+        entry_name = _entry_name(hook)
         if entry_name is not None:
             env_rows.setdefault(key, set()).add(entry_name)
 

@@ -60,8 +60,10 @@ prints. Under ``CI=true``, that invocation reads no configuration and
 needs no PyYAML; ``pre-commit`` validates the configurations itself.
 
 Adding, removing, or reconfiguring a hook requires no change here —
-edit the YAML files and (if network access is available) run
-``pre-commit install-hooks`` to refresh the cache.
+edit the YAML files and (if network access is available) refresh the
+cache with ``pre-commit install-hooks`` for the gate configuration
+and ``pre-commit install-hooks --config .github/pre-commit-ci.yaml``
+for the CI configuration.
 """
 
 from __future__ import annotations
@@ -1442,20 +1444,29 @@ def _run_each_config(paths: list[Path], scope_args: list[str]) -> int:
     """Run ``pre-commit run`` once per configuration and wait for it.
 
     Every configuration runs even when an earlier one fails, so one
-    failing configuration cannot hide another's findings. Returns the
-    first non-zero exit code, or 0 when every configuration passes.
+    failing configuration cannot hide another's findings. When any
+    configuration fails, one stderr line names every failing
+    configuration, because the exit code alone cannot say which one
+    failed. Returns the first non-zero exit code, or 0 when every
+    configuration passes.
     """
     # Flush so lines this wrapper already printed (for example the
     # cache restore notice) appear before the child's own output.
     sys.stdout.flush()
     sys.stderr.flush()
     first_rc = 0
+    failed: list[Path] = []
     for path in paths:
         rc = _run_pre_commit(_pre_commit_run_command(path, scope_args))
         if rc is None:
             return 1
-        if rc != 0 and first_rc == 0:
-            first_rc = rc
+        if rc != 0:
+            if first_rc == 0:
+                first_rc = rc
+            failed.append(path)
+    if failed:
+        listing = ", ".join(_relative(path) for path in failed)
+        print(f"ERROR: these configurations failed: {listing}", file=sys.stderr)
     return first_rc
 
 

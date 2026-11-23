@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Seed the offline ``pre-commit`` hook cache for Fullsend agent sandboxes.
 
-Fullsend agent sandboxes have no network egress, so ``scripts/lint.py``
-(the validation entrypoint ``AGENTS.md`` prescribes) needs a pre-seeded
-``PRE_COMMIT_HOME``. This script runs on the trusted runner, which has
-network access, in two steps:
+Fullsend agent sandboxes deny VCS access and reach PyPI. They do not
+lack all network egress. ``AGENTS.md`` prescribes the direct gate
+command, ``pre-commit run --files``, which needs no pre-seeded
+``PRE_COMMIT_HOME``. ``scripts/lint.py`` is the CI and developer
+entrypoint and runs both configurations. The bootstrap archive covers
+the gate configuration's hooks only, so it is an optimisation for
+explicit ``scripts/lint.py`` runs in the sandbox. This script runs on
+the trusted runner, which has network access, in two steps:
 
 1. Run the pinned upstream Fullsend pre-script unchanged, so its input
    validation and exit-78 skip semantics survive. A local harness
