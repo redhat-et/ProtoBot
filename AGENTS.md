@@ -187,10 +187,10 @@ must follow these rules:
    (`docs/vision.md`, `docs/architecture.md`, and others
    registered in `.protobot/project.yaml`) and
    `.protobot/project.yaml` must never be edited by hand.
-   When a PR creates, modifies, or Rule 4 identifies staleness in a
-   registered specification artifact, apply the update exclusively via
-   `ears-manager artifact put` within an active change set. Run
-   formatters and linters before `ears-manager artifact put`, and
+   When a PR creates or modifies a registered specification artifact, or
+   Rule 4 finds staleness in such an artifact, apply the update
+   exclusively via `ears-manager artifact put` within an active change
+   set. Format and lint before `ears-manager artifact put`;
    verify with `ears-manager check` before committing.
 
 6. **Review agents must check registered specification artifact and
