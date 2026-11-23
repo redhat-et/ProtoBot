@@ -80,7 +80,7 @@ enforce them reflexively on `AGENTS.md` changes.
    same list or governed collection, not only specification-hierarchy
    keyword checks. For every `AGENTS.md` modification, verify the
    change introduces no undeclared aliases for established terms or
-   omitted grammatical referents in requirement clauses.
+   omitted grammatical referents in the modified prose.
 
 4. **Match intra-entry restatement terminology.** When an entry
    restates a requirement's cases in a separate enforcement or
