@@ -108,7 +108,7 @@ IdeaBot has 23 ADRs (Architecture Decision Records) at
 [redhat-et/hermes](https://github.com/redhat-et/hermes). Several
 transfer directly to ProtoBot:
 
-- **Credential isolation** (ADR-0005/0006): Token Service +
+- **Credential isolation** (IdeaBot ADR-0005/0006): Token Service +
   auth-proxy sidecar, adapted from Alcove's Bridge/Gate pattern.
   The main agent process never sees real credentials.
 - **Platform constraints** (ADR-0021): Managed Platform Plus
