@@ -1,30 +1,27 @@
 # AGENTS
 
-- All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py` as a
-  wrapper around `pre-commit run`.
+- Pre-commit tests must pass before committing. In sandboxed
+  environments without network access, use `python scripts/lint.py` for
+  `pre-commit run`.
   Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
   (specific files), `--check-parity` (validate config and offline hook
-  cache), `--online-if-ci` (allow network when CI=true).
+  cache), `--online-if-ci` (network when CI=true).
   For offline runs, pre-install tools and pre-populate the hook cache
-  (bootstrap with `pre-commit install-hooks`).
-  Go changes must pass `gofmt` and `go vet` across affected Go modules
+  using `pre-commit install-hooks`.
+  Go changes must pass `gofmt` and `go vet` in affected Go modules
   before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
   target this repository.
-- Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
-  there so Claude Code finds them; do not add skills
-  under `.claude/` directly.
+- Agent skills live in `.agents/skills/`; `.claude/skills` symlinks
+  there for Claude Code. Do not add them under `.claude/` directly.
 
 ## Workflow files and CI boundaries
-
-Agents must follow these rules:
 
 1. **Workflow file restrictions.** Fullsend agents running via
    GitHub workflows must not create or modify files under
    `.github/workflows/`. Local coding agents may create or modify
-   them, except as restricted by Rule 2, when required and
-   user-authorized.
+   them, except as restricted by Rule 2, when the change requires
+   it and the user authorizes it.
 
 2. **Defer CI integration for new modules.** When introducing a new
    Go module, package, or tool, implement code, local test suites,
@@ -37,22 +34,22 @@ Agents must follow these rules:
 ## Context budget and prompt efficiency
 
 `AGENTS.md` enters every dispatched agent's prompt, capped by
-`context-budget`'s `agents-md` warn limit in `.skillsaw.yaml`,
-ratcheted by
+`context-budget`'s `agents-md` warn limit in `.skillsaw.yaml` and
+enforced downward by
 [`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
 
 1. **Respect the prompt context budget.** Do not raise a
-   `.skillsaw-baseline.json` ceiling to fit new prose; after a
-   genuine shrink, run `skillsaw baseline`
-   so the ceiling ratchets downward. Lower `.skillsaw.yaml`'s
+   `.skillsaw-baseline.json` ceiling for prose; after shrinking,
+   run `skillsaw baseline`
+   to ratchet it down. Lower `.skillsaw.yaml`'s
    `agents-md` warn limit when `AGENTS.md` shrinks below it
    (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
 3. **Review agents must recognize budget consolidation.** Treat prose
-   consolidation offsetting a new `AGENTS.md` addition as budget compliance,
-   not scope creep, only if it omits no governance requirement, defined
+   consolidation offsetting an `AGENTS.md` addition as budget compliance,
+   not scope creep, if it omits no governance requirement, defined
    keyword, or diagnostic name and introduces no undeclared alias or
    terminology drift. Consolidation does not exempt an entry from
    sibling-entry or intra-entry terminology rules.
@@ -81,7 +78,7 @@ creating, modifying, or consolidating entries.
    that the new or changed entry reuses established sibling terminology
    rather than inventing an alias. In a module README, also check for
    drift between neighboring paragraphs and between a CLI flag and its
-   description. Findings should include terminology drift within the
+   description. Findings should include terminology drift in the
    same list or governed collection, not only specification-hierarchy
    keyword checks. For `AGENTS.md` modifications, verify prose
    consolidations introduce no undeclared aliases for established terms
@@ -91,8 +88,8 @@ creating, modifying, or consolidating entries.
    restates a requirement's cases in a separate enforcement or
    consequence clause, both statements must use identical terminology.
    An undeclared alias or omitted term is a defect. Review agents must
-   check this restatement. Findings should include intra-entry
-   terminology drift, not only sibling-entry terminology matching.
+   check this restatement and include intra-entry terminology drift
+   findings, not only sibling-entry terminology matching.
 
 ### Examples of sibling entries
 
@@ -133,7 +130,7 @@ not the list, defines membership.
   design influences.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
   versioned evaluation fixture schema and result contract.
-- [`docs/architecture/open-questions.md`](docs/architecture/open-questions.md) —
+- [`docs/architecture/open-questions.md`][open-questions-doc] —
   unresolved questions.
 - `docs/decisions/` — architecture decision records.
 
@@ -143,6 +140,7 @@ not the list, defines membership.
 [ears-and-review-doc]: .agents/skills/eliciting-requirements/references/ears-and-review.md
 [drafting-table-wms-doc]: docs/architecture/drafting-table-wms.md
 [evaluation-corpus-doc]: docs/architecture/evaluation-corpus.md
+[open-questions-doc]: docs/architecture/open-questions.md
 [jobsite-sandbox-doc]: docs/architecture/jobsite-sandbox.md
 
 ### Rules for creating or modifying specification documents
@@ -208,7 +206,7 @@ must follow these rules:
    for hand edits under Rule 5.
    Run `ears-manager check --base-ref <merge-base>` on the recorded PR
    head checkout or worktree (default-branch merge base; a base-branch
-   check is not evidence) and require it to pass
+   check is not evidence) and require passage
    without `artifact.digest_mismatch`, `artifact.operation_missing`, or
    `artifact.unregistered`. Each registered artifact path or
    canonical-content delta must match the `artifact_id` in a proposed
@@ -219,22 +217,22 @@ must follow these rules:
    metadata-only artifact-registry changes require no artifact
    operation. Reviewers must flag identifiable hand edits, not claim CLI
    provenance from an operation record. Findings should include each
-   diagnostic and any hand edit in that registered
-   specification artifact or [.protobot/project.yaml](.protobot/project.yaml);
-   when Rule 4
-   identifies staleness in a registered specification artifact, a
-   staleness finding must prescribe `ears-manager artifact put`, not a
-   hand edit.
+   diagnostic and any hand edit in that registered specification
+   artifact or [.protobot/project.yaml](.protobot/project.yaml), and
+   Rule 4 staleness findings for a registered specification artifact
+   must prescribe `ears-manager artifact put`, not a hand edit.
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
-   immutable historical records; never rewrite or replace accepted
-   decision text in place. When design evolution amends one, append a
-   dated amendment block (`**[Amended Month Year]**`) with the change,
-   rationale, and updated architecture references. Review agents must
-   verify no in-place rewrite or replacement and that each amendment
-   block includes the change, rationale, and updated architecture
-   references.
+   immutable historical records; accepted decision text is never
+   rewritten or replaced in place. When design evolution amends an accepted
+   architecture decision record, append a dated amendment block
+   (`**[Amended Month Year]**`) with the change, its rationale, and
+   references to updated architecture documents. Review agents must
+   verify accepted decision text is never rewritten or replaced in
+   place, and amendments append the dated amendment block with the
+   change, its rationale, and
+   references to updated architecture documents.
 
 ## Agent skills
 
