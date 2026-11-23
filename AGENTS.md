@@ -23,8 +23,8 @@ Agents must follow these rules:
 1. **Workflow file restrictions.** Fullsend agents running via
    GitHub workflows must not create or modify files under
    `.github/workflows/`. Local coding agents may create or modify
-   them, except as restricted by Rule 2, when the change requires
-   it and the user authorizes it.
+   them, except as restricted by Rule 2, when required and
+   user-authorized.
 
 2. **Defer CI integration for new modules.** When introducing a new
    Go module, package, or tool, implement code, local test suites,
@@ -36,73 +36,75 @@ Agents must follow these rules:
 
 ## Context budget and prompt efficiency
 
-`AGENTS.md` is injected into every dispatched agent's prompt and
-budget-capped by the `context-budget` rule's `agents-md` warn limit in
-`.skillsaw.yaml`, enforced downward by
+`AGENTS.md` enters every dispatched agent's prompt, capped by
+`context-budget`'s `agents-md` warn limit in `.skillsaw.yaml`,
+ratcheted by
 [`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
 
 1. **Respect the prompt context budget.** Do not raise a
    `.skillsaw-baseline.json` ceiling to fit new prose; after a
-   genuine shrink, regenerate the baseline with `skillsaw baseline`
-   so the ceiling ratchets downward. The `agents-md` warn limit in
-   `.skillsaw.yaml` is lowered when `AGENTS.md` shrinks below it
+   genuine shrink, run `skillsaw baseline`
+   so the ceiling ratchets downward. Lower `.skillsaw.yaml`'s
+   `agents-md` warn limit when `AGENTS.md` shrinks below it
    (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
-   explanations by consolidating existing prose or extracting
-   detail into an on-demand skill under `.agents/skills/`.
+   explanations by consolidating prose or extracting detail into an
+   on-demand `.agents/skills/` skill.
 3. **Review agents must recognize budget consolidation.** Treat prose
-   consolidation offsetting an `AGENTS.md` addition as budget
-   compliance, not scope creep, provided no governance requirement,
-   defined keyword, or diagnostic name is omitted.
+   consolidation offsetting a new `AGENTS.md` addition as budget compliance,
+   not scope creep, provided no governance requirement, defined keyword,
+   or diagnostic name is omitted, and no undeclared alias or terminology
+   drift is introduced. Consolidating prose does not exempt an entry from
+   sibling-entry or intra-entry terminology rules.
 
 ## Rules for creating or modifying sibling entries
 
-A governed scope defines a domain of applicability; a list
-or governed collection defines the sibling set within that domain.
-A **module README** is the top-level `README.md` of a directory
-with a `go.mod`. When creating or modifying a numbered rule
-in `AGENTS.md`, specification document under `docs/`, skill file
-under `.agents/skills/`, module README, or entry in any future
-governed scope, agents must follow these rules:
+A governed scope defines a domain of applicability; its list or
+governed collection defines the sibling set. A **module README** is
+the top-level `README.md` of a directory with a `go.mod`.
 
-1. **Read all sibling entries first.** Read every other
-   entry in the list or governed collection before drafting
-   or revising one.
+When creating or modifying a numbered rule in `AGENTS.md`, specification
+document under `docs/`, skill file under `.agents/skills/`, module
+README, or entry in a future governed scope, agents must follow these
+rules. Review agents must enforce them reflexively on `AGENTS.md` PRs
+creating, modifying, or consolidating entries.
 
-2. **Reuse established terminology.** Match sibling
-   entries' terms for the same concepts. An undeclared alias
-   for a term already used in the same list or governed
-   collection is a defect.
+1. **Read all sibling entries first.** Read every other entry in the
+   list or governed collection before drafting or revising one.
 
-3. **Review agents must check sibling-entry terminology.**
-   When reviewing a PR that creates or modifies an entry in
-   a governed scope, verify that the new or changed entry
-   reuses established sibling terminology rather than inventing
-   an alias. In a module README, also check for drift
-   between neighboring paragraphs and between a CLI flag and its
-   description. Findings should include terminology drift within
-   the same list or governed collection, not only
-   specification-hierarchy keyword checks.
+2. **Reuse established terminology.** Match sibling entries' terms for
+   the same concepts. An undeclared alias for a term already used in the
+   same list or governed collection is a defect.
 
-4. **Match intra-entry restatement terminology.** When
-   an entry restates a requirement's cases in a separate
-   enforcement or consequence clause, both statements
-   must use identical terminology. An undeclared alias
-   or omitted term is a defect. Review agents must
-   check this restatement. Findings should include
-   intra-entry terminology drift, not only sibling-entry
-   terminology matching.
+3. **Review agents must check sibling-entry terminology.** When reviewing
+   a PR creating or modifying an entry in a governed scope, verify
+   that the new or changed entry reuses established sibling terminology
+   rather than inventing an alias. In a module README, also check for
+   drift between neighboring paragraphs and between a CLI flag and its
+   description. Findings should include terminology drift within the
+   same list or governed collection, not only specification-hierarchy
+   keyword checks. When `AGENTS.md` itself is modified, verify that prose
+   consolidations neither introduce undeclared aliases for established
+   terms nor omit grammatical referents in requirement clauses.
 
-Examples of sibling entries: numbered rules in `AGENTS.md` (other
-rules in the list); specification documents under `docs/` (other
-governed Markdown files); skill files under `.agents/skills/`
-(other skill files); module READMEs (other module READMEs and
-`docs/` specification documents that describe the module).
+4. **Match intra-entry restatement terminology.** When an entry
+   restates a requirement's cases in a separate enforcement or
+   consequence clause, both statements must use identical terminology.
+   An undeclared alias or omitted term is a defect. Review agents must
+   check this restatement. Findings should include intra-entry
+   terminology drift, not only sibling-entry terminology matching.
+
+### Examples of sibling entries
+
+Numbered rules in `AGENTS.md` (other rules in the list); specification
+documents under `docs/` (other governed Markdown files); skill files under
+`.agents/skills/` (other skill files); module READMEs (other module READMEs
+and `docs/` specification documents describing the module).
 
 ## Specification document hierarchy
 
-Every Markdown file under `docs/` is a governed hierarchy member;
-membership is the `docs/` prefix, not the list.
+Every `docs/` Markdown file is a governed hierarchy member; the prefix,
+not the list, defines membership.
 
 - `docs/vision.md` — registered Vision artifact (purpose, users,
   outcomes).
@@ -123,16 +125,16 @@ membership is the `docs/` prefix, not the list.
 - `docs/architecture/user-interaction-flow.md` — phase details,
   sequence diagrams, and testing strategy.
 - `docs/architecture/drafting-table-ux.md` — stable interaction
-  contract for the first local Drafting Table.
+  contract for first local Drafting Table.
 - [`docs/architecture/agent-harness/`][agent-harness-doc] — Agent
   Harness Adapter Contract (`adapter-contract.md`) and bindings
   (`opencode.md`, `claude-code.md`, `codex.md`).
 - `docs/architecture/related-work.md` — internal and external
-  projects informing the design.
+  design influences.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
   versioned evaluation fixture schema and result contract.
-- `docs/architecture/open-questions.md` — unresolved design
-  questions across all areas.
+- [`docs/architecture/open-questions.md`](docs/architecture/open-questions.md) —
+  unresolved questions.
 - `docs/decisions/` — architecture decision records.
 
 [git-integration-doc]: docs/architecture/git-integration.md
@@ -168,7 +170,7 @@ must follow these rules:
    document, verify that the document accounts for components,
    interfaces, and constraints from `components.md` and
    `overview.md`. Findings should include coverage gaps, not
-   only formatting and cross-reference text matching. Do not raise
+   only formatting and cross-reference matching. Do not raise
    a hierarchy-membership finding for an unlisted `docs/` file.
    Checks must go beyond link freshness and heading alignment:
    register new capabilities where `components.md` enumerates
@@ -181,8 +183,8 @@ must follow these rules:
 4. **Review agents must also check for staleness introduced
    elsewhere.** When a PR changes a contract, lifecycle, or
    behavior description in a specification document, search
-   all other governed Markdown documents under `docs/` for
-   prose describing the same behavior, and flag any
+   every other governed Markdown document under `docs/` for
+   prose describing the same behavior and flag any
    not updated to match.
 
 5. **Update registered specification artifacts through
@@ -191,37 +193,37 @@ must follow these rules:
    registered in `.protobot/project.yaml`) and
    `.protobot/project.yaml` must never be edited by hand.
    When a PR creates or modifies a registered specification artifact,
-   or when Rule 4 identifies staleness in a registered specification
-   artifact, apply the update exclusively via
+   or Rule 4 identifies staleness in such an artifact, apply the update
+   exclusively via
    `ears-manager artifact put` within an active change set. Run
-   formatters and linters before `ears-manager artifact put`, and
-   verify with `ears-manager check` before committing.
+   formatters and linters before `ears-manager artifact put`; verify
+   with `ears-manager check` before committing.
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
-   registered specification artifact, when Rule 4 identifies staleness
-   in a registered specification artifact, or when a PR modifies
+   registered specification artifact, Rule 4 identifies staleness in
+   it, or a PR modifies
    [.protobot/project.yaml](.protobot/project.yaml), inspect the
    affected registered specification artifact or project configuration
    for hand edits under Rule 5.
    Run `ears-manager check --base-ref <merge-base>` on the recorded PR
-   head's checkout or worktree (the default-branch merge base; a
-   base-branch check is not evidence), and require it to pass
+   head checkout or worktree (default-branch merge base; a base-branch
+   check is not evidence) and require it to pass
    without `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. It requires each registered artifact
-   path or canonical-content delta to match an `artifact_id` in
-   an `artifact_operations[]` entry in any proposed change set, and
-   rejects unregistration of an artifact-registry entry present on the
-   comparison base (the merge base in CI and review). It confirms
-   manifest association only, not that `ears-manager artifact put` was
-   invoked; metadata-only artifact-registry changes do not require an
-   artifact operation. Reviewers must flag identifiable hand
-   edits, not claim CLI provenance from an operation record. Findings
-   should include each listed diagnostic and any hand edit identified in
-   the inspected registered specification artifact or
-   [.protobot/project.yaml](.protobot/project.yaml); and, when Rule 4
+   `artifact.unregistered`. Each registered artifact path or
+   canonical-content delta must match a proposed
+   `artifact_operations[]` entry's `artifact_id`, and the check
+   rejects unregistration of an artifact-registry entry on the
+   comparison base (merge base in CI/review). It confirms
+   manifest association only, not `ears-manager artifact put` invocation;
+   metadata-only artifact-registry changes require no artifact
+   operation. Reviewers must flag identifiable hand edits, not claim CLI
+   provenance from an operation record. Findings should include each
+   diagnostic and any hand edit in that registered
+   specification artifact or [.protobot/project.yaml](.protobot/project.yaml);
+   when Rule 4
    identifies staleness in a registered specification artifact, a
-   staleness finding that prescribes `ears-manager artifact put`, not a
+   staleness finding must prescribe `ears-manager artifact put`, not a
    hand edit.
 
 7. **Preserve accepted architecture decision records.**
@@ -230,11 +232,9 @@ must follow these rules:
    decision text in place. When design evolution amends an accepted
    architecture decision record, append a dated amendment block
    (`**[Amended Month Year]**`) with the change, its rationale, and
-   references to updated architecture documents. Review agents must
-   verify that accepted decision text is never rewritten or replaced
-   in place, and that amendments append the dated amendment block
-   (`**[Amended Month Year]**`) with the change, its rationale, and
-   references to updated architecture documents.
+   references to updated architecture documents; review agents must
+   verify no in-place rewrite or replacement and each amendment
+   appends the dated amendment block.
 
 ## Agent skills
 
@@ -316,7 +316,7 @@ reviewing such a skill, agents must:
 5. **Review agents must check skill-to-spec alignment.** When
    reviewing a PR that creates or modifies a skill file, verify
    the skill against the specification hierarchy, not only
-   against sibling skills. Findings should include
+   sibling skills. Findings should include
    capability-registration gaps, harness-specific frontmatter
    that violates Toolkit skill rules, and terminology that
    conflicts with `overview.md` or `components.md`.
