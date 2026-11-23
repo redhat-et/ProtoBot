@@ -114,9 +114,28 @@ func valueOptions(names ...string) map[string]optionSpec {
 }
 
 func runCheck(args []string) (any, Mutation, *commandFailure) {
-	parsed, failure := parseOptions(args, valueOptions("change-set"))
+	parsed, failure := parseOptions(args, valueOptions("change-set", "base-ref"))
 	if failure != nil {
 		return nil, Mutation{}, failure
+	}
+	// artifactBase names the commit that the artifact-operation delta
+	// compares against instead of the default-branch head. It narrows only
+	// that delta: change-set approval detection and proposed base freshness
+	// keep reading the default branch, and a resolvable default-branch head
+	// stays required. An empty value keeps the default-branch comparison.
+	artifactBase := ""
+	if parsed.has("base-ref") {
+		artifactBase, failure = parseRevisionOption("base-ref", parsed.one("base-ref"))
+		if failure != nil {
+			return nil, Mutation{}, failure
+		}
+		root, failure := resolveRoot()
+		if failure != nil {
+			return nil, Mutation{}, failure
+		}
+		if failure := requireRevisionCommit(root, artifactBase); failure != nil {
+			return nil, Mutation{}, failure
+		}
 	}
 	var state projectState
 	if parsed.has("change-set") {
@@ -128,11 +147,11 @@ func runCheck(args []string) (any, Mutation, *commandFailure) {
 		if !exists {
 			return nil, Mutation{}, validationFailure("change_set.not_found", fmt.Sprintf("Change set %s was not found.", parsed.one("change-set")), nil)
 		}
-		if failure := validateScopedCheck(state.root, state.snapshot, index); failure != nil {
+		if failure := validateScopedCheck(state.root, state.snapshot, index, artifactBase); failure != nil {
 			return nil, Mutation{}, failure
 		}
 	} else {
-		state, failure = checkState()
+		state, failure = checkState(artifactBase)
 		if failure != nil {
 			return nil, Mutation{}, failure
 		}
@@ -912,7 +931,7 @@ func runArtifactList(args []string) (any, Mutation, *commandFailure) {
 
 	var state projectState
 	if parsed.has("at") {
-		commit, failure := parseRevisionOption(parsed.one("at"))
+		commit, failure := parseRevisionOption("at", parsed.one("at"))
 		if failure != nil {
 			return nil, Mutation{}, failure
 		}

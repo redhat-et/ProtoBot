@@ -447,7 +447,7 @@ var commandSpecs = map[string]optionSpec{
 	"change-set show":    {allowed: []string{"change-set", "at"}, required: []string{"change-set"}},
 	"change-set update":  {allowed: []string{"change-set", "intent", "affected-interface", "affected-scope", "base-commit", "implementation-required", "implementation-rationale", "impact-file"}, required: []string{"change-set"}, repeated: map[string]bool{"affected-interface": true, "affected-scope": true}, write: true},
 	"change-set compare": {allowed: []string{"change-set", "against"}, required: []string{"change-set"}},
-	"check":              {allowed: []string{"at", "change-set"}},
+	"check":              {allowed: []string{"change-set", "base-ref", "at"}},
 	"impact":             {allowed: []string{"change-set", "at"}, required: []string{"change-set"}},
 }
 

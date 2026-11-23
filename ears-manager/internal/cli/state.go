@@ -115,7 +115,7 @@ func loadReadState() (projectState, *commandFailure) {
 	return state, nil
 }
 
-func checkState() (projectState, *commandFailure) {
+func checkState(artifactBase string) (projectState, *commandFailure) {
 	root, failure := resolveRoot()
 	if failure != nil {
 		return projectState{}, failure
@@ -153,7 +153,7 @@ func checkState() (projectState, *commandFailure) {
 	if failure := checkProposedBaseFreshness(root, snapshot, proposed, head); failure != nil {
 		return projectState{root: root}, failure
 	}
-	if failure := checkArtifactOperationDeltas(root, snapshot, proposed); failure != nil {
+	if failure := checkArtifactOperationDeltas(root, snapshot, proposed, artifactBase); failure != nil {
 		return projectState{root: root}, failure
 	}
 	if draftFailure != nil {
@@ -319,7 +319,7 @@ func validateCandidateForChangeSet(snapshot specvalidation.Snapshot, changeSetID
 	return validateCandidate(snapshot, allowDraft)
 }
 
-func validateScopedCheck(root string, snapshot specvalidation.Snapshot, targetIndex int) *commandFailure {
+func validateScopedCheck(root string, snapshot specvalidation.Snapshot, targetIndex int, artifactBase string) *commandFailure {
 	targetID := snapshot.ChangeSets[targetIndex].Value.ID
 	proposed := map[string]bool{}
 	refs, failure := resolveDefaultBranchRefs(root, snapshot.Config.Repository)
@@ -392,7 +392,7 @@ func validateScopedCheck(root string, snapshot specvalidation.Snapshot, targetIn
 			return failure
 		}
 	}
-	if failure := checkArtifactOperationDeltas(root, snapshot, proposedIDs); failure != nil {
+	if failure := checkArtifactOperationDeltas(root, snapshot, proposedIDs, artifactBase); failure != nil {
 		return failure
 	}
 	return draftFailure

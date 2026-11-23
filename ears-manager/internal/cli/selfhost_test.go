@@ -467,6 +467,77 @@ func TestSelfHostingSeedMatchesWorkflowTrustAnchor(t *testing.T) {
 	}
 }
 
+func TestSelfHostingWorkflowBasesArtifactCheckOnMergeBase(t *testing.T) {
+	workflow := readTestFile(t, selfHostingRoot(t), ".github/workflows/ci-workflow.yaml")
+	specJob := workflowJobRegion(t, workflow, "spec", "scm")
+
+	// The default pull_request checkout is the synthetic merge commit,
+	// whose merge base with the default branch is the default-branch tip,
+	// so the spec job must check out the pull request head itself.
+	checkoutStep := workflowStep(t, specJob, "Checkout repository")
+	if !strings.Contains(checkoutStep, "ref: ${{ github.event.pull_request.head.sha || github.sha }}") {
+		t.Fatalf("the spec checkout does not pin the pull request head:\n%s", checkoutStep)
+	}
+	if !strings.Contains(checkoutStep, "persist-credentials: false") || !strings.Contains(checkoutStep, "fetch-depth: 0") {
+		t.Fatalf("the spec checkout lost persist-credentials: false or full history:\n%s", checkoutStep)
+	}
+
+	fetchStep := workflowStep(t, specJob, "Fetch default branch for change-set approval")
+	if !strings.Contains(fetchStep, "git update-ref refs/heads/main FETCH_HEAD") {
+		t.Fatalf("the fetch step no longer points the local default branch at FETCH_HEAD:\n%s", fetchStep)
+	}
+
+	mergeBaseStep := workflowStep(t, specJob, "Compute artifact comparison base")
+	if !strings.Contains(mergeBaseStep, "git merge-base refs/heads/main HEAD") {
+		t.Fatalf("the merge-base step does not compute the artifact base with git merge-base refs/heads/main HEAD:\n%s", mergeBaseStep)
+	}
+	if !strings.Contains(mergeBaseStep, "::error::") || !strings.Contains(mergeBaseStep, "exit 1") {
+		t.Fatalf("the merge-base step does not fail closed:\n%s", mergeBaseStep)
+	}
+
+	checkStep := workflowStep(t, specJob, "Run ears-manager check")
+	if !strings.Contains(checkStep, `check --base-ref "$ARTIFACT_BASE"`) {
+		t.Fatalf("the check step does not pass the computed artifact base to check --base-ref:\n%s", checkStep)
+	}
+	if !strings.Contains(checkStep, "ARTIFACT_BASE: ${{ steps.artifact-base.outputs.commit }}") {
+		t.Fatalf("the check step does not wire ARTIFACT_BASE from the merge-base step output:\n%s", checkStep)
+	}
+
+	// FETCH_HEAD is the fetched default-branch tip. It feeds only the local
+	// default-branch ref; the artifact baseline never falls back to it.
+	if strings.Contains(mergeBaseStep, "FETCH_HEAD") || strings.Contains(checkStep, "FETCH_HEAD") {
+		t.Fatalf("the artifact baseline falls back to FETCH_HEAD:\nmerge-base step:\n%s\ncheck step:\n%s", mergeBaseStep, checkStep)
+	}
+}
+
+// workflowJobRegion returns the workflow text of the named job, from its
+// header to the header of the next job.
+func workflowJobRegion(t *testing.T, workflow, job, next string) string {
+	t.Helper()
+	start := strings.Index(workflow, "\n  "+job+":\n")
+	end := strings.Index(workflow, "\n  "+next+":\n")
+	if start < 0 || end < 0 || start > end {
+		t.Fatalf("could not locate job %q before %q in the workflow", job, next)
+	}
+	return workflow[start:end]
+}
+
+// workflowStep returns the text of the named step within a workflow job
+// region, up to the next step or the end of the job.
+func workflowStep(t *testing.T, job, name string) string {
+	t.Helper()
+	header := "- name: " + name
+	start := strings.Index(job, header)
+	if start < 0 {
+		t.Fatalf("the workflow job does not contain step %q", name)
+	}
+	step := job[start:]
+	if next := strings.Index(step, "\n      - name: "); next >= 0 {
+		step = step[:next]
+	}
+	return step
+}
+
 func TestSelfHostingMultipleProposedChangeSets(t *testing.T) {
 	source, extra := selfHostingSourceWithExtraChangeSet(t)
 	root := newSelfHostingCheckoutFrom(t, source)

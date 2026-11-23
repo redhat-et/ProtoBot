@@ -419,7 +419,7 @@ func helpText(args []string) string {
 	case "change-set":
 		return "Usage: ears-manager change-set <create|list|show|renumber|update|compare> [options]\n"
 	case "check":
-		return "Usage: ears-manager check [--change-set CS-ID]\n"
+		return "Usage: ears-manager check [--change-set CS-ID] [--base-ref FULL-SHA]\n"
 	case "impact":
 		return "Usage: ears-manager impact --change-set CS-ID\n"
 	case "project":

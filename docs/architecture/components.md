@@ -441,12 +441,14 @@ It is used by these callers:
   and [open question Q19][q19].
 - **CI** — `ears-manager check` runs on every branch push to
   validate that spec files are well-formed, all EARS statements
-  match required templates, referential integrity holds, every registered
-  artifact path/canonical-content delta has a matching
+  match required templates, and referential integrity holds. On
+  `pull_request` events, CI checks out the pull request head before
+  comparing against the artifact comparison base it computes.
+  Every registered artifact path/canonical-content delta must have a matching
   `artifact_operations[]` entry with the same `artifact_id` in a proposed
-  change set, every artifact registered on the default branch remains
-  registered, and each proposed change set's `base_commit` matches the
-  resolved default-branch head.
+  change set, every artifact registered on the artifact comparison base
+  that CI computes remains registered, and each proposed change set's
+  `base_commit` matches the resolved default-branch head.
 - **Job Site Materializer** — reads the approved manifest and requirement
   records at the immutable specification commit recorded in a build
   work-item contract.
@@ -471,7 +473,8 @@ It is used by these callers:
   ([approval rule](ears-manager-cli.md#approved-and-proposed-change-sets))
   and to check that each proposed `base_commit` equals that default-branch
   head, and to compare registered artifact paths and canonical content with
-  the default-branch tree for artifact-operation consistency
+  the comparison base tree (the default-branch tree by default, or the commit
+  named by `--base-ref`) for artifact-operation consistency
   ([`check`](ears-manager-cli.md#check)); `ears-manager` never fetches.
 - **Git refs (write):** `change-set create` cuts and checks out the
   change-set branch at the local default-branch head, and after a failed
@@ -497,7 +500,7 @@ scope](ears-manager-cli.md#em-04-first-release-scope).
 | Subcommand | Purpose |
 | --- | --- |
 | `ears-manager project init` | Initialize `.protobot/project.yaml`, seed version-1 schema keys, store paths, store integrity digests, and opaque artifact entries, and write a version-1 `.protobot/projection.yaml` that classifies the registered specification paths and the configured store directories as `shared`. It creates no store directory and no artifact content. |
-| `ears-manager check` | Validate all spec files: project configuration and store integrity, projection classification (`projection.invalid`, `projection.unclassified`), EARS formatting, required fields, applicability metadata, change-set integrity, referential integrity, registered artifact path/canonical-content deltas against proposed `artifact_operations[]` (`artifact.operation_missing`), continued registration of default-branch artifacts (`artifact.unregistered`), and proposed `base_commit` freshness against the default-branch head (`BASE_NOT_ON_DEFAULT`, `DEFAULT_MOVED`, `BASE_COMMIT_STALE`). Exit non-zero on failure. Suitable for CI gates. |
+| `ears-manager check` | Validate all spec files: project configuration and store integrity, projection classification (`projection.invalid`, `projection.unclassified`), EARS formatting, required fields, applicability metadata, change-set integrity, referential integrity, registered artifact path/canonical-content deltas against proposed `artifact_operations[]` (`artifact.operation_missing`), continued registration of artifacts registered on the comparison base (`artifact.unregistered`), and proposed `base_commit` freshness against the default-branch head (`BASE_NOT_ON_DEFAULT`, `DEFAULT_MOVED`, `BASE_COMMIT_STALE`). By default, artifact comparison reads the default-branch tree; `--base-ref FULL-SHA` selects an explicit comparison base commit for artifact deltas only (`revision.invalid`, `revision.not_found`). Exit non-zero on failure. Suitable for CI gates. |
 | `ears-manager requirement add` | Add a new EARS requirement with interface or project-wide applicability selectors and optional narrower scopes. Validates the EARS statement and metadata before writing. |
 | `ears-manager requirement list/show` | Read requirements at the working tree or an immutable `--at` revision. |
 | `ears-manager requirement update/retire` | Modify requirements through a proposed change set. |
@@ -552,11 +555,13 @@ scope](ears-manager-cli.md#em-04-first-release-scope).
   Opaque prose and external IDLs still pass through `ears-manager` for
   change-set membership and path/transaction control; controlled validator
   adapters invoke approved format-specific tools. `check` compares
-  registered artifact paths and canonical content with the default-branch
-  tree, requires a matching `artifact_id` in `artifact_operations[]` in any
-  proposed change set for a delta, and rejects unregistration. This validates
-  manifest association, not whether `artifact put` was invoked; no other
-  component reimplements the check.
+  registered artifact paths and canonical content with the artifact
+  comparison base (the default-branch tree by default, or the commit named by
+  `--base-ref`), requires a matching `artifact_id` in `artifact_operations[]`
+  in any proposed change set for a delta, and rejects unregistration of an
+  artifact registered on that base. This validates manifest association, not
+  whether `artifact put` was invoked; no other component reimplements the
+  check.
 - **File format consistency.** `ears-manager` ensures one-file-per-record
   YAML files ([ADR-0001](../decisions/0001-requirements-storage-format.md))
   are syntactically valid and follow the expected schema.
@@ -1919,8 +1924,9 @@ sequenceDiagram
    protection rules, CODEOWNERS, and required reviews all apply.
    CI runs `ears-manager check` as a merge gate to validate spec
    well-formedness, registered artifact path/canonical-content deltas against
-   proposed `artifact_operations[]`, continued registration of default-branch
-   artifacts, and proposed `base_commit` freshness.
+   proposed `artifact_operations[]`, continued registration of artifacts
+   registered on the comparison base (`--base-ref` in CI), and proposed
+   `base_commit` freshness.
 3. **The change set lands on main.** A registration hook calls the Job
    Site materializer with the change-set ID, resulting merge commit, stable
    materialization key, and the distinct deterministic registration
