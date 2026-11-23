@@ -35,6 +35,12 @@ the sandbox image's interpreter; the bootstrap refuses to publish an
 archive whose python hook environments were built for another
 interpreter.
 
+``--print-pre-commit-version`` prints ``PRECOMMIT_VERSION`` and exits
+with 0. It does no upstream run, no cache warm, and no filesystem
+change. The CI ``gate-rehearsal`` job uses it to install the exact
+pre-commit version the sandbox image runs. Every other invocation
+requires ``--upstream``.
+
 Step 2 is fail-soft: a bootstrap failure prints a GitHub Actions warning
 and exits 0, so it never blocks the agent run. ``scripts/lint.py``
 still reports its actionable cache-miss error.
@@ -73,6 +79,11 @@ UPSTREAM_SCRIPT_SHA256 = {
 }
 
 # Must equal PRECOMMIT_VERSION in fullsend's images/sandbox/Containerfile.
+# scripts/lint.py pins a newer pre-commit version for CI and developers;
+# this constant must stay equal to the version in Fullsend's sandbox
+# image because gate-rehearsal proves the gate configuration on the
+# exact version Fullsend runs. Change one pin only with the other in
+# mind.
 PRECOMMIT_VERSION = "4.5.1"
 
 # The Ubuntu Noble interpreter in the Fullsend sandbox image. Python
@@ -644,9 +655,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--upstream",
-        required=True,
         choices=("code", "fix"),
-        help="pinned upstream pre-script to delegate to",
+        help=(
+            "pinned upstream pre-script to delegate to (required unless "
+            "--print-pre-commit-version is given)"
+        ),
+    )
+    parser.add_argument(
+        "--print-pre-commit-version",
+        action="store_true",
+        help=(
+            "print the pinned pre-commit version and exit (no upstream run "
+            "or cache warm)"
+        ),
     )
     parser.add_argument(
         "--skip-upstream",
@@ -672,11 +693,23 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             f"Python X.Y version the sandbox uses (default: {SANDBOX_PYTHON_VERSION})"
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.print_pre_commit_version and args.upstream is not None:
+        parser.error("--print-pre-commit-version cannot be combined with --upstream")
+    if args.upstream is None and not args.print_pre_commit_version:
+        parser.error(
+            "--upstream is required unless --print-pre-commit-version is given"
+        )
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.print_pre_commit_version:
+        # Read-only query for the CI gate-rehearsal job: no upstream
+        # run, no cache warm, no filesystem change.
+        print(PRECOMMIT_VERSION)
+        return 0
     if not args.skip_upstream:
         upstream_rc = _run_upstream_script(args.upstream)
         if upstream_rc != 0:

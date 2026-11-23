@@ -118,6 +118,50 @@ class SkipUpstreamTests(unittest.TestCase):
         self.assertIn("-czf", tar_calls[0])
 
 
+class PrintPreCommitVersionTests(unittest.TestCase):
+    """``--print-pre-commit-version`` prints the pin and stops."""
+
+    def test_prints_the_pin_and_does_no_other_work(self) -> None:
+        # No --upstream is given: the flag must work without it.
+        stdout = io.StringIO()
+        with (
+            patch.object(bootstrap, "_run_upstream_script") as upstream,
+            patch.object(bootstrap, "_warm_cache") as warm,
+            contextlib.redirect_stdout(stdout),
+        ):
+            rc = bootstrap.main(["--print-pre-commit-version"])
+        self.assertEqual(0, rc)
+        self.assertEqual(f"{bootstrap.PRECOMMIT_VERSION}\n", stdout.getvalue())
+        upstream.assert_not_called()
+        warm.assert_not_called()
+
+    def test_upstream_with_the_print_flag_is_a_parser_error(self) -> None:
+        stderr = io.StringIO()
+        with (
+            self.assertRaises(SystemExit) as ctx,
+            contextlib.redirect_stderr(stderr),
+        ):
+            bootstrap.main(["--print-pre-commit-version", "--upstream", "code"])
+        self.assertEqual(2, ctx.exception.code)
+        self.assertIn(
+            "--print-pre-commit-version cannot be combined with --upstream",
+            stderr.getvalue(),
+        )
+
+    def test_no_upstream_and_no_print_flag_is_a_parser_error(self) -> None:
+        stderr = io.StringIO()
+        with (
+            self.assertRaises(SystemExit) as ctx,
+            contextlib.redirect_stderr(stderr),
+        ):
+            bootstrap.main([])
+        self.assertEqual(2, ctx.exception.code)
+        self.assertIn(
+            "--upstream is required unless --print-pre-commit-version is given",
+            stderr.getvalue(),
+        )
+
+
 class DownloadVerificationTests(unittest.TestCase):
     """The pinned pre-script is verified before it runs."""
 

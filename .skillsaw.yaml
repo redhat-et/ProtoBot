@@ -24,4 +24,4 @@ rules:
     # shrink, run `skillsaw baseline` to lower the ceiling.
     limits:
       agents-md:
-        warn: 4000
+        warn: 3990

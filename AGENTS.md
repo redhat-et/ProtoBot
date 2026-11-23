@@ -1,15 +1,14 @@
 # AGENTS
 
-- All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py` as a
-  wrapper around `pre-commit run`.
-  Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
-  (specific files), `--check-parity` (validate config and offline hook
-  cache), `--online-if-ci` (allow network when CI=true).
-  For offline runs, pre-install tools and pre-populate the hook cache
-  (bootstrap with `pre-commit install-hooks`).
-  Go changes must pass `gofmt` and `go vet` across affected Go modules
-  before committing.
+- All gate checks must pass before committing. Run
+  `pre-commit run --files FILE [FILE ...]` directly against the gate
+  configuration (`.pre-commit-config.yaml`, the default); it needs no
+  VCS access. `python scripts/lint.py` runs the gate configuration and
+  [.github/pre-commit-ci.yaml](.github/pre-commit-ci.yaml) for
+  `--all-files`, `--files`, and `--check-parity` (`--online-if-ci`
+  allows network when CI=true), and CI runs it. Go checks, cloned
+  hooks, `adr-amendments`, `baseline-ratchet`, and the validator run
+  at merge time in CI.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
   target this repository.
 - Agent skills live in `.agents/skills/`. `.claude/skills` symlinks

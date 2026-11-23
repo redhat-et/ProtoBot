@@ -31,6 +31,16 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
+      - name: Set up Go
+        # The pre-commit job now runs the Go hooks through scripts/lint.py
+        # (.github/pre-commit-ci.yaml), so it needs the Go toolchain from
+        # ADR-0005 Decision item 5.
+        # https://github.com/actions/setup-go
+        # zizmor: ignore[cache-poisoning]
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: validator/go.mod
+
       - name: Install uv
         # https://github.com/astral-sh/setup-uv
         # zizmor: ignore[cache-poisoning]
@@ -414,6 +424,156 @@ jobs:
         run: CGO_ENABLED=0 go build -trimpath -buildvcs=false ./...
         working-directory: wms
 
+  # ADR-0005 Decision item 3: prove the gate invariant on the exact
+  # pre-commit version the Fullsend sandbox runs. The matrix covers
+  # both images item 3 names: ubuntu-24.04, the Fullsend runner_image,
+  # and ubuntu-latest, with the same probes. The job reads only the
+  # checked-out tree and never reads .github/pre-commit-ci.yaml, so a
+  # branch that predates the cutover still passes.
+  gate-rehearsal:
+    name: Gate rehearsal (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        # https://github.com/actions/checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install the pre-commit version Fullsend ships
+        # scripts/pre_commit_cache.py owns the Fullsend pin;
+        # scripts/lint.py owns the separate CI and developer pin.
+        run: |
+          version="$(python3 scripts/pre_commit_cache.py --print-pre-commit-version)"
+          python3 -m venv "$RUNNER_TEMP/gate-venv"
+          "$RUNNER_TEMP/gate-venv/bin/pip" install "pre-commit==${version}"
+
+      - name: Check the gate invariant
+        # The venv has PyYAML because pre-commit depends on it. Every
+        # gate checker must have a companion test hook, so the gate
+        # run below exercises its negative fixture and expected
+        # diagnostic.
+        run: |
+          "$RUNNER_TEMP/gate-venv/bin/python3" scripts/check_gate_invariant.py
+
+      # Exactly one step invokes `pre-commit run` directly, as the
+      # Fullsend gate does; every other lint entrypoint stays
+      # scripts/lint.py.
+      - name: Rehearse the gate
+        run: |
+          set -euo pipefail
+
+          venv="$RUNNER_TEMP/gate-venv"
+          bin="$RUNNER_TEMP/gate-bin"
+          home="$RUNNER_TEMP/gate-home"
+          gate_user_home="$RUNNER_TEMP/gate-user-home"
+          log_job_env="$RUNNER_TEMP/gate-run-job-env.log"
+          log_env_i="$RUNNER_TEMP/gate-run-env-i.log"
+
+          # Deny VCS access for the whole step: only the file protocol
+          # stays allowed, and git must never prompt for credentials.
+          # PyPI stays reachable: the gate `language: python` hooks
+          # install their declared dependencies from PyPI, so no pip
+          # index, proxy, or offline variable is set here.
+          export GIT_ALLOW_PROTOCOL=file
+          export GIT_TERMINAL_PROMPT=0
+
+          # A minimal PATH with only git, the venv python3, and the
+          # venv pre-commit, so go, gofmt, node, npm, and uvx do not
+          # resolve.
+          mkdir -p "$bin"
+          ln -s "$(command -v git)" "$bin/git"
+          ln -s "$venv/bin/python3" "$bin/python3"
+          ln -s "$venv/bin/pre-commit" "$bin/pre-commit"
+
+          # pip and pre-commit resolve user paths from HOME; an unset
+          # HOME is not a stable gate condition. Both runs get this
+          # dedicated user home and the C.UTF-8 locale explicitly.
+          mkdir -p "$gate_user_home"
+
+          # Remove the default-branch refs once, before the first
+          # probes, so the probes can confirm their absence. A ref
+          # that is absent is already in the wanted state. These
+          # deletions are the only change to the repository tree.
+          git checkout --detach
+          for ref in refs/heads/main refs/remotes/origin/main; do
+            if git show-ref --verify --quiet "$ref"; then
+              git update-ref -d "$ref"
+            fi
+          done
+
+          verify_gate_environment() {
+            if git ls-remote https://github.com/redhat-et/ProtoBot.git \
+              refs/heads/main >/dev/null 2>&1; then
+              echo "::error::git ls-remote against github.com succeeded; VCS access is not denied"
+              exit 1
+            fi
+            if git rev-parse --verify refs/heads/main >/dev/null 2>&1; then
+              echo "::error::refs/heads/main resolves; a default-branch ref is visible"
+              exit 1
+            fi
+            if git rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1; then
+              echo "::error::refs/remotes/origin/main resolves; a default-branch ref is visible"
+              exit 1
+            fi
+            for tool in go gofmt node npm uvx; do
+              if (PATH="$bin"; command -v "$tool" >/dev/null 2>&1); then
+                echo "::error::${tool} resolves on the minimal PATH; the gate must not need it"
+                exit 1
+              fi
+            done
+          }
+
+          require_empty_home() {
+            local home_dir="$1"
+            if [ -z "$(ls -A "$home_dir")" ]; then
+              return 0
+            fi
+            echo "::error::PRE_COMMIT_HOME is not empty before the run: $home_dir"
+            exit 1
+          }
+
+          fail_on_skip() {
+            local log="$1"
+            if grep -Eq 'Skipped$|skipped=|skipped ' "$log"; then
+              echo "::error::A hook or test was skipped; see $log"
+              grep -E 'Skipped$|skipped=|skipped ' "$log" || true
+              exit 1
+            fi
+          }
+
+          # pre-commit prints a passing hook's output only with
+          # --verbose, so an `OK (skipped=N)` unittest summary reaches
+          # fail_on_skip; --color=never keeps the saved log free of
+          # ANSI escapes.
+          # ── Direct run 1: the job environment ─────────────────────
+          rm -rf "$home"
+          mkdir -p "$home"
+          verify_gate_environment
+          require_empty_home "$home"
+          env PATH="$bin" PRE_COMMIT_HOME="$home" HOME="$gate_user_home" \
+            LANG=C.UTF-8 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
+            pre-commit run --all-files --verbose --color=never 2>&1 | tee "$log_job_env"
+          fail_on_skip "$log_job_env"
+
+          # ── Direct run 2: env -i, to catch hooks that read
+          # environment variables ───────────────────────────────────
+          rm -rf "$home"
+          mkdir -p "$home"
+          verify_gate_environment
+          require_empty_home "$home"
+          env -i PATH="$bin" PRE_COMMIT_HOME="$home" HOME="$gate_user_home" \
+            LANG=C.UTF-8 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
+            pre-commit run --all-files --verbose --color=never 2>&1 | tee "$log_env_i"
+          fail_on_skip "$log_env_i"
+
   # This job provides a single status check for merge gates.
   ci-success:
     name: CI Workflow - Success
@@ -425,6 +585,7 @@ jobs:
       - validator
       - scm
       - wms
+      - gate-rehearsal
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs

@@ -238,3 +238,43 @@ an upstream change and keeps a per-run archive build in the critical path.
 - [agents#2105: Sandbox git TLS configuration](https://github.com/fullsend-ai/agents/issues/2105)
 - [agents#577: Husky hook conflict in commit path](https://github.com/fullsend-ai/agents/issues/577)
 - [agents#2091: AGENTS.md offline lint runner configuration](https://github.com/fullsend-ai/agents/issues/2091)
+
+**[Amended November 2026]**
+
+The cutover rehearsal recorded the following updates to gate requirements and
+hook placement. Per item 4, the rehearsal result overrides the placement table.
+
+- **`language: pygrep` is permitted in the gate configuration.** Decision item 1
+  names only `language: python` and `language: system`. The gate keeps
+  `text-unicode-replacement-char`, which uses `language: pygrep`. Pre-commit
+  includes `pygrep` directly. The hook clones no repository, and installs no
+  environment. It satisfies the gate invariant.
+  `scripts/check_gate_invariant.py` permits `language: pygrep`.
+- **`test-adr-amendments` and `test-check-gate-invariant` are placed in CI.**
+  The rehearsal showed that `test-adr-amendments` runs
+  `scripts/check_adr_amendments.py`, which resolves a default-branch ref. The
+  hook fails in the gate with `ERROR: cannot resolve default-branch baseline ref
+  to check against`. `test-check-gate-invariant` imports PyYAML outside the
+  standard library, and tests the checker that enforces this decision.
+- **`check-toml` and `check-xml` are placed in CI.** The repository tracks no
+  `.toml` or `.xml` files, so `pre-commit run --all-files` reports both as
+  `(no files to check)Skipped`. The gate rehearsal fails on any skipped hook. In
+  CI they validate files when the repository gains them.
+- **`gate-rehearsal` runs on a matrix of `ubuntu-24.04` and `ubuntu-latest`.**
+  Decision item 3 requires both runner images. One job matrix covers both runner
+  images.
+
+The amendment placement table records the hooks placed in CI:
+
+| Hook | Placement | Cause |
+| --- | --- | --- |
+| `test-adr-amendments` | CI | Tests a checker that resolves and fetches a default-branch ref from origin |
+| `test-check-gate-invariant` | CI | Imports a module outside the standard library without declaring it |
+| `check-toml`, `check-xml` | CI | Reports "Skipped" on --all-files because the repository tracks no files of that type |
+
+Updated documents:
+
+- `.pre-commit-config.yaml`
+- `.github/pre-commit-ci.yaml`
+- `scripts/check_gate_invariant.py`
+- `.github/workflows/ci-workflow.yaml`
