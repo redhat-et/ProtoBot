@@ -447,8 +447,9 @@ These checks do not establish writer provenance or generally check
 or Git metadata. Coordinated manual edits to artifact content and its registry
 digest, plus a manifest containing a matching operation, can pass. By default,
 the resolver uses the local default ref first, falls back to a canonical
-remote-tracking ref, and does not fetch; callers may pass `--base-ref FULL-SHA`
-to select an explicit artifact comparison base. Hand edits to
+remote-tracking ref, and does not fetch. CI and reviewers may pass
+`--base-ref FULL-SHA` to select an explicit artifact comparison base. The
+Drafting Table guard refuses the option. Hand edits to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, can retarget the default-branch baseline.
 Rule 5 in `AGENTS.md` prohibits

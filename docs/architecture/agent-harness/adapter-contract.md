@@ -1114,9 +1114,10 @@ coordinated-edit gap. By default, the artifact baseline uses the existing
 default-branch resolver and working-tree `.protobot/project.yaml` settings: it
 checks the local `repository.default_branch` ref first, then a resolved
 remote-tracking ref for `repository.canonical_remote` if the local ref does not
-resolve. A caller may pass `--base-ref FULL-SHA` to select an explicit artifact
-comparison base without changing approval or freshness. `ears-manager` never
-fetches. A hand edit to `repository.default_branch`, or to
+resolve. CI and reviewers may pass `--base-ref FULL-SHA` to select an explicit
+artifact comparison base without changing approval or freshness. The Drafting
+Table guard refuses the option. `ears-manager` never fetches. A hand edit to
+`repository.default_branch`, or to
 `repository.canonical_remote` when the remote-tracking fallback is used, can
 retarget it. That risk is outside the operation-record check. Rule 5 in
 `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6 requires
@@ -1227,9 +1228,10 @@ matching operation can pass; a matching operation record does not prove that
 default-branch resolver with `repository.default_branch` and
 `repository.canonical_remote` from the working-tree project configuration; it
 checks the local default ref first, then a resolved remote-tracking ref for
-the canonical remote. A caller may pass `--base-ref FULL-SHA` to select an
-explicit artifact comparison base without changing approval or freshness.
-`ears-manager` never fetches. A hand edit to `repository.default_branch`, or to
+the canonical remote. CI and reviewers may pass `--base-ref FULL-SHA` to
+select an explicit artifact comparison base without changing approval or
+freshness. The Drafting Table guard refuses the option. `ears-manager` never
+fetches. A hand edit to `repository.default_branch`, or to
 `repository.canonical_remote` when the remote-tracking fallback is used, can
 retarget the comparison. This is outside
 the operation-record guarantee. Rule 5 in `AGENTS.md` prohibits hand-editing
@@ -1464,9 +1466,10 @@ path/canonical-content deltas without a matching proposed operation, and
 unregistration are checked. By default, the check uses the existing
 default-branch resolver with working-tree project settings: it checks the local
 `repository.default_branch` ref first, then a resolved remote-tracking ref for
-`repository.canonical_remote` if the local ref does not resolve. A caller may
-pass `--base-ref FULL-SHA` to select an explicit artifact comparison base
-without changing approval or freshness. `ears-manager` never fetches.
+`repository.canonical_remote` if the local ref does not resolve. CI and
+reviewers may pass `--base-ref FULL-SHA` to select an explicit artifact
+comparison base without changing approval or freshness. The Drafting Table
+guard refuses the option. `ears-manager` never fetches.
 Coordinated edits with a matching operation, or a hand edit to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, remain outside that guarantee.

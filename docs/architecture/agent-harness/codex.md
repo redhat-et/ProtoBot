@@ -597,10 +597,11 @@ checks do not establish writer provenance or generally check `.protobot/`
 control files, reserved harness controls, the selected manifest, or Git
 metadata; an indirect `ears-manager` write with a matching operation can pass.
 By default, the baseline uses the existing default-branch resolver and
-working-tree project settings without fetching; callers may pass
-`--base-ref FULL-SHA` to select an explicit artifact comparison base. Hand
-edits to `repository.default_branch`, or to `repository.canonical_remote` when
-the remote-tracking fallback is used, can retarget the default-branch baseline.
+working-tree project settings without fetching. CI and reviewers may pass
+`--base-ref FULL-SHA` to select an explicit artifact comparison base. The
+Drafting Table guard refuses the option. Hand edits to
+`repository.default_branch`, or to `repository.canonical_remote` when the
+remote-tracking fallback is used, can retarget the default-branch baseline.
 Rule 5 in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6
 requires reviewers to inspect it and flag hand edits. The checks also do not
 enforce shell grammar, argument values, variable expansion, or file-source

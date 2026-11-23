@@ -989,9 +989,10 @@ repository fails with status `4` and `revision.not_found`. Supplying
 head. On `pull_request` events, CI checks out the pull request head, fetches
 the default branch, computes their merge base, and passes it to
 `check --base-ref`. This makes the comparison baseline the fork point, not
-the default tip. Every full or scoped `check` requires a resolvable
-default-branch head, with or without `--base-ref`, even when the project has
-zero change sets.
+the default tip. The Drafting Table shell guard refuses `--base-ref`; CI and
+reviewer/maintainer invocations use it outside that guard. Every full or
+scoped `check` requires a resolvable default-branch head, with or without
+`--base-ref`, even when the project has zero change sets.
 
 For each artifact registered in the comparison base project configuration
 (the default-branch tree by default, or the commit named by `--base-ref`),

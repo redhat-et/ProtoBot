@@ -182,10 +182,12 @@ that the delta is represented in a proposed manifest; it does not prove
 content, its registry digest, and the manifest can pass. Manual edits to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, can retarget the default-branch baseline. A
-caller-supplied `--base-ref` can also select an artifact comparison base
-commit that hides an artifact delta; CI computes the value itself from
-`git merge-base` to prevent this retargeting. These escape paths are outside
-the operation-record guarantee. Rule 5 in `AGENTS.md` prohibits hand-editing
+caller outside the guard can supply `--base-ref` to select an artifact
+comparison base commit that hides an artifact delta. The Drafting Table shell
+guard refuses `--base-ref`, so an agent session cannot select the artifact
+comparison base. CI and reviewer invocations compute the merge base themselves
+(CI from `git merge-base`). These escape paths are outside the
+operation-record guarantee. Rule 5 in `AGENTS.md` prohibits hand-editing
 registered specification artifacts and `.protobot/project.yaml`; Rule 6 in
 `AGENTS.md` requires reviewers to inspect them and flag hand edits.
 File-source provenance remains a separate fail-open gap
@@ -841,16 +843,19 @@ The check verifies manifest association only; it does not prove that
 content, its registry digest, and the manifest, or hand edits to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, can retarget the default-branch baseline. A
-caller-supplied `--base-ref` can also select an artifact comparison base
-commit that hides an artifact delta; CI computes the value itself from
-`git merge-base` to prevent this retargeting. These escape paths are outside
-the operation-record guarantee. By default, the baseline uses the existing
+caller outside the guard can supply `--base-ref` to select an artifact
+comparison base commit that hides an artifact delta. The Drafting Table shell
+guard refuses `--base-ref`, so an agent session cannot select the artifact
+comparison base. CI and reviewer invocations compute the merge base themselves
+(CI from `git merge-base`). These escape paths are outside the
+operation-record guarantee. By default, the baseline uses the existing
 default-branch resolver and settings in the working-tree
 `.protobot/project.yaml`: it uses the local `repository.default_branch` ref
 when that resolves, otherwise a resolved remote-tracking ref for
-`repository.canonical_remote`; `ears-manager` never fetches. Callers may pass
-`--base-ref FULL-SHA` to select an explicit artifact comparison base commit for
-the artifact-operation delta without altering approval or freshness checks.
+`repository.canonical_remote`; `ears-manager` never fetches. CI and reviewers
+may pass `--base-ref FULL-SHA` outside the guard to select an explicit artifact
+comparison base commit for the artifact-operation delta without altering
+approval or freshness checks.
 Rule 5 in `AGENTS.md` prohibits hand-editing registered specification
 artifacts and `.protobot/project.yaml`; Rule 6 in `AGENTS.md` requires
 reviewers to inspect them and flag hand edits. The optional harness layer and

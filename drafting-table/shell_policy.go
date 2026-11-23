@@ -447,8 +447,11 @@ var commandSpecs = map[string]optionSpec{
 	"change-set show":    {allowed: []string{"change-set", "at"}, required: []string{"change-set"}},
 	"change-set update":  {allowed: []string{"change-set", "intent", "affected-interface", "affected-scope", "base-commit", "implementation-required", "implementation-rationale", "impact-file"}, required: []string{"change-set"}, repeated: map[string]bool{"affected-interface": true, "affected-scope": true}, write: true},
 	"change-set compare": {allowed: []string{"change-set", "against"}, required: []string{"change-set"}},
-	"check":              {allowed: []string{"change-set", "base-ref", "at"}},
-	"impact":             {allowed: []string{"change-set", "at"}, required: []string{"change-set"}},
+	// The guard refuses --base-ref for check because an agent session
+	// must not choose the artifact comparison base; CI and reviewers
+	// compute it from the merge base outside this guard.
+	"check":  {allowed: []string{"change-set", "at"}},
+	"impact": {allowed: []string{"change-set", "at"}, required: []string{"change-set"}},
 }
 
 func (form cliForm) requiredChangeSet() bool {
