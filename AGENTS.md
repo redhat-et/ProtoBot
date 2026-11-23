@@ -78,9 +78,9 @@ enforce them reflexively on `AGENTS.md` changes.
    between neighboring paragraphs and between a CLI flag and its
    description. Findings must include terminology drift in the
    same list or governed collection, not only specification-hierarchy
-   keyword checks. For `AGENTS.md`, verify prose consolidation
-   introduces no undeclared aliases for established terms
-   or omitted grammatical referents in requirement clauses.
+   keyword checks. For every `AGENTS.md` modification, verify the
+   change introduces no undeclared aliases for established terms or
+   omitted grammatical referents in requirement clauses.
 
 4. **Match intra-entry restatement terminology.** When an entry
    restates a requirement's cases in a separate enforcement or
