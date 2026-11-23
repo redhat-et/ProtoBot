@@ -3236,8 +3236,12 @@ class MainCiInvocationTests(unittest.TestCase):
 # A `run:` key line. Group 1 is the indentation; group 2 is an
 # optional quote pair around the key; group 3 is the inline value, if
 # any. YAML also accepts `"run":`, `'run':`, and `run :`, so the key
-# may carry a quote pair and spaces before the colon.
-_RUN_KEY_LINE = re.compile(r"""^([ \t]*)(["']?)run\2[ \t]*:(?:[ \t]+(.*))?$""")
+# may carry a quote pair and spaces before the colon. A step may also
+# be a sequence item with no name (`- run:` or a `- run: |` block), so
+# an optional `- ` item prefix is accepted.
+_RUN_KEY_LINE = re.compile(
+    r"""^([ \t]*)(?:-[ \t]+)?(["']?)run\2[ \t]*:(?:[ \t]+(.*))?$"""
+)
 
 # A top-level job key under `jobs:` (exactly two spaces of indent).
 # shortcut: keys under `on:` and `permissions:` also sit at two
@@ -3328,7 +3332,8 @@ def _run_commands_by_step(text: str) -> list[list[str]]:
     Each ``run:`` key starts a new group holding that step's commands:
     the inline value, or every non-empty stripped line of the indented
     block that follows. The key may be quoted or spaced
-    (``"run":``, ``'run':``, ``run :``). Comment parts are removed
+    (``"run":``, ``'run':``, ``run :``) and the step may be a
+    sequence item with no name (``- run:``). Comment parts are removed
     first, so a comment that names a command does not count and a step
     name never becomes a command. The helper parses text only, so the
     tests need no PyYAML.
@@ -3424,6 +3429,20 @@ def _direct_runs_outside_job(text: str, job_id: str) -> list[str]:
     return [
         command
         for command in _run_commands_joined(remaining)
+        if _has_direct_pre_commit_run(command)
+    ]
+
+
+def _direct_runs_in_job(text: str, job_id: str) -> list[str]:
+    """Return every joined command in job *job_id* that runs ``pre-commit`` directly.
+
+    Every step form counts, including ``- run:`` sequence items with
+    no name, so a direct run cannot hide from the count.
+    """
+    job, _ = _split_job(text, job_id)
+    return [
+        command
+        for command in _run_commands_joined(job)
         if _has_direct_pre_commit_run(command)
     ]
 
@@ -3531,6 +3550,30 @@ class RunCommandsByStepTests(unittest.TestCase):
             ],
             _run_commands_by_step(snippet),
         )
+
+    def test_sequence_item_run_steps_are_extracted(self) -> None:
+        # GitHub allows a step as a sequence item with no name:
+        # `- run: <command>` inline, and a `- run: |` block. Each is
+        # its own group, and the direct-run matcher finds the command.
+        snippet = (
+            "      - run: pre-commit run --all-files\n"
+            "      - run: |\n"
+            "          env -i pre-commit run --all-files\n"
+            "      - name: Named step\n"
+            "        run: pre-commit gc\n"
+        )
+        self.assertEqual(
+            [
+                ["pre-commit run --all-files"],
+                ["env -i pre-commit run --all-files"],
+                ["pre-commit gc"],
+            ],
+            _run_commands_by_step(snippet),
+        )
+        for command in _run_commands(snippet):
+            with self.subTest(command=command):
+                if command != "pre-commit gc":
+                    self.assertTrue(_has_direct_pre_commit_run(command))
 
     def test_join_continuations_merges_backslash_lines(self) -> None:
         self.assertEqual(
@@ -3681,11 +3724,10 @@ class CiWorkflowContractTests(unittest.TestCase):
     def test_gate_rehearsal_direct_run_step_runs_twice(self) -> None:
         # The one direct-run step holds exactly two runs: one in the
         # job environment, one under env -i to catch hooks that read
-        # environment variables.
-        commands = self._rehearsal_direct_run_commands()
-        direct_runs = [
-            command for command in commands if _has_direct_pre_commit_run(command)
-        ]
+        # environment variables. The count comes from every step form,
+        # including `- run:` items with no name, so a third direct run
+        # cannot hide.
+        direct_runs = _direct_runs_in_job(self.text, self._GATE_REHEARSAL_JOB)
         self.assertEqual(2, len(direct_runs))
         under_env_i = [command for command in direct_runs if _runs_under_env_i(command)]
         self.assertEqual(1, len(under_env_i))
@@ -3699,6 +3741,26 @@ class CiWorkflowContractTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn("--verbose", command)
                 self.assertIn("--color=never", command)
+
+    def test_a_third_direct_run_step_is_counted(self) -> None:
+        # Regression test: GitHub also allows `- run:` steps with no
+        # name. Before the parser accepted that form, a third direct
+        # run added that way was not counted and the "exactly two"
+        # contract still passed.
+        workflow = (
+            "jobs:\n"
+            "  gate-rehearsal:\n"
+            "    steps:\n"
+            "      - name: Rehearse the gate\n"
+            "        run: |\n"
+            "          env PATH=x pre-commit run --all-files\n"
+            "          env -i PATH=x pre-commit run --all-files\n"
+            "      - run: pre-commit run --all-files\n"
+        )
+        self.assertEqual(
+            3,
+            len(_direct_runs_in_job(workflow, self._GATE_REHEARSAL_JOB)),
+        )
 
     def test_gate_rehearsal_direct_run_step_guards_each_run(self) -> None:
         # Each direct run is bracketed: strict shell settings at the

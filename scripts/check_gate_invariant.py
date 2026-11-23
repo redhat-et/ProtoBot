@@ -29,9 +29,11 @@ Rules (ADR-0005):
   module, a relative import, or a repository module (the ``scripts``
   package name, or a file ``scripts/<root>.py`` or
   ``scripts/<root>/__init__.py`` under the repository root).
-  Repository modules are inspected transitively for the imports that
-  execute at module import time; a function-nested import in a
-  repository module runs only when called, so it does not count
+  Repository modules are resolved along their full dotted path (a
+  package ``__init__.py`` plus each named submodule) and inspected
+  transitively for the imports that execute at module import time.
+  Class bodies execute at import time, so their imports count; function
+  bodies run only when called, so their imports do not count
   (``scripts/lint.py`` imports PyYAML inside ``_load_config``).
 * Every ``scripts/check_NAME.py`` gate checker has a companion hook
   that runs ``scripts/test_check_NAME.py``, so its negative fixtures
@@ -428,8 +430,7 @@ def _scan_dotted_import(
     if not _is_allowed_root(parts[0], repo_root):
         violations.append(ImportViolation(chain, parts[0]))
         return
-    candidate = parts[1] if parts[0] == "scripts" and len(parts) > 1 else parts[0]
-    _scan_repository_module(candidate, chain, repo_root, visited, violations)
+    _scan_repository_files([dotted], chain, repo_root, visited, violations)
 
 
 def _scan_from_import(
@@ -439,44 +440,66 @@ def _scan_from_import(
     visited: set[str],
     violations: list[ImportViolation],
 ) -> None:
-    """Inspect one ``from`` import statement."""
+    """Inspect one ``from`` import statement.
+
+    The module itself and every imported name resolve to repository
+    files; a name that is an attribute, not a submodule, resolves to
+    no file.
+    """
     if node.level > 0:
         return
-    parts = (node.module or "").split(".")
+    module = node.module or ""
+    parts = module.split(".")
     if not _is_allowed_root(parts[0], repo_root):
         violations.append(ImportViolation(chain, parts[0]))
         return
-    if parts[0] != "scripts":
-        candidates = [parts[0]]
-    elif len(parts) == 1:
-        candidates = [alias.name for alias in node.names]
-    else:
-        candidates = [parts[1]]
-    for candidate in candidates:
-        _scan_repository_module(candidate, chain, repo_root, visited, violations)
+    paths = [module] + [f"{module}.{alias.name}" for alias in node.names]
+    _scan_repository_files(paths, chain, repo_root, visited, violations)
 
 
-def _scan_repository_module(
-    name: str,
+def _scan_repository_files(
+    paths: list[str],
     chain: tuple[str, ...],
     repo_root: Path,
     visited: set[str],
     violations: list[ImportViolation],
 ) -> None:
-    """Parse one repository module under ``scripts/`` and inspect it."""
-    module_path = _repository_module_path(name, repo_root)
-    if module_path is None or module_path in visited:
-        return
-    visited.add(module_path)
-    tree = _parse_repository_module(module_path, repo_root)
+    """Inspect every repository file that the dotted *paths* resolve to."""
+    for path in paths:
+        current = chain
+        for module_file in _repository_module_files(path, repo_root):
+            current = _scan_repository_file(
+                module_file, current, repo_root, visited, violations
+            )
+
+
+def _scan_repository_file(
+    module_file: str,
+    chain: tuple[str, ...],
+    repo_root: Path,
+    visited: set[str],
+    violations: list[ImportViolation],
+) -> tuple[str, ...]:
+    """Parse one repository file and return the chain extended with it.
+
+    An already-visited file is not parsed again, but it still extends
+    the chain, so a submodule diagnostic names the package files that
+    import it.
+    """
+    extended = (*chain, module_file)
+    if module_file in visited:
+        return extended
+    visited.add(module_file)
+    tree = _parse_repository_module(module_file, repo_root)
     if tree is not None:
         _scan_imports(
             _module_scope_imports(tree),
-            (*chain, module_path),
+            extended,
             repo_root,
             visited,
             violations,
         )
+    return extended
 
 
 def _parse_repository_module(module_path: str, repo_root: Path) -> ast.Module | None:
@@ -491,15 +514,43 @@ def _parse_repository_module(module_path: str, repo_root: Path) -> ast.Module | 
         return None
 
 
-def _repository_module_path(name: str, repo_root: Path) -> str | None:
-    """Return the repo-relative path of ``scripts/<name>``, or None."""
-    module = repo_root / "scripts" / f"{name}.py"
-    if module.is_file():
-        return f"scripts/{name}.py"
-    package = repo_root / "scripts" / name / "__init__.py"
-    if package.is_file():
-        return f"scripts/{name}/__init__.py"
-    return None
+def _repository_module_files(dotted: str, repo_root: Path) -> list[str]:
+    """Return the repository files that one dotted import path resolves to.
+
+    A path with a ``scripts.`` prefix resolves from the repository
+    root, so ``scripts/__init__.py`` counts as an ancestor package. A
+    bare path resolves inside ``scripts/`` (the ``sys.path`` style the
+    gate scripts use), so the ``scripts`` package itself does not run.
+    The ``__init__.py`` of every ancestor package comes first, then the
+    leaf module; each file is included only when it exists, in the
+    order in which Python executes it at import time.
+    """
+    parts = dotted.split(".")
+    if parts[0] == "scripts":
+        first = 1
+        full = parts
+    else:
+        first = 2
+        full = ["scripts", *parts]
+    files: list[str] = []
+    for depth in range(first, len(full)):
+        candidate = f"{'/'.join(full[:depth])}/__init__.py"
+        if (repo_root / candidate).is_file():
+            files.append(candidate)
+    files.extend(_leaf_module_files(full, repo_root))
+    return files
+
+
+def _leaf_module_files(full: list[str], repo_root: Path) -> list[str]:
+    """Return the leaf module or package file for the full component path."""
+    stem = "/".join(full)
+    module = f"{stem}.py"
+    if (repo_root / module).is_file():
+        return [module]
+    package = f"{stem}/__init__.py"
+    if (repo_root / package).is_file():
+        return [package]
+    return []
 
 
 def _is_allowed_root(root: str, repo_root: Path) -> bool:
@@ -507,7 +558,7 @@ def _is_allowed_root(root: str, repo_root: Path) -> bool:
     return (
         root in sys.stdlib_module_names
         or root == "scripts"
-        or _repository_module_path(root, repo_root) is not None
+        or bool(_repository_module_files(root, repo_root))
     )
 
 
@@ -524,11 +575,11 @@ def _module_scope_imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]
     """Return the imports that execute when the module is imported.
 
     Module-level ``if``, ``try``, and loop blocks run at import time,
-    so their imports count. Function and class bodies run only when
-    called, so their imports do not: the repository treats a
-    function-nested import as an optional dependency that the module
-    does not require at import time (``scripts/lint.py`` imports
-    PyYAML inside ``_load_config``).
+    and so do class bodies, so their imports count. Function and async
+    function bodies (including methods) run only when called, so their
+    imports do not: the repository treats a function-nested import as
+    an optional dependency that the module does not require at import
+    time (``scripts/lint.py`` imports PyYAML inside ``_load_config``).
     """
     imports: list[ast.Import | ast.ImportFrom] = []
     for statement in tree.body:
@@ -537,10 +588,14 @@ def _module_scope_imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]
 
 
 def _statement_imports(node: ast.AST) -> list[ast.Import | ast.ImportFrom]:
-    """Return imports in *node*'s subtree, outside function and class bodies."""
+    """Return imports in *node*'s subtree, outside function bodies.
+
+    A class body executes when its class statement runs, so imports
+    inside it count; methods are function bodies and do not count.
+    """
     if isinstance(node, (ast.Import, ast.ImportFrom)):
         return [node]
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return []
     imports: list[ast.Import | ast.ImportFrom] = []
     for child in ast.iter_child_nodes(node):

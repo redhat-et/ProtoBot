@@ -323,6 +323,48 @@ class CheckConfigTests(unittest.TestCase):
 
         self.assertEqual([], report.diagnostics)
 
+    def test_transitive_package_child_import_fails(self) -> None:
+        """Reject a third-party import in a package submodule."""
+        sources = {
+            "dotted import": "import pkg.child\n",
+            "from import": "from pkg import child\n",
+        }
+        for label, checker_source in sources.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts(checker_source)
+                self.write_script("scripts/pkg/__init__.py", "")
+                self.write_script("scripts/pkg/child.py", "import yaml\n")
+
+                diagnostics = self.run_checker().diagnostics
+
+                self.assertEqual(1, len(diagnostics))
+                self.assertIn("yaml", diagnostics[0])
+                self.assertIn("scripts/pkg/__init__.py", diagnostics[0])
+                self.assertIn("scripts/pkg/child.py", diagnostics[0])
+
+    def test_repository_module_class_body_import_fails(self) -> None:
+        """Reject a third-party import in a repository module class body."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import helper\n")
+        self.write_script("scripts/helper.py", "class Settings:\n    import yaml\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/helper.py", diagnostics[0])
+
+    def test_repository_module_function_nested_import_passes(self) -> None:
+        """Allow a function-nested import in a repository module."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import helper\n")
+        self.write_script("scripts/helper.py", "def load():\n    import yaml\n")
+
+        self.assertEqual([], self.run_checker().diagnostics)
+
     def test_system_entry_with_shell_operator_fails(self) -> None:
         """Reject chained commands, pipelines, and command substitution."""
         entries = {
