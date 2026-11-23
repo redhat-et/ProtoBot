@@ -47,7 +47,7 @@ repos:
       - id: hadolint
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: d215268648a5dd267b02642e3f8684779444a42c  # frozen: 44.236.5
+    rev: 71222830124d3dcacafde100efbd8e833c2cbb1f  # frozen: 44.237.0
     hooks:
       - id: renovate-config-validator
 
