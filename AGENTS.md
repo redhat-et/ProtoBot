@@ -52,9 +52,9 @@ ratcheted by
    on-demand `.agents/skills/` skill.
 3. **Review agents must recognize budget consolidation.** Treat prose
    consolidation offsetting a new `AGENTS.md` addition as budget compliance,
-   not scope creep, provided no governance requirement, defined keyword,
-   or diagnostic name is omitted, and no undeclared alias or terminology
-   drift is introduced. Consolidating prose does not exempt an entry from
+   not scope creep, only if it omits no governance requirement, defined
+   keyword, or diagnostic name and introduces no undeclared alias or
+   terminology drift. Consolidation does not exempt an entry from
    sibling-entry or intra-entry terminology rules.
 
 ## Rules for creating or modifying sibling entries
@@ -83,9 +83,9 @@ creating, modifying, or consolidating entries.
    drift between neighboring paragraphs and between a CLI flag and its
    description. Findings should include terminology drift within the
    same list or governed collection, not only specification-hierarchy
-   keyword checks. When `AGENTS.md` itself is modified, verify that prose
-   consolidations neither introduce undeclared aliases for established
-   terms nor omit grammatical referents in requirement clauses.
+   keyword checks. For `AGENTS.md` modifications, verify prose
+   consolidations introduce no undeclared aliases for established terms
+   or omitted grammatical referents in requirement clauses.
 
 4. **Match intra-entry restatement terminology.** When an entry
    restates a requirement's cases in a separate enforcement or
@@ -211,10 +211,10 @@ must follow these rules:
    check is not evidence) and require it to pass
    without `artifact.digest_mismatch`, `artifact.operation_missing`, or
    `artifact.unregistered`. Each registered artifact path or
-   canonical-content delta must match a proposed
-   `artifact_operations[]` entry's `artifact_id`, and the check
-   rejects unregistration of an artifact-registry entry on the
-   comparison base (merge base in CI/review). It confirms
+   canonical-content delta must match the `artifact_id` in a proposed
+   change set's `artifact_operations[]` entry, and the check rejects
+   unregistration of an artifact-registry entry on the comparison base
+   (merge base in CI/review). It confirms
    manifest association only, not `ears-manager artifact put` invocation;
    metadata-only artifact-registry changes require no artifact
    operation. Reviewers must flag identifiable hand edits, not claim CLI
@@ -228,13 +228,13 @@ must follow these rules:
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
-   immutable historical records. Never rewrite or replace accepted
-   decision text in place. When design evolution amends an accepted
-   architecture decision record, append a dated amendment block
-   (`**[Amended Month Year]**`) with the change, its rationale, and
-   references to updated architecture documents; review agents must
-   verify no in-place rewrite or replacement and each amendment
-   appends the dated amendment block.
+   immutable historical records; never rewrite or replace accepted
+   decision text in place. When design evolution amends one, append a
+   dated amendment block (`**[Amended Month Year]**`) with the change,
+   rationale, and updated architecture references. Review agents must
+   verify no in-place rewrite or replacement and that each amendment
+   block includes the change, rationale, and updated architecture
+   references.
 
 ## Agent skills
 
