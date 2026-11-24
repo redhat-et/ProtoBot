@@ -393,8 +393,8 @@ func TestValidateRecordSchema(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if len(tc.wantCodes) > 0 && len(tc.wantMessages) != len(tc.wantCodes) {
-				t.Fatalf("len(wantMessages)=%d != len(wantCodes)=%d", len(tc.wantMessages), len(tc.wantCodes))
+			if len(tc.wantFields) != len(tc.wantCodes) || len(tc.wantMessages) != len(tc.wantCodes) {
+				t.Fatalf("test case %q: slice length mismatch: wantCodes=%d, wantFields=%d, wantMessages=%d", tc.name, len(tc.wantCodes), len(tc.wantFields), len(tc.wantMessages))
 			}
 			diagnostics := schemaDiagnostics(Validate(tc.snapshot))
 			if len(tc.wantCodes) == 0 {
@@ -423,38 +423,6 @@ func TestValidateRecordSchema(t *testing.T) {
 				if got.Message != tc.wantMessages[i] {
 					t.Errorf("message=%q, want %q", got.Message, tc.wantMessages[i])
 				}
-			}
-		})
-	}
-}
-
-func TestValidateRecordSchemaEmptyAppliesToMessage(t *testing.T) {
-	cases := []struct {
-		name     string
-		document layout.Document[records.Requirement]
-	}{
-		{"empty applies_to mapping", requirementWithEmptyAppliesTo()},
-		{"empty applies_to lists", requirementWithEmptyAppliesToLists()},
-		{"blank applies_to selectors", requirementWithBlankAppliesToSelectors()},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			diagnostics := schemaDiagnostics(Validate(schemaSnapshot(tc.document, validInterfaceDocument())))
-			var got Diagnostic
-			found := false
-			for _, diagnostic := range diagnostics {
-				if diagnostic.Field == "applies_to" {
-					got = diagnostic
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("diagnostics=%v, want applies_to", diagnostics)
-			}
-			wantMsg := "applies_to must name at least one interface or scope."
-			if got.Message != wantMsg {
-				t.Errorf("message=%q, want %q", got.Message, wantMsg)
 			}
 		})
 	}

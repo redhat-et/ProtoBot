@@ -24,7 +24,7 @@ reference resolution, EARS shape checks, requirement identifier checks,
 basename-to-id and basename-to-name matching, and parsed-text
 immutability against comparison base
 (issues #381, #383, #385, #387, #388, #390, #392, #395, #397, #399, #402,
-\#459, #462, #463, #468, #479, #497, and #475). The command line accepts
+\#459, #462, #463, #468, #471, #479, #497, and #475). The command line accepts
 the checkout path and comparison base.
 It reads requirement and interface YAML records from `spec/requirements/` and
 `spec/interfaces/` in the target checkout. Missing directories are treated as
@@ -55,9 +55,12 @@ declared by more than one interface record fails with
 `reference.ambiguous` when an `applies_to.interfaces` selector names it.
 Duplicate requirement IDs fail with `requirement.duplicate_id` on the
 declaring records, not with `reference.ambiguous`. Requirement IDs must
-match `REQ-<SCOPE>-<NNNNN>`, be unique in the working tree, and must
-not be deleted or reused relative to the comparison base. Requirement
-file basenames must use that same identifier pattern and equal the
+match `REQ-<SCOPE>-<NNNNN>`, where `<SCOPE>` is one or more uppercase
+alphanumeric segments separated by single hyphens (consecutive,
+leading, or trailing hyphens are rejected), be unique in the working
+tree, and must not be deleted or reused relative to the comparison
+base. Requirement file basenames must use that same identifier
+pattern and equal the
 in-record `id`. Interface file basenames must equal the declared
 `name`. An interface `name` (and its file basename) must be a well-formed
 single path segment: non-empty, free of path separators (`/` or `\`), and

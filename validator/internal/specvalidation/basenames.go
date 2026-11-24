@@ -35,7 +35,7 @@ func validateRequirementBasename(document layout.Document[records.Requirement]) 
 			Code: CodeRequirementInvalidBasename,
 			Path: document.Path,
 			Message: fmt.Sprintf(
-				"Requirement file basename %q is invalid. Use REQ-<SCOPE>-<NNNNN>.yaml with an uppercase scope and five-digit sequence.",
+				"Requirement file basename %q is invalid. Use REQ-<SCOPE>-<NNNNN>.yaml with an uppercase scope of hyphen-separated alphanumeric segments and a five-digit sequence.",
 				base,
 			),
 		}}
