@@ -55,23 +55,6 @@ FALLBACK_NOTE = (
 )
 
 
-def _git(repo_root: Path, *args: str) -> str | None:
-    """Return stripped stdout of a git command, or ``None`` on failure."""
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_root),
-            check=False,
-        )
-    except FileNotFoundError:
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
-
-
 def resolve_base(
     repo_root: Path = REPO_ROOT,
     env: dict[str, str] | None = None,

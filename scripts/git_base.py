@@ -22,8 +22,8 @@ Public surface:
     revision.
 ``git_ref_exists`` / ``git_commit_sha``
     Check whether a ref resolves to a commit, or resolve it to a SHA.
-``get_merge_base``
-    Compute ``git merge-base <head_ref> <ref>``.
+``git_merge_base`` / ``get_merge_base``
+    Compute ``git merge-base <ref> <head_ref>``.
 ``is_shallow_repository``
     Report whether the checkout is a shallow clone, so a caller can
     decide whether an unresolved merge base might be fixed by deepening
@@ -118,15 +118,23 @@ def git_ref_exists(repo_root: Path, ref: str) -> bool:
     return git_commit_sha(repo_root, ref) is not None
 
 
-def get_merge_base(repo_root: Path, ref: str, head_ref: str = "HEAD") -> str | None:
-    """Return the merge-base commit of *head_ref* and *ref*, or None."""
+def git_merge_base(repo_root: Path, ref: str, head_ref: str = "HEAD") -> str | None:
+    """Return the merge-base commit of *ref* and *head_ref*, or None.
+
+    Runs ``git merge-base <ref> <head_ref>``. For two commits git merge-base
+    is symmetric; passing *ref* followed by *head_ref* matches the parameter
+    order.
+    """
     if not is_safe_git_ref(ref) or not is_safe_git_ref(head_ref):
         return None
-    result = _run_git(repo_root, "merge-base", head_ref, ref)
+    result = _run_git(repo_root, "merge-base", ref, head_ref)
     if result is None or result.returncode != 0:
         return None
     sha = result.stdout.strip()
     return sha or None
+
+
+get_merge_base = git_merge_base
 
 
 def is_shallow_repository(repo_root: Path) -> bool:
@@ -213,7 +221,7 @@ def resolve_comparison_base(
             continue
         if not git_ref_exists(repo_root, candidate):
             continue
-        merge_base = get_merge_base(repo_root, candidate)
+        merge_base = git_merge_base(repo_root, candidate)
         if merge_base:
             return merge_base, merge_base == head
     return None, False

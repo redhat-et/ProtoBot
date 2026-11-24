@@ -829,9 +829,7 @@ def resolve_baseline_ref(
         return resolved
 
     from_ref = os.environ.get("PRE_COMMIT_FROM_REF")
-    if from_ref:
-        if not is_safe_git_ref(from_ref):
-            return None
+    if from_ref and is_safe_git_ref(from_ref):
         resolved = _resolve_commit(from_ref)
         if not resolved and _fetch_target(repo_root, from_ref):
             clean_ref = from_ref

@@ -105,7 +105,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 # checks reject option-injecting and path-smuggling refs the same way.
 is_safe_ref = git_base.is_safe_git_ref
 git_commit_sha = git_base.git_commit_sha
-git_merge_base = git_base.get_merge_base
+git_merge_base = git_base.git_merge_base
 is_shallow_repository = git_base.is_shallow_repository
 
 

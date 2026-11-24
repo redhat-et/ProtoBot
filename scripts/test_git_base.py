@@ -88,22 +88,26 @@ class GitPrimitiveTests(unittest.TestCase):
         self.assertFalse(git_base.git_ref_exists(self.root, "no-such-branch"))
         self.assertFalse(git_base.git_ref_exists(self.root, "-h"))
 
-    def test_get_merge_base_common_ancestor(self) -> None:
+    def test_git_merge_base_common_ancestor(self) -> None:
         """Compute the merge base of two diverged branches."""
         self._git("branch", "main")
         self._git("checkout", "-q", "-b", "feature")
         (self.root / "b.txt").write_text("b")
         self._git("add", "-A")
         self._git("commit", "-q", "-m", "two")
-        self.assertEqual(self.head, git_base.get_merge_base(self.root, "main"))
+        self.assertEqual(self.head, git_base.git_merge_base(self.root, "main"))
 
-    def test_get_merge_base_returns_none_for_unsafe_ref(self) -> None:
+    def test_git_merge_base_returns_none_for_unsafe_ref(self) -> None:
         """Refuse to compute a merge base against an option-like ref."""
-        self.assertIsNone(git_base.get_merge_base(self.root, "--upload-pack=x"))
+        self.assertIsNone(git_base.git_merge_base(self.root, "--upload-pack=x"))
 
-    def test_get_merge_base_returns_none_when_unresolvable(self) -> None:
+    def test_git_merge_base_returns_none_when_unresolvable(self) -> None:
         """Return None when the candidate ref does not exist."""
-        self.assertIsNone(git_base.get_merge_base(self.root, "no-such-branch"))
+        self.assertIsNone(git_base.git_merge_base(self.root, "no-such-branch"))
+
+    def test_get_merge_base_is_alias_for_git_merge_base(self) -> None:
+        """Preserve get_merge_base as a compatibility alias for git_merge_base."""
+        self.assertIs(git_base.get_merge_base, git_base.git_merge_base)
 
     def test_is_shallow_repository_false_for_full_clone(self) -> None:
         """A normal local repository is not shallow."""
