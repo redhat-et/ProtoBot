@@ -32,19 +32,19 @@ func gitRoot(cwd string) (string, error) {
 				}
 			}
 		}
-		return "", errors.New("Git working-tree root could not be read")
+		return "", errors.New("git working-tree root could not be read")
 	}
 	root := strings.TrimSpace(string(output))
 	if root == "" || !filepath.IsAbs(root) {
-		return "", errors.New("Git returned an invalid working-tree root")
+		return "", errors.New("git returned an invalid working-tree root")
 	}
 	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", errors.New("Git working-tree root could not be resolved")
+		return "", errors.New("git working-tree root could not be resolved")
 	}
 	info, err := os.Stat(root)
 	if err != nil || !info.IsDir() {
-		return "", errors.New("Git working-tree root is not a directory")
+		return "", errors.New("git working-tree root is not a directory")
 	}
 	return filepath.Clean(root), nil
 }
@@ -57,22 +57,22 @@ func gitMetadataDirs(root string) (string, string, error) {
 		command.Env = safeCommandEnv()
 		output, err := command.Output()
 		if err != nil {
-			return "", errors.New("Git metadata directory could not be read")
+			return "", errors.New("git metadata directory could not be read")
 		}
 		path := strings.TrimSpace(string(output))
 		if path == "" {
-			return "", errors.New("Git returned an empty metadata directory")
+			return "", errors.New("git returned an empty metadata directory")
 		}
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(root, path)
 		}
 		path, err = filepath.EvalSymlinks(path)
 		if err != nil {
-			return "", errors.New("Git metadata directory could not be resolved")
+			return "", errors.New("git metadata directory could not be resolved")
 		}
 		info, err := os.Stat(path)
 		if err != nil || !info.IsDir() {
-			return "", errors.New("Git metadata path is not a directory")
+			return "", errors.New("git metadata path is not a directory")
 		}
 		return filepath.Clean(path), nil
 	}
@@ -107,7 +107,8 @@ func readYAMLFile(path string, destination any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	// The file is read-only, so a close failure has no consequence.
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, 1<<20+1))
 	if err != nil {
 		return err

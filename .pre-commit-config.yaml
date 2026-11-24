@@ -13,12 +13,13 @@
 # validator/vendor/ holds go mod vendor's copy of validator's module
 # dependencies (gopkg.in/yaml.v3 as of this writing) so the always-run
 # spec-validator hook (see its entry below) can build offline without a
-# populated GOMODCACHE. CI's "Check formatting" step
-# (.github/workflows/ci-workflow.yaml:244) runs `gofmt -l validator`,
-# which recurses into vendor/. Run `gofmt -w validator/vendor/gopkg.in/yaml.v3`
-# after `go mod vendor` to keep vendored sources formatted. Formatting
-# fixers below exclude validator/vendor/ individually, keeping secret
-# scans and size checks unfiltered.
+# populated GOMODCACHE. The composite action's "Check formatting" step
+# (.github/actions/check-go-module/action.yaml) runs `gofmt -l .`
+# from inside each module directory, which recurses into vendor/. Run
+# `gofmt -w validator/vendor/gopkg.in/yaml.v3` after `go mod vendor`
+# to keep vendored sources formatted. Formatting fixers below exclude
+# validator/vendor/ individually, keeping secret scans and size checks
+# unfiltered.
 
 # Completely exclude certain files from checks
 # exclude: |
@@ -395,4 +396,4 @@ repos:
         entry: python3 scripts/test_select_comparison_base.py
         language: system
         pass_filenames: false
-        files: ^(scripts/(select_comparison_base|test_select_comparison_base)\.py|\.github/workflows/ci-workflow\.yaml)$
+        files: ^(scripts/(select_comparison_base|test_select_comparison_base)\.py|\.github/workflows/ci-workflow\.yaml|\.github/actions/[^/]+/action\.ya?ml)$

@@ -848,13 +848,16 @@ func TestRunStatusAndSingleLineContract(t *testing.T) {
 }
 
 func TestGuardExecutableRefusesControlFlowGovernedWrite(t *testing.T) {
-	fixture := newFixture(t, true, false)
 	binary := filepath.Join(t.TempDir(), "drafting-table-guard")
 	build := exec.Command("go", "build", "-o", binary, "./cmd/drafting-table-guard")
 	build.Env = safeCommandEnv()
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build guard executable: %v: %s", err, output)
 	}
+	// Build before newFixture points HOME at a temp directory. Otherwise the go
+	// tool creates $HOME/go/pkg/mod with read-only module cache files there, and
+	// the t.TempDir cleanup fails with a permission error.
+	fixture := newFixture(t, true, false)
 	input, err := json.Marshal(hookInput{
 		HookEventName: "PreToolUse",
 		SessionID:     "fixture-session",

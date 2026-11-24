@@ -85,7 +85,6 @@ func parseSimpleShell(command string) (parsedShell, error) {
 				if wordStarted {
 					words = append(words, word.String())
 					word.Reset()
-					wordStarted = false
 				}
 				return parseQuotedHereDocument(command, i, words)
 			}
@@ -186,10 +185,6 @@ func parseQuotedHereDocument(command string, operator int, words []string) (pars
 		lineStart = end + 1
 	}
 	return parsedShell{}, errors.New("here-document terminator is missing")
-}
-
-func parseOtherShellRedirects(command string) ([]string, bool) {
-	return parseOtherShellRedirectsAtDepth(command, 0)
 }
 
 func parseOtherShellRedirectsAtDepth(command string, depth int) ([]string, bool) {
@@ -297,14 +292,6 @@ func ambiguousRedirectTarget(target string) bool {
 		return true
 	}
 	return strings.HasPrefix(target, "~")
-}
-
-func otherHereDocument(command string, operator int) (string, int, bool) {
-	document, ok := parseOtherHereDocument(command, operator)
-	if !ok {
-		return "", 0, false
-	}
-	return document.tail, document.afterBody, true
 }
 
 type parsedOtherHereDocument struct {
@@ -508,15 +495,16 @@ func readShellTarget(command string, index int) (string, int, bool) {
 			continue
 		}
 		if quote == '"' {
-			if char == '"' {
+			switch char {
+			case '"':
 				quote = 0
-			} else if char == '\\' {
+			case '\\':
 				index++
 				if index >= len(command) {
 					return "", index, false
 				}
 				result.WriteByte(command[index])
-			} else {
+			default:
 				result.WriteByte(char)
 			}
 			index++

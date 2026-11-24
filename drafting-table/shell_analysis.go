@@ -124,10 +124,6 @@ type findAction struct {
 	execDir bool
 }
 
-func nestedShellCommands(words []string) ([]nestedShellScript, bool) {
-	return nestedShellCommandsAtDepth(words, 0)
-}
-
 func nestedShellCommandsAtDepth(words []string, depth int) ([]nestedShellScript, bool) {
 	if depth > maxShellAnalysisDepth {
 		return nil, false
@@ -867,10 +863,6 @@ func skipHereDocument(command string, operator int) (string, int, bool) {
 		lineStart = end + 1
 	}
 	return "", 0, false
-}
-
-func governedWordsWrite(words []string) governedExecution {
-	return governedWordsWriteAtDepth(words, 0)
 }
 
 func governedWordsWriteAtDepth(words []string, depth int) governedExecution {
