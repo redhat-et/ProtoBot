@@ -8,8 +8,7 @@
   `--online-if-ci` (allow network when CI=true).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
-- The upstream repository is `redhat-et/protobot`. Ensure pull requests
-  target this repository.
+- Pull requests target the `redhat-et/protobot` upstream repository.
 - Agent skills live in `.agents/skills/`; `.claude/skills` symlinks
   there. Do not add them under `.claude/` directly.
 
@@ -33,10 +32,10 @@ Agents must follow these rules:
 
 ## Context budget and prompt efficiency
 
-`AGENTS.md` enters every dispatched agent's prompt, capped by
-`context-budget`'s `agents-md` warn limit in `.skillsaw.yaml` and
-ratcheted by
-[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
+`AGENTS.md` enters every dispatched agent's prompt. The `context-budget`
+rule's `agents-md` warn limit in `.skillsaw.yaml` triggers the finding;
+[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py)
+rejects a `.skillsaw-baseline.json` ceiling increase.
 
 1. **Respect the prompt context budget.** Never raise or delete a
    `.skillsaw-baseline.json` ceiling row for an existing file. After a
@@ -98,8 +97,8 @@ describing the module).
 
 ## Specification document hierarchy
 
-Every `docs/` Markdown file is a governed hierarchy member; the
-`docs/` prefix, not the list, defines membership.
+Every `docs/` Markdown file is a governed hierarchy member; the prefix,
+not the list, defines membership.
 
 - `docs/vision.md` — registered Vision artifact (purpose, users,
   outcomes).
@@ -147,7 +146,7 @@ When creating or modifying documents under `docs/`, agents
 must follow these rules:
 
 1. **Account for all components, interfaces, and constraints.**
-   New or revised specification documents must account for every
+   Specification documents must account for every
    component, interface, and constraint in
    `docs/architecture/components.md` and
    `docs/architecture/overview.md`, and address, not silently
@@ -211,15 +210,14 @@ must follow these rules:
    path or canonical-content delta to match an `artifact_id` in an
    `artifact_operations[]` entry in a proposed change set, and
    rejects unregistering an artifact-registry entry present on the
-   comparison base (the merge base in CI and review). It confirms
-   manifest association only, not that
+   comparison base (the default-branch tree, or the commit named by
+   `--base-ref`). It confirms manifest association only, not that
    `ears-manager artifact put` was invoked; metadata-only changes to an
    artifact-registry entry (`kind`, `owner`, `validator`) require no
    artifact operation. Reviewers must flag identifiable hand edits, not
    claim CLI provenance from an operation record. Findings should include
-   each listed diagnostic and any identified hand edit in the registered
-   specification artifact or
-   [.protobot/project.yaml](.protobot/project.yaml);
+   each listed diagnostic and any identified hand edit in the affected
+   artifact or project configuration;
    when Rule 4 identifies staleness in a registered specification
    artifact, a staleness finding must prescribe `ears-manager artifact put`,
    not a hand edit.
