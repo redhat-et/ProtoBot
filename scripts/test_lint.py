@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import types
 import unittest
 import zlib
 from pathlib import Path
@@ -32,20 +31,17 @@ _RUNTIME = "runtime"
 
 
 def _expected_python_env_name() -> str:
-    """Return pre-commit's python environment suffix, computed independently."""
-    try:
-        from pre_commit.languages.python import get_default_version
-    except ImportError:
-        pass
-    else:
-        return get_default_version()
-    # Independent mirror of pre-commit's selection order, kept separate
-    # from ``checker._default_python_language_version`` so the tests
-    # stay a cross-check: probe PATH for the versioned interpreter,
-    # then the major-only name, then the running interpreter's own
-    # name. ``sys.version_info`` alone mispredicts where ``pre_commit``
-    # is not importable and PATH holds no versioned interpreter: there
-    # pre-commit selects ``python3`` even under Python 3.14.
+    """Return pre-commit's python environment suffix, computed independently.
+
+    The mirror is independent of ``pre_commit``: the gate invariant
+    rejects third-party imports in a gate entry script, so the earlier
+    optional ``pre_commit`` import was removed. The body reproduces
+    pre-commit's ``get_default_version`` with the standard library
+    alone. It stays separate from ``checker._default_python_language_version``
+    so the tests remain a cross-check: ``sys.version_info`` alone
+    mispredicts the name where PATH holds no versioned interpreter,
+    and pre-commit then selects ``python3`` even under Python 3.14.
+    """
     major = str(sys.version_info[0])
     minor = f"{sys.version_info[0]}.{sys.version_info[1]}"
     implementation = (
@@ -56,10 +52,33 @@ def _expected_python_env_name() -> str:
         if shutil.which(executable):
             return executable
     for executable_path in (sys.executable, os.path.realpath(sys.executable)):
-        executable = Path(executable_path.lower()).name.partition(".exe")[0]
-        if executable not in {"python", "pythonw"} and shutil.which(executable):
+        executable = _sys_executable_name(executable_path, implementation)
+        if executable is not None and shutil.which(executable):
             return executable
     return "default"
+
+
+def _sys_executable_name(executable_path: str, implementation: str) -> str | None:
+    """Return the interpreter name pre-commit accepts for *executable_path*.
+
+    Mirror pre-commit's ``_find_by_sys_executable`` with its
+    ``_sys_executable_matches`` check: the lowercased basename, with
+    any ``.exe`` suffix removed, must not be the bare ``python`` or
+    ``pythonw`` name, must start with the running implementation, and
+    its version part must match the running ``sys.version_info``.
+    """
+    name = Path(executable_path.lower()).name.partition(".exe")[0]
+    if name in {"python", "pythonw"}:
+        return None
+    if not name.startswith(implementation):
+        return None
+    try:
+        version = tuple(
+            int(part) for part in name.removeprefix(implementation).split(".")
+        )
+    except ValueError:
+        return None
+    return name if sys.version_info[: len(version)] == version else None
 
 
 def _add_environment_health(environment_path: Path) -> None:
@@ -529,40 +548,6 @@ class PythonLanguageVersionTests(unittest.TestCase):
                 )
         self.skipTest("pre-commit is not installed")
 
-    def test_prefers_pre_commit_own_default_version(self) -> None:
-        """Return pre-commit's own default version when it is importable."""
-        module = types.ModuleType("pre_commit.languages.python")
-        module.get_default_version = lambda: "python9.8"
-        package = types.ModuleType("pre_commit")
-        languages = types.ModuleType("pre_commit.languages")
-        package.languages = languages
-        with patch.dict(
-            sys.modules,
-            {
-                "pre_commit": package,
-                "pre_commit.languages": languages,
-                "pre_commit.languages.python": module,
-            },
-        ):
-            self.assertEqual("python9.8", checker._default_python_language_version())
-
-    def test_falls_back_when_pre_commit_is_not_importable(self) -> None:
-        """Run the independent mirror when the module cannot be imported.
-
-        Models the gate-rehearsal PATH: no versioned interpreter is
-        findable, so the major-only name is selected.
-        """
-        major_only = f"python{sys.version_info.major}"
-
-        def which(name: str) -> str | None:
-            return f"/usr/bin/{name}" if name == major_only else None
-
-        with (
-            patch.dict(sys.modules, {"pre_commit.languages.python": None}),
-            patch("shutil.which", side_effect=which),
-        ):
-            self.assertEqual(major_only, checker._default_python_language_version())
-
     def test_uses_versioned_interpreter_found_on_path(self) -> None:
         """Select the versioned executable when pre-commit would find it."""
         expected = f"python{sys.version_info.major}.{sys.version_info.minor}"
@@ -570,14 +555,65 @@ class PythonLanguageVersionTests(unittest.TestCase):
         def which(name: str) -> str | None:
             return f"/usr/bin/{name}" if name == expected else None
 
+        with patch("shutil.which", side_effect=which):
+            self.assertEqual(expected, _expected_python_env_name())
+
+    def test_uses_major_only_interpreter_found_on_path(self) -> None:
+        """Probe the major-only name next, as pre-commit does."""
+        expected = f"python{sys.version_info.major}"
+
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name == expected else None
+
+        with patch("shutil.which", side_effect=which):
+            self.assertEqual(expected, _expected_python_env_name())
+
+    def test_falls_back_to_the_running_interpreter_name(self) -> None:
+        """Accept the running interpreter's own name when no probe hits.
+
+        The ``major.minor.micro`` name differs from both probed names,
+        so only the ``sys.executable`` fallback can return it.
+        """
+        expected = (
+            f"python{sys.version_info.major}.{sys.version_info.minor}."
+            f"{sys.version_info.micro}"
+        )
+
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name == expected else None
+
         with (
-            # The wrapper prefers pre-commit's own function wherever
-            # pre_commit is importable, so force the import failure to
-            # exercise the independent mirror.
-            patch.dict(sys.modules, {"pre_commit.languages.python": None}),
             patch("shutil.which", side_effect=which),
+            patch("sys.executable", f"/opt/bin/{expected}"),
         ):
-            self.assertEqual(expected, checker._default_python_language_version())
+            self.assertEqual(expected, _expected_python_env_name())
+
+    def _assert_default_for(self, executable: str) -> None:
+        """Assert the mirror returns ``default`` for *executable* on PATH."""
+
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name == executable else None
+
+        with (
+            patch("shutil.which", side_effect=which),
+            patch("sys.executable", f"/opt/bin/{executable}"),
+        ):
+            self.assertEqual("default", _expected_python_env_name())
+
+    def test_rejects_names_that_do_not_name_the_running_version(self) -> None:
+        """Reject a findable name for another version or implementation."""
+        other = f"python{sys.version_info.major}.{sys.version_info.minor + 1}"
+        for executable in (other, "python-custom", "pypy3"):
+            with self.subTest(executable=executable):
+                self._assert_default_for(executable)
+
+    def test_returns_the_default_marker_when_nothing_resolves(self) -> None:
+        """Return pre-commit's ``default`` marker after every name fails."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("sys.executable", "/opt/bin/python"),
+        ):
+            self.assertEqual("default", _expected_python_env_name())
 
     def test_explicit_language_version_names_environment(self) -> None:
         """An explicit language_version selects that environment directory."""

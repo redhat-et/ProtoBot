@@ -37,20 +37,18 @@ Rules (ADR-0005):
   file exists; a ``from`` import of a name that the package
   initializer binds is an attribute, not a submodule; and relative
   imports resolve from the qualified package name of the importing
-  file, failing closed when they go above the top-level package or
-  resolve to no file. Repository files are inspected transitively for
+  file, then load with the same package-initializer, name, and
+  namespace-package handling as an absolute ``from`` import, failing
+  closed when they go above the top-level package or resolve to no
+  file. Repository files are inspected transitively for
   the imports that execute at import time: class bodies count.
   Function and method bodies are not scanned, because they do not
   execute at import time (``scripts/lint.py`` imports PyYAML inside
-  ``_load_config``).
-  An import inside the body of a ``try`` statement is an optional
-  dependency when one handler catches ``ImportError``,
-  ``Exception``, or every exception (a bare ``except``). An optional
-  dependency does not require installation, so the import is allowed
-  in the entry script and in repository files, at any nesting depth.
-  The ``else`` and ``finally`` bodies of the ``try`` statement are
-  not guarded. An import with an unrelated handler only, for example
-  ``except ValueError``, is still a violation.
+  ``_load_config``). A ``try`` handler does not excuse a third-party
+  import: a handler that only swallows ``ImportError``,
+  ``Exception``, or every exception (a bare ``except``) is not a
+  working fallback, so a guarded import is a violation like any
+  other (ADR-0005 item 1).
 * Every ``scripts/check_NAME.py`` gate checker has a companion hook
   that runs ``scripts/test_check_NAME.py``, so its negative fixtures
   run in the rehearsal.
@@ -87,9 +85,6 @@ THIRD_PARTY_FIX = (
 # redirection, substitution, and expansion; upgrade to a shell tokenizer
 # if an entry ever needs a quoted operator character.
 SHELL_METACHARACTERS = frozenset("&|;><`$\n\r")
-# A handler that names one of these exceptions, or a bare ``except``,
-# catches the ImportError that a missing dependency raises.
-OPTIONAL_DEPENDENCY_EXCEPTS = frozenset(("ImportError", "Exception"))
 
 
 @dataclass
@@ -443,19 +438,12 @@ def _import_diagnostics(script: str, tree: ast.Module, repo_root: Path) -> list[
 
 
 def _scan_imports(
-    imports: list[tuple[ast.Import | ast.ImportFrom, bool]],
+    imports: list[ast.Import | ast.ImportFrom],
     chain: tuple[ScanFrame, ...],
     state: ScanState,
 ) -> None:
-    """Inspect *imports* and every repository file they load.
-
-    An optional-dependency import is skipped: the module works
-    without the dependency installed, so neither the import nor a
-    repository file it names can break the gate.
-    """
-    for node, optional in imports:
-        if optional:
-            continue
+    """Inspect *imports* and every repository file they load."""
+    for node in imports:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 _scan_dotted_import(alias.name, chain, state)
@@ -520,8 +508,12 @@ def _scan_relative_import(
 
     The import resolves from the qualified package of the file being
     scanned (the last frame of *chain*), one package up per dot beyond
-    the first. Traversal above the top-level package, or a target
-    whose own module file is missing, fails closed.
+    the first: ``from .child import bad`` targets ``package.child``,
+    and ``from . import helper`` targets the package itself. The
+    target then loads with the same package-initializer, name, and
+    namespace-package handling as an absolute ``from`` import.
+    Traversal above the top-level package, or a target that resolves
+    to no repository file, fails closed.
     """
     frame = chain[-1]
     package = _relative_package(node.level, frame.package)
@@ -532,19 +524,20 @@ def _scan_relative_import(
         )
         state.diagnostics.append(_import_diagnostic(chain, problem, "fix the import"))
         return
-    targets = [node.module] if node.module else [alias.name for alias in node.names]
-    for target in targets:
-        qualified = f"{package}.{target}"
-        files = _relative_target_files(frame.base, qualified, state.repo_root)
-        if not files:
-            problem = (
-                f'uses relative import "{_relative_render(node)}" that resolves '
-                f'to no repository file for "{qualified}"'
-            )
-            state.diagnostics.append(
-                _import_diagnostic(chain, problem, "fix the import or add the module")
-            )
-            continue
+    module = f"{package}.{node.module}" if node.module else package
+    files = _from_import_files(node, module, frame.base, state.repo_root)
+    unresolved = _unresolved_relative_targets(
+        node, module, files, frame.base, state.repo_root
+    )
+    for qualified in unresolved:
+        problem = (
+            f'uses relative import "{_relative_render(node)}" that resolves '
+            f'to no repository file for "{qualified}"'
+        )
+        state.diagnostics.append(
+            _import_diagnostic(chain, problem, "fix the import or add the module")
+        )
+    if files:
         _scan_file_list(files, frame.base, chain, state)
 
 
@@ -562,17 +555,54 @@ def _relative_package(level: int, package: str | None) -> str | None:
     return ".".join(parts[: len(parts) - (level - 1)])
 
 
-def _relative_target_files(base: str, qualified: str, repo_root: Path) -> list[str]:
-    """Return the files for one relative target, requiring its own leaf.
+def _unresolved_relative_targets(
+    node: ast.ImportFrom,
+    module: str,
+    files: list[str],
+    base: str,
+    repo_root: Path,
+) -> list[str]:
+    """Return the qualified targets of one relative import with no file.
 
-    An ancestor package file alone does not satisfy a relative import:
-    the target module itself must exist.
+    *module* is the qualified target module. A named module target
+    (``from .child import bad``) is unresolved when no repository file
+    loaded at or below its own stem. A package-level name target
+    (``from . import helper``) is unresolved when the package
+    initializer does not bind the name and no submodule file loaded
+    for it.
     """
-    files = _module_files_in_base(base, qualified, repo_root)
-    stem = "/".join(([base] if base else []) + qualified.split("."))
-    if f"{stem}.py" in files or f"{stem}/__init__.py" in files:
-        return files
-    return []
+    stem = _module_stem(base, module)
+    if node.module:
+        return [] if _stem_loaded(stem, files) else [module]
+    initializer = _parse_repository_module(f"{stem}/__init__.py", repo_root)
+    unresolved: list[str] = []
+    for alias in node.names:
+        if initializer is not None and _binds_name(initializer, alias.name):
+            continue
+        if _stem_loaded(f"{stem}/{alias.name}", files):
+            continue
+        unresolved.append(f"{module}.{alias.name}")
+    return unresolved
+
+
+def _module_stem(base: str, module: str) -> str:
+    """Return the repository path stem of one qualified module in *base*."""
+    return "/".join(([base] if base else []) + module.split("."))
+
+
+def _stem_loaded(stem: str, files: list[str]) -> bool:
+    """Return True when one of *files* loaded at or below *stem*.
+
+    A module stem loads through its module file, its package
+    initializer, or a submodule file below it. Ancestor package
+    initializers alone do not count.
+    """
+    return any(
+        loaded == f"{stem}.py"
+        or loaded == f"{stem}/__init__.py"
+        or loaded.startswith(f"{stem}/")
+        for loaded in files
+    )
 
 
 def _relative_render(node: ast.ImportFrom) -> str:
@@ -791,8 +821,8 @@ def _dedupe(files: list[str]) -> list[str]:
     return list(dict.fromkeys(files))
 
 
-def _all_imports(tree: ast.Module) -> list[tuple[ast.Import | ast.ImportFrom, bool]]:
-    """Return every import in *tree*, at any nesting depth, with its guard."""
+def _all_imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]:
+    """Return every import in *tree*, at any nesting depth."""
     collector = _ImportCollector(module_scope_only=False)
     collector.visit(tree)
     return collector.imports
@@ -800,16 +830,14 @@ def _all_imports(tree: ast.Module) -> list[tuple[ast.Import | ast.ImportFrom, bo
 
 def _module_scope_imports(
     tree: ast.Module,
-) -> list[tuple[ast.Import | ast.ImportFrom, bool]]:
+) -> list[ast.Import | ast.ImportFrom]:
     """Return the imports that execute when the module is imported.
 
     Module-level ``if``, ``try``, and loop blocks run at import time,
     and so do class bodies, so their imports count. Function and async
     function bodies (including methods) run only when called, so their
-    imports do not: the repository treats a function-nested import as
-    an optional dependency that the module does not require at import
-    time (``scripts/lint.py`` imports PyYAML inside ``_load_config``).
-    Each returned import carries its optional-dependency guard state.
+    imports do not (``scripts/lint.py`` imports PyYAML inside
+    ``_load_config``).
     """
     collector = _ImportCollector(module_scope_only=True)
     collector.visit(tree)
@@ -817,46 +845,29 @@ def _module_scope_imports(
 
 
 class _ImportCollector(ast.NodeVisitor):
-    """Collect each import node and whether it is an optional dependency.
+    """Collect each import node in a module.
 
-    An import is an optional dependency when it is lexically inside
-    the body of a ``try`` statement one of whose handlers catches
-    ``ImportError``, ``Exception``, or every exception (a bare
-    ``except``): the module then works without the dependency
-    installed. The handlers, ``else`` body, and ``finally`` body of
-    that ``try`` statement gain no guard from it. A nested ``try``
-    body inherits the guard of an outer handler. When
-    *module_scope_only* is set, imports inside function and async
+    When *module_scope_only* is set, imports inside function and async
     function bodies are not collected: they run only when the function
     is called, not at module import time. Class bodies are always
-    collected: they run when the class statement runs.
+    collected: they run when the class statement runs. ``try``
+    statement bodies, handlers, ``else`` bodies, and ``finally``
+    bodies are collected like any other block: a handler that only
+    swallows ``ImportError`` is not a working fallback, so it does not
+    make an import optional.
     """
 
     def __init__(self, module_scope_only: bool) -> None:
-        self.imports: list[tuple[ast.Import | ast.ImportFrom, bool]] = []
+        self.imports: list[ast.Import | ast.ImportFrom] = []
         self._module_scope_only = module_scope_only
-        self._optional = False
 
     def visit_Import(self, node: ast.Import) -> None:
-        """Record one ``import`` statement with its guard state."""
-        self.imports.append((node, self._optional))
+        """Record one ``import`` statement."""
+        self.imports.append(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        """Record one ``from`` import statement with its guard state."""
-        self.imports.append((node, self._optional))
-
-    def visit_Try(self, node: ast.Try) -> None:
-        """Guard the ``try`` body when one handler catches a failed import."""
-        outer_optional = self._optional
-        self._optional = outer_optional or _has_optional_dependency_handler(node)
-        for statement in node.body:
-            self.visit(statement)
-        self._optional = outer_optional
-        for handler in node.handlers:
-            for statement in handler.body:
-                self.visit(statement)
-        for statement in (*node.orelse, *node.finalbody):
-            self.visit(statement)
+        """Record one ``from`` import statement."""
+        self.imports.append(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Descend into the body only when every nested import counts."""
@@ -864,29 +875,6 @@ class _ImportCollector(ast.NodeVisitor):
             self.generic_visit(node)
 
     visit_AsyncFunctionDef = visit_FunctionDef
-
-
-def _has_optional_dependency_handler(node: ast.Try) -> bool:
-    """Return True when one handler of *node* catches a failed import.
-
-    A bare ``except`` and a handler that names ``ImportError`` or
-    ``Exception``, alone or in a tuple, catch the ``ImportError`` a
-    missing dependency raises, so the ``try`` body holds optional
-    dependencies.
-    """
-    for handler in node.handlers:
-        if handler.type is None or _is_optional_dependency_except(handler.type):
-            return True
-    return False
-
-
-def _is_optional_dependency_except(exception_type: ast.expr) -> bool:
-    """Return True when *exception_type* names a failed-import handler."""
-    if isinstance(exception_type, ast.Name):
-        return exception_type.id in OPTIONAL_DEPENDENCY_EXCEPTS
-    if isinstance(exception_type, ast.Tuple):
-        return any(_is_optional_dependency_except(item) for item in exception_type.elts)
-    return False
 
 
 def _import_diagnostic(

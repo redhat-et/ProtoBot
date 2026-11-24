@@ -289,8 +289,8 @@ class CheckConfigTests(unittest.TestCase):
         self.assertIn("yaml", diagnostics[0])
         self.assertIn("scripts/check_widget.py", diagnostics[0])
 
-    def test_system_script_optional_dependency_import_passes(self) -> None:
-        """Allow a third-party import that a ``try`` handler guards."""
+    def test_system_script_try_import_of_third_party_fails(self) -> None:
+        """Reject a third-party import in a ``try``, whatever the handler."""
         sources = {
             "ImportError handler": (
                 "from __future__ import annotations\n"
@@ -320,7 +320,7 @@ class CheckConfigTests(unittest.TestCase):
                 "except (ImportError, ValueError):\n"
                 "    yaml = None\n"
             ),
-            "nested try inherits the guard": (
+            "nested try": (
                 "from __future__ import annotations\n"
                 "try:\n"
                 "    try:\n"
@@ -339,21 +339,6 @@ class CheckConfigTests(unittest.TestCase):
                 "        return 1\n"
                 "    return 0\n"
             ),
-        }
-        for label, source in sources.items():
-            with self.subTest(case=label):
-                self.write_config(
-                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
-                )
-                self.write_widget_scripts(source)
-
-                report = self.run_checker()
-
-                self.assertEqual([], report.diagnostics)
-
-    def test_system_script_unguarded_try_import_fails(self) -> None:
-        """Reject a third-party import in a ``try`` that no handler guards."""
-        sources = {
             "unrelated handler": (
                 "from __future__ import annotations\n"
                 "try:\n"
@@ -458,8 +443,8 @@ class CheckConfigTests(unittest.TestCase):
         self.assertIn("yaml", diagnostics[0])
         self.assertIn("scripts/helper.py", diagnostics[0])
 
-    def test_repository_module_class_body_guarded_import_passes(self) -> None:
-        """Allow a guarded import inside a repository module class body."""
+    def test_repository_module_class_body_guarded_import_fails(self) -> None:
+        """Reject a guarded import inside a repository module class body."""
         guarded_source = (
             "class Settings:\n"
             "    try:\n"
@@ -471,9 +456,11 @@ class CheckConfigTests(unittest.TestCase):
         self.write_widget_scripts("import helper\n")
         self.write_script("scripts/helper.py", guarded_source)
 
-        report = self.run_checker()
+        diagnostics = self.run_checker().diagnostics
 
-        self.assertEqual([], report.diagnostics)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/helper.py", diagnostics[0])
 
     def test_repository_module_function_nested_import_passes(self) -> None:
         """Allow a function-nested import in a repository module."""
@@ -483,16 +470,18 @@ class CheckConfigTests(unittest.TestCase):
 
         self.assertEqual([], self.run_checker().diagnostics)
 
-    def test_repository_module_optional_dependency_import_passes(self) -> None:
-        """Allow a guarded third-party import inside an imported module."""
+    def test_repository_module_guarded_import_fails(self) -> None:
+        """Reject a guarded third-party import inside an imported module."""
         guarded_source = "try:\n    import yaml\nexcept ImportError:\n    yaml = None\n"
         self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
         self.write_widget_scripts("import helper\n")
         self.write_script("scripts/helper.py", guarded_source)
 
-        report = self.run_checker()
+        diagnostics = self.run_checker().diagnostics
 
-        self.assertEqual([], report.diagnostics)
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/helper.py", diagnostics[0])
 
     def test_relative_import_resolves_and_scans_helper(self) -> None:
         """Resolve a relative import against the importing package."""
@@ -525,6 +514,17 @@ class CheckConfigTests(unittest.TestCase):
                 self.write_script("scripts/pkg/helper.py", "import os\n")
 
                 self.assertEqual([], self.run_checker().diagnostics)
+
+    def test_relative_import_bound_name_passes(self) -> None:
+        """Allow a relative name the package initializer binds."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import pkg.child\n")
+        self.write_script("scripts/pkg/__init__.py", "helper = None\n")
+        self.write_script("scripts/pkg/child.py", "from . import helper\n")
+
+        report = self.run_checker()
+
+        self.assertEqual([], report.diagnostics)
 
     def test_relative_import_parent_package_sibling_resolves(self) -> None:
         """Resolve ``from ..sibling`` inside ``pkg.sub.child`` to ``pkg.sibling``."""
@@ -574,6 +574,48 @@ class CheckConfigTests(unittest.TestCase):
         self.assertEqual(1, len(diagnostics))
         self.assertIn("missing_helper", diagnostics[0])
         self.assertIn("no repository file", diagnostics[0])
+
+    def test_relative_import_unbound_submodule_fails(self) -> None:
+        """Scan the submodule a relative ``from`` import names."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import pkg.outer\n")
+        self.write_script("scripts/pkg/__init__.py", "")
+        self.write_script("scripts/pkg/outer.py", "from .child import bad\n")
+        self.write_script("scripts/pkg/child/__init__.py", "")
+        self.write_script("scripts/pkg/child/bad.py", "import yaml\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/pkg/child/bad.py", diagnostics[0])
+
+    def test_relative_import_bound_submodule_passes(self) -> None:
+        """Do not scan a submodule the package initializer binds."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import pkg.outer\n")
+        self.write_script("scripts/pkg/__init__.py", "")
+        self.write_script("scripts/pkg/outer.py", "from .child import bad\n")
+        self.write_script("scripts/pkg/child/__init__.py", "bad = None\n")
+        self.write_script("scripts/pkg/child/bad.py", "import yaml\n")
+
+        report = self.run_checker()
+
+        self.assertEqual([], report.diagnostics)
+
+    def test_relative_import_namespace_target_fails(self) -> None:
+        """Scan a submodule below a relative namespace-package target."""
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import pkg.outer\n")
+        self.write_script("scripts/pkg/__init__.py", "")
+        self.write_script("scripts/pkg/outer.py", "from .child import bad\n")
+        self.write_script("scripts/pkg/child/bad.py", "import yaml\n")
+
+        diagnostics = self.run_checker().diagnostics
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("yaml", diagnostics[0])
+        self.assertIn("scripts/pkg/child/bad.py", diagnostics[0])
 
     def test_from_import_of_bound_name_skips_submodule(self) -> None:
         """Treat a name the package initializer binds as an attribute."""
