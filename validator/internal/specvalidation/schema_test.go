@@ -393,8 +393,8 @@ func TestValidateRecordSchema(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if len(tc.wantCodes) > 0 && len(tc.wantMessages) != len(tc.wantCodes) {
-				t.Fatalf("len(wantMessages)=%d != len(wantCodes)=%d", len(tc.wantMessages), len(tc.wantCodes))
+			if len(tc.wantFields) != len(tc.wantCodes) || len(tc.wantMessages) != len(tc.wantCodes) {
+				t.Fatalf("test case %q: slice length mismatch: wantCodes=%d, wantFields=%d, wantMessages=%d", tc.name, len(tc.wantCodes), len(tc.wantFields), len(tc.wantMessages))
 			}
 			diagnostics := schemaDiagnostics(Validate(tc.snapshot))
 			if len(tc.wantCodes) == 0 {
