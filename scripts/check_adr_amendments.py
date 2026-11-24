@@ -65,12 +65,14 @@ _STATUS_FIELD = re.compile(
     r"^[ \t]*>[ \t]*status:[ \t]*",
     re.IGNORECASE | re.MULTILINE,
 )
-# Ambiguous (fail-closed) match: any line that states a status with
-# 1-3 `*` or `_` emphasis characters (or none) and any letter case.
-# Used for whole-file protection and for the unexpected-status check;
-# a status-like line that is not canonical makes the run fail.
+# Ambiguous (fail-closed) match: any line that starts with an
+# optional blockquote marker and ``status:`` and states accepted or
+# superseded with any markup. The lookarounds treat ``_`` as markup,
+# not as a word character, so ``__Accepted__`` matches; a longer word
+# such as ``unaccepted`` does not. Used for whole-file protection; a
+# status-like line that is not canonical makes the run fail.
 _AMBIGUOUS_STATUS = re.compile(
-    r"^[ \t]*>[ \t]*status:[ \t]*(?:[*_]{1,3})?(?:accepted|superseded\b)",
+    r"^[ \t]*>[ \t]*status:.*(?<![A-Za-z0-9])(?:accepted|superseded)(?![A-Za-z0-9])",
     re.IGNORECASE | re.MULTILINE,
 )
 _AMENDMENT_MARKER = re.compile(

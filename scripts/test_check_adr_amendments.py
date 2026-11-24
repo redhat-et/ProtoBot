@@ -348,6 +348,20 @@ Superseded by ADR-0004; see docs/decisions/0004-adopt-protobot-v2.md.
                 text = f"# ADR-0010: Legacy\n\n{status_line}\n"
                 self.assertTrue(checker.is_protected(text))
 
+    def test_non_standard_status_markup_is_protected(self) -> None:
+        """Status lines with other markup than bold are protected (fail closed)."""
+        cases = [
+            "> Status: ****Accepted**** — September 2026",
+            "> Status: <b>Accepted</b> — September 2026",
+            "> Status: `Accepted` — September 2026",
+            "> Status: record accepted September 2026",
+        ]
+        for status_line in cases:
+            with self.subTest(status_line=status_line):
+                text = f"# ADR-0010: Legacy\n\n{status_line}\n"
+                self.assertTrue(checker.is_protected(text))
+        self.assertFalse(checker.is_protected(_PROPOSED_ADR))
+
     def test_alternate_emphasis_accepted_cannot_transition(self) -> None:
         """An alternate-emphasis Accepted status line cannot authorize a transition."""
         for status_line in [
@@ -1543,6 +1557,54 @@ class GitRepoCheckTests(unittest.TestCase):
             "ambiguous status header: > Status: __Accepted__ — September 2026",
             stderr.getvalue(),
         )
+
+    def test_four_star_status_header_fails_run_as_ambiguous(self) -> None:
+        """An unmodified ADR with a four-star status header fails the run."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace("**Accepted**", "****Accepted****"),
+            encoding="utf-8",
+        )
+        _git(
+            self.root,
+            "commit",
+            "--no-gpg-sign",
+            "-am",
+            "baseline with a four-star status header",
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc, _output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn(
+            "ambiguous status header: > Status: ****Accepted**** — September 2026",
+            stderr.getvalue(),
+        )
+
+    def test_four_star_status_header_rewrite_fails(self) -> None:
+        """An ADR with a four-star status header is protected from rewrites."""
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace("**Accepted**", "****Accepted****"),
+            encoding="utf-8",
+        )
+        _git(
+            self.root,
+            "commit",
+            "--no-gpg-sign",
+            "-am",
+            "baseline with a four-star status header",
+        )
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.", "Use JSONL storage instead."
+            ).replace("**Accepted**", "****Accepted****"),
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(1, rc)
+        self.assertIn("rewritten or replaced in place", output)
+        self.assertIn("Use one file per record.", output)
 
     def _commit_fenced_header_baseline(self) -> list[str]:
         """Commit a baseline whose Accepted status line sits inside a fence."""
