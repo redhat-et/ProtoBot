@@ -7,8 +7,9 @@ module downloads disabled, so the check needs no network access and no
 credentials; the Go module cache (or a vendor directory) must already
 hold the dependencies. The working tree is compared against the default
 base: the merge base of ``HEAD`` with the first of ``GITHUB_BASE_SHA``,
-``origin/$GITHUB_BASE_REF``, ``upstream/main``, ``origin/main``, or
-``main`` that resolves. When none resolves the tree is compared with
+``origin/$GITHUB_BASE_REF``, ``$GITHUB_BASE_REF``, ``upstream/main``,
+``origin/main``, or ``main`` that resolves (see
+``scripts/git_base.py``). When none resolves the tree is compared with
 ``HEAD`` itself, the base-relative checks (text immutability, deletion,
 replacement) cannot fire, and a note says so on stderr.
 Set ``PROTOBOT_VALIDATOR_BASE`` to compare against another revision; a
@@ -38,11 +39,16 @@ except ImportError:  # imported as ``scripts.<module>``
         is_dependency_error as _is_dependency_error,
     )
 
+try:
+    import git_base
+except ImportError:  # imported as ``scripts.<module>``
+    from scripts import git_base
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR_MODULE = Path("validator")
 VALIDATOR_PACKAGE = "./cmd/validator"
 BASE_ENV = "PROTOBOT_VALIDATOR_BASE"
-DEFAULT_BASE_CANDIDATES = ("upstream/main", "origin/main", "main")
+DEFAULT_BASE_CANDIDATES = git_base.DEFAULT_BASE_REF_CANDIDATES
 FALLBACK_NOTE = (
     "note: no default-branch ref resolved; comparing the working tree with "
     "HEAD, so base-relative checks are skipped"
@@ -72,32 +78,35 @@ def resolve_base(
 ) -> tuple[str, bool]:
     """Return ``(base_revision, base_is_head)`` for the validator run.
 
-    ``PROTOBOT_VALIDATOR_BASE`` wins when set. Otherwise the merge base of
-    ``HEAD`` and the first resolvable default-branch candidate is used, so
-    a feature branch is compared against where it diverged. When no
-    candidate resolves, the base is ``HEAD`` itself.
+    ``PROTOBOT_VALIDATOR_BASE`` wins when set, and is passed through
+    unresolved so the validator itself reports an invalid override. An
+    unresolvable or unresolved override is not retried against
+    ``git_base.resolve_comparison_base`` because an explicit override
+    should never be silently replaced by an automatically discovered
+    base. Otherwise the merge base of ``HEAD`` and the first resolvable
+    candidate from ``GITHUB_BASE_SHA``, ``GITHUB_BASE_REF``, or
+    ``DEFAULT_BASE_CANDIDATES`` is used (see
+    ``git_base.resolve_comparison_base``), so a feature branch is
+    compared against where it diverged. When no candidate resolves, the
+    base is ``HEAD`` itself.
     """
     environ = os.environ if env is None else env
-    head = _git(repo_root, "rev-parse", "--verify", "HEAD^{commit}")
     override = environ.get(BASE_ENV, "").strip()
     if override:
-        resolved = _git(repo_root, "rev-parse", "--verify", f"{override}^{{commit}}")
+        head = git_base.git_commit_sha(repo_root, "HEAD")
+        resolved = git_base.git_commit_sha(repo_root, override)
         return override, resolved is not None and resolved == head
-    candidates = []
-    if environ.get("GITHUB_BASE_SHA"):
-        candidates.append(environ["GITHUB_BASE_SHA"])
-    if environ.get("GITHUB_BASE_REF"):
-        candidates.append(f"origin/{environ['GITHUB_BASE_REF']}")
-    candidates.extend(DEFAULT_BASE_CANDIDATES)
-    for candidate in candidates:
-        if candidate.startswith("-"):
-            continue
-        if _git(repo_root, "rev-parse", "--verify", f"{candidate}^{{commit}}") is None:
-            continue
-        merge_base = _git(repo_root, "merge-base", "HEAD", candidate)
-        if merge_base:
-            return merge_base, merge_base == head
-    return "HEAD", True
+    base, is_head = git_base.resolve_comparison_base(
+        repo_root,
+        env={
+            "GITHUB_BASE_SHA": environ.get("GITHUB_BASE_SHA", ""),
+            "GITHUB_BASE_REF": environ.get("GITHUB_BASE_REF", ""),
+        },
+        default_candidates=DEFAULT_BASE_CANDIDATES,
+    )
+    if base is None:
+        return "HEAD", True
+    return base, is_head
 
 
 def build_validator(
@@ -138,7 +147,7 @@ def check(repo_root: Path = REPO_ROOT, env: dict[str, str] | None = None) -> int
     """Build the validator and run it on *repo_root*. Returns an exit code."""
     environ = os.environ if env is None else env
     override = environ.get(BASE_ENV, "").strip()
-    if override.startswith("-"):
+    if override and not git_base.is_safe_git_ref(override):
         print(f"{BASE_ENV} must not start with '-': {override!r}", file=sys.stderr)
         return 1
     base, base_is_head = resolve_base(repo_root, env)

@@ -19,6 +19,11 @@ a silent skip.
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
 ``HEAD`` for local uncommitted checks when the file is not on the baseline.
+An explicit ref, ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, or
+``GITHUB_BASE_REF`` that looks like a git option (e.g. ``-h`` or
+``--upload-pack=...``) is rejected before use, via the shared
+``scripts/git_base.py`` helper also used by
+``scripts/check_spec_validator.py`` and ``scripts/check_baseline_ratchet.py``.
 """
 
 from __future__ import annotations
@@ -32,6 +37,11 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
+
+try:
+    from git_base import is_safe_git_ref
+except ImportError:  # imported as ``scripts.<module>``
+    from scripts.git_base import is_safe_git_ref
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -799,6 +809,8 @@ def resolve_baseline_ref(
         return None
 
     if explicit_ref:
+        if not is_safe_git_ref(explicit_ref):
+            return None
         resolved = _resolve_commit(explicit_ref)
         if not resolved and _fetch_target(repo_root, explicit_ref):
             clean_ref = explicit_ref
@@ -818,6 +830,8 @@ def resolve_baseline_ref(
 
     from_ref = os.environ.get("PRE_COMMIT_FROM_REF")
     if from_ref:
+        if not is_safe_git_ref(from_ref):
+            return None
         resolved = _resolve_commit(from_ref)
         if not resolved and _fetch_target(repo_root, from_ref):
             clean_ref = from_ref
@@ -838,6 +852,8 @@ def resolve_baseline_ref(
 
     base_sha = os.environ.get("GITHUB_BASE_SHA")
     if base_sha:
+        if not is_safe_git_ref(base_sha):
+            return None
         resolved = _resolve_commit(base_sha)
         if not resolved and _fetch_target(repo_root, base_sha):
             resolved = _resolve_commit(base_sha)
@@ -847,6 +863,8 @@ def resolve_baseline_ref(
 
     base_ref = os.environ.get("GITHUB_BASE_REF")
     if base_ref:
+        if not is_safe_git_ref(base_ref):
+            return None
         clean_base = base_ref
         for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
             if clean_base.startswith(prefix):

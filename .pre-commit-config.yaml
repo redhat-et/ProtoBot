@@ -396,3 +396,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^(scripts/(select_comparison_base|test_select_comparison_base)\.py|\.github/workflows/ci-workflow\.yaml)$
+      - id: test-git-base
+        name: test-git-base
+        entry: python3 scripts/test_git_base.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(git_base|test_git_base|check_adr_amendments|check_spec_validator|check_baseline_ratchet)\.py$
