@@ -736,8 +736,9 @@ It extends Decision item 1 and Consequences:
 
 **[Amended November 2026, #560]**
 
-On 2026-11-24, commit `23da589` replaced duplicated per-module CI jobs with a
-shared composite action. The commit also added the `drafting-table` CI job.
+On 2026-11-24, the pull request for issue #560 replaced duplicated per-module
+CI jobs with a shared composite action. The change also added the
+`drafting-table` CI job.
 
 The composite action at `.github/actions/check-go-module/action.yaml` runs
 standard Go checks. It sets up Go, downloads module dependencies, checks
@@ -753,9 +754,9 @@ work that this record assigned to issue #560.
 
 One shared action definition removes per-job configuration drift. That drift
 caused repeated review cycles on PR #542. The new `drafting-table` job closes
-the silent test coverage gap for that module. Commit `4e276f2` cleared
-pre-existing `golangci-lint` findings in `drafting-table` so the new job
-passes.
+the silent test coverage gap for that module. A prerequisite commit in the
+same pull request cleared pre-existing `golangci-lint` findings in
+`drafting-table` so the new job passes.
 
 No architecture document changes accompany this amendment.
 

@@ -339,6 +339,53 @@ class WorkflowBindingTests(unittest.TestCase):
                 self.assertEqual("off", step["env"]["GOWORK"])
                 self.assertEqual("${{ inputs.module-path }}", step["working-directory"])
 
+    def test_action_wires_the_module_cache(self) -> None:
+        self._action_step("Resolve module cache inputs")
+        setup = self._action_step("Set up Go")
+        self.assertEqual(
+            "${{ steps.module.outputs.go-sum != '' }}", setup["with"]["cache"]
+        )
+        self.assertEqual(
+            "${{ steps.module.outputs.go-sum }}",
+            setup["with"]["cache-dependency-path"],
+        )
+
+    def _run_module_cache_step(self, root: Path, module_path: str) -> str:
+        step = self._action_step("Resolve module cache inputs")
+        output_path = root / "github-output"
+        subprocess.run(
+            ["bash", "-c", step["run"]],
+            cwd=root,
+            env={
+                **os.environ,
+                "MODULE_PATH": module_path,
+                "GITHUB_OUTPUT": str(output_path),
+            },
+            check=True,
+            text=True,
+        )
+        return output_path.read_text(encoding="utf-8")
+
+    def test_module_cache_step_publishes_the_go_sum_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            module = root / "module-with-sum"
+            module.mkdir()
+            (module / "go.sum").write_text("", encoding="utf-8")
+            self.assertEqual(
+                "go-sum=module-with-sum/go.sum\n",
+                self._run_module_cache_step(root, "module-with-sum"),
+            )
+
+    def test_module_cache_step_publishes_an_empty_value_without_go_sum(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "module-without-sum").mkdir()
+            self.assertEqual(
+                "go-sum=\n",
+                self._run_module_cache_step(root, "module-without-sum"),
+            )
+
     def test_steps_run_in_dependency_order(self) -> None:
         order = [
             "Run shared Go module checks",
@@ -364,8 +411,19 @@ class WorkflowBindingTests(unittest.TestCase):
     def test_job_has_no_condition(self) -> None:
         self.assertNotIn("if", self.job)
 
-    def test_gate_requires_the_validator_job(self) -> None:
-        self.assertIn("validator", self.workflow["jobs"]["ci-success"]["needs"])
+    def test_gate_requires_every_required_job(self) -> None:
+        needs = self.workflow["jobs"]["ci-success"]["needs"]
+        for job in (
+            "pre-commit",
+            "go",
+            "spec",
+            "validator",
+            "scm",
+            "wms",
+            "drafting-table",
+        ):
+            with self.subTest(job=job):
+                self.assertIn(job, needs)
 
 
 if __name__ == "__main__":

@@ -79,8 +79,8 @@ jobs:
           submodules: recursive
 
       - name: Run shared Go module checks
-        # The $/ self-repository form needs a newer actionlint than
-        # this repository verifies with. Use the local path.
+        # actionlint rejects the $/ form and zizmor prefers it. Keep
+        # the local path and the ignore below.
         uses: ./.github/actions/check-go-module # zizmor: ignore[self-repository]
         with:
           module-path: ears-manager
