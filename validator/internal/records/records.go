@@ -64,12 +64,14 @@ type InterfaceRecord struct {
 	Description string `yaml:"description"`
 }
 
-// requirementIDPattern is REQ-<SCOPE>-<NNNNN>: an uppercase scope tag
-// of alphanumeric segments separated by single hyphens, and a
-// five-digit sequence. Consecutive or trailing hyphens in the scope
-// are rejected. ADR-0002 and the V2 requirement record define the
-// REQ-<SCOPE>-<NNNNN> format; this pattern additionally enforces the
-// single-hyphen scope segmentation rule.
+// requirementIDPattern is REQ-<SCOPE>-<NNNNN>: a scope tag whose
+// first segment begins with an uppercase letter and whose segments
+// are alphanumeric, separated by single hyphens, followed by a
+// five-digit sequence. Consecutive, leading, or trailing hyphens in
+// the scope are rejected. ADR-0002 and the V2 requirement record
+// define the REQ-<SCOPE>-<NNNNN> format; this pattern additionally
+// enforces the single-hyphen scope segmentation rule and the
+// letter-start requirement for the initial segment.
 var requirementIDPattern = regexp.MustCompile(`^REQ-[A-Z][A-Z0-9]*(-[A-Z0-9]+)*-[0-9]{5}$`)
 
 // ValidateRequirementID returns an error if id does not match REQ-<SCOPE>-<NNNNN>.
