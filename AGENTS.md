@@ -4,13 +4,14 @@
   `python scripts/lint.py` for `pre-commit run`; pre-install tools and
   populate the hook cache with `pre-commit install-hooks`.
   Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
-  (specific files), `--check-parity` (validate config and offline hook
-  cache), `--online-if-ci` (allow network when CI=true).
-  Affected Go modules must pass `gofmt` and `go vet` before committing.
+  (specific files), `--check-parity` (validate config and hook cache),
+  `--online-if-ci` (allow network when CI=true).
+  Go changes must pass `gofmt` and `go vet` across affected Go modules
+  before committing.
 - The upstream repository is `redhat-et/protobot`. Ensure pull requests
   target this repository.
 - Agent skills live in `.agents/skills/`; `.claude/skills` symlinks
-  there. Do not add skills under `.claude/` directly.
+  there. Do not add them under `.claude/` directly.
 
 ## Workflow files and CI boundaries
 
@@ -38,36 +39,34 @@ ratcheted by
 [`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
 
 1. **Respect the prompt context budget.** Never raise or delete a
-   `.skillsaw-baseline.json` ceiling row while the file that the ceiling
-   tracks still exists. After a genuine prose shrink, lower the
-   `agents-md` warn limit in
+   `.skillsaw-baseline.json` ceiling row for an existing file. After a
+   genuine prose shrink, lower the `agents-md` warn limit in
    `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
-   downward (`.skillsaw.yaml:19-20`).
+   down (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
 3. **Review agents must recognize budget consolidation.** Treat prose
-   consolidation offsetting an `AGENTS.md` addition as budget compliance,
+   consolidation offsetting a new `AGENTS.md` addition as budget compliance,
    not scope creep, if it omits no governance requirement, defined
    keyword, or diagnostic name and introduces no undeclared alias or
-   terminology drift. It does not exempt entries from sibling-entry or
-   intra-entry terminology rules.
+   terminology drift. Consolidation does not exempt entries from
+   sibling-entry or intra-entry terminology rules.
 
 ## Rules for creating or modifying sibling entries
 
-A governed scope defines applicability; its list or governed collection
-defines the sibling set. A **module README** is the top-level
-`README.md` of a directory with a `go.mod`.
+A governed scope defines a domain of applicability; its list or
+governed collection defines the sibling set. A **module README** is
+the top-level `README.md` of a directory with a `go.mod`.
 
-When creating or modifying a numbered rule in `AGENTS.md`,
-specification document under `docs/`, skill file under
-`.agents/skills/`, module README, or entry in a future governed scope,
-agents must follow these rules. Review agents must enforce these rules
-reflexively on PRs that create, modify, or consolidate entries within
-`AGENTS.md` itself.
+When creating or modifying a numbered rule in `AGENTS.md`, specification
+document under `docs/`, skill file under `.agents/skills/`, module
+README, or an entry in a future governed scope, agents must follow these
+rules. Review agents must enforce these rules reflexively on PRs that
+create, modify, or consolidate entries within `AGENTS.md` itself.
 
 1. **Read all sibling entries first.** Read every other entry in the
-   list or governed collection before drafting or revising an entry.
+   list or governed collection before drafting or revising one.
 
 2. **Reuse established terminology.** Match sibling entries' terms for
    the same concepts. An undeclared alias for a term already used in the
@@ -93,9 +92,8 @@ reflexively on PRs that create, modify, or consolidate entries within
 
 ### Examples of sibling entries
 
-Numbered rules in `AGENTS.md` (other rules in the list); specification
-documents under `docs/` (other governed Markdown files); skill files under
-`.agents/skills/` (other skill files); module READMEs (other module READMEs
+Numbered rules in `AGENTS.md`; specification documents under `docs/`;
+skill files under `.agents/skills/`; module READMEs (other module READMEs
 and `docs/` specification documents describing the module).
 
 ## Specification document hierarchy
@@ -150,13 +148,13 @@ must follow these rules:
 
 1. **Account for all components, interfaces, and constraints.**
    New or revised specification documents must account for every
-   component, interface, and constraint enumerated in
+   component, interface, and constraint in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md`, and must address, not
-   silently omit, those relevant to the document's scope.
+   `docs/architecture/overview.md`, and address, not silently
+   omit, those relevant to their scope.
 
 2. **Verify deployment topology, security posture, and
-   persistent state coverage.** Cross-check against
+   persistent state coverage.** Cross-check
    `docs/architecture/overview.md` and `docs/architecture.md`:
    deployment topology (single-player, multi-player, web),
    security posture (credential isolation, sandbox
@@ -207,27 +205,29 @@ must follow these rules:
    On the recorded PR head checkout or worktree, run
    `ears-manager check --base-ref` with the full SHA from
    `git merge-base <default-branch-ref> HEAD`; a base-branch check is not
-   evidence. Require it to pass
-   without `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. Each registered artifact path or
-   canonical-content delta must match the `artifact_id` of a proposed
-   change set's `artifact_operations[]` entry. The check rejects
-   unregistration of an artifact-registry entry present on the comparison
-   base (the default-branch tree, or the commit named by `--base-ref`). It
-   confirms manifest association only, not that `ears-manager artifact
-   put` was invoked; metadata-only (`kind`, `owner`, `validator`) changes
-   require no artifact operation. Reviewers must flag identifiable hand
-   edits, not claim CLI
-   provenance from an operation record. Findings should include each
-   listed diagnostic and any hand edit in that registered specification
-   artifact or
-   [.protobot/project.yaml](.protobot/project.yaml); Rule 4 staleness
-   findings must prescribe `ears-manager artifact put`, not a hand edit.
+   evidence. Require it to pass without
+   `artifact.digest_mismatch`, `artifact.operation_missing`, or
+   `artifact.unregistered`. The check requires each registered artifact
+   path or canonical-content delta to match an `artifact_id` in an
+   `artifact_operations[]` entry in a proposed change set, and
+   rejects unregistration of an artifact-registry entry present on the
+   comparison base (the merge base in CI and review). It confirms
+   manifest association only, not that
+   `ears-manager artifact put` was invoked; metadata-only changes to an
+   artifact-registry entry (`kind`, `owner`, `validator`) require no
+   artifact operation. Reviewers must flag identifiable hand edits, not
+   claim CLI provenance from an operation record. Findings should include
+   each listed diagnostic and any identified hand edit in the registered
+   specification artifact or
+   [.protobot/project.yaml](.protobot/project.yaml);
+   when Rule 4 identifies staleness in a registered specification
+   artifact, a staleness finding must prescribe `ears-manager artifact put`,
+   not a hand edit.
 
 7. **Preserve accepted architecture decision records.**
    Accepted architecture decision records (`docs/decisions/`) are
-   immutable historical records; accepted decision text is never
-   rewritten or replaced in place. When design evolution amends an accepted
+   immutable historical records. Never rewrite or replace accepted
+   decision text in place. When design evolution amends an accepted
    architecture decision record, append a dated amendment block
    (`**[Amended Month Year]**`) with the change, its rationale, and
    references to updated architecture documents; review agents must
@@ -250,12 +250,12 @@ agents must follow these rules:
 
 2. **Match structural conventions, not behavioral fields.**
    Behavioral fields like dispatch parameters must follow the skill's own
-   requirements, not copied sibling configuration, which can produce
+   requirements, not copied sibling configuration, which can cause
    incorrect dispatch or workflow behavior.
 
 3. **Link a GitHub issue or justify why none is needed.**
    When reversing or correcting a business rule, link an issue describing
-   the incorrect prior behavior and impact, or justify why none was filed
+   incorrect prior behavior and impact, or justify why none was filed
    in the PR description with that substance; comment acknowledgments do
    not qualify. Omitting both or a vacuous justification is a defect.
    Gating-condition or gated-action diffs (e.g., status moves) are in
@@ -288,15 +288,15 @@ agents must:
    `user-invocable`, `allowed-tools`, or `$ARGUMENTS`.
 
 3. **Use ProtoBot's defined vocabulary.** State-driven EARS
-   uses `While`, not undeclared aliases. Persisting skills use
-   ADR-0002 relationships (`depends-on`,
+   uses `While`, not undeclared aliases. Skills persisting
+   records use ADR-0002 relationships (`depends-on`,
    `conflicts-with`, `supersedes`, `related-to`); host-independent
    skills use non-persisted companion-role labels for suggested
    companions.
 
-4. **Emit machine-separable fields.** Host-independent elicitation skills
-   emit portable-response fields defined in
-   [`ears-and-review.md`][ears-and-review-doc]
+4. **Emit machine-separable fields.** Distinguish vocabulary
+   by layer: host-independent elicitation skills emit portable-response
+   fields defined in [`ears-and-review.md`][ears-and-review-doc]
    ("Portable Response", including `Responsible system`). Cite the
    [Adapter Contract][agent-harness-doc] only for host-mapping named
    fields (`Affected interfaces`, `Observable at the named boundary alone`)
