@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated_by": "skillsaw 0.23.0",
-  "generated_at": "2026-11-24T16:25:32.828619+00:00",
+  "generated_at": "2026-11-24T16:48:14.725355+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -60,6 +60,14 @@
       "severity": "info"
     },
     {
+      "fingerprint": "12285de0d00ebc6e",
+      "rule_id": "content-section-length",
+      "file_path": "AGENTS.md",
+      "line": 56,
+      "message": "Section 'Rules for creating or modifying sibling entries' is ~572 tokens (max recommended: 500)",
+      "severity": "info"
+    },
+    {
       "fingerprint": "bf6aff1c1a975087",
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
@@ -72,7 +80,7 @@
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
       "line": 144,
-      "message": "Section 'Rules for creating or modifying specification documents' is ~1226 tokens (max recommended: 500)",
+      "message": "Section 'Rules for creating or modifying specification documents' is ~1216 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
@@ -359,9 +367,9 @@
       "fingerprint": "9ac2052ca695ae1d",
       "rule_id": "context-budget",
       "file_path": "AGENTS.md",
-      "message": "Estimated 3,967 tokens exceeds agents-md warn limit of 3,900",
+      "message": "Estimated 3,965 tokens exceeds agents-md warn limit of 3,900",
       "severity": "warning",
-      "value": 3967,
+      "value": 3965,
       "baseline_mode": "ceiling"
     }
   ]

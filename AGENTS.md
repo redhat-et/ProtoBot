@@ -42,7 +42,7 @@ ratcheted by
    `.skillsaw-baseline.json` ceiling row for an existing file. After a
    genuine prose shrink, lower the `agents-md` warn limit in
    `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
-   down (`.skillsaw.yaml:19-20`).
+   down.
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
@@ -90,11 +90,11 @@ create, modify, or consolidate entries within `AGENTS.md` itself.
    check this restatement. Findings should include intra-entry
    terminology drift, not only sibling-entry terminology matching.
 
-### Examples of sibling entries
-
-Numbered rules in `AGENTS.md`; specification documents under `docs/`;
-skill files under `.agents/skills/`; module READMEs (other module READMEs
-and `docs/` specification documents describing the module).
+**Examples of sibling entries:** numbered rules in `AGENTS.md` (other
+rules in the list); specification documents under `docs/` (other governed
+Markdown files); skill files under `.agents/skills/` (other skill files);
+module READMEs (other module READMEs and `docs/` specification documents
+describing the module).
 
 ## Specification document hierarchy
 
@@ -167,7 +167,7 @@ must follow these rules:
    interfaces, and constraints from `components.md` and
    `overview.md`. Findings should include coverage gaps, not
    only formatting and cross-reference matching. Do not raise
-   a hierarchy-membership finding for an unlisted `docs/` file.
+   hierarchy-membership findings for unlisted `docs/` files.
    Checks must go beyond link freshness and heading alignment:
    register new capabilities where `components.md` enumerates
    them, avoid conflicting with principles in `overview.md`
@@ -202,7 +202,7 @@ must follow these rules:
    [.protobot/project.yaml](.protobot/project.yaml), inspect the
    affected registered specification artifact or project configuration for
    hand edits under Rule 5.
-   On the recorded PR head checkout or worktree, run
+   On the PR head, run
    `ears-manager check --base-ref` with the full SHA from
    `git merge-base <default-branch-ref> HEAD`; a base-branch check is not
    evidence. Require it to pass without
@@ -210,7 +210,7 @@ must follow these rules:
    `artifact.unregistered`. The check requires each registered artifact
    path or canonical-content delta to match an `artifact_id` in an
    `artifact_operations[]` entry in a proposed change set, and
-   rejects unregistration of an artifact-registry entry present on the
+   rejects unregistering an artifact-registry entry present on the
    comparison base (the merge base in CI and review). It confirms
    manifest association only, not that
    `ears-manager artifact put` was invoked; metadata-only changes to an
@@ -273,18 +273,18 @@ agents must follow these rules:
 ### Aligning skills with the specification hierarchy
 
 A skill implementing or describing a ProtoBot or Specification
-Toolkit capability must remain consistent with every governed `docs/`
-Markdown document. When creating, modifying, or reviewing such a skill,
-agents must:
+Toolkit capability must be consistent with every governed `docs/`
+Markdown document. When creating, modifying, or reviewing one, agents
+must:
 
 1. **Register new Toolkit capabilities.** Add the capability to
-   `components.md`, and distinguish it from repository process
+   `components.md` and distinguish it from repository process
    skills.
 
 2. **Keep Toolkit frontmatter harness-agnostic.** Use `name`
    and `description` only, as required by the
    [Agent Harness Adapter Contract][agent-harness-doc]. Do not
-   add harness-specific fields or placeholders such as
+   add harness-specific fields or placeholders like
    `user-invocable`, `allowed-tools`, or `$ARGUMENTS`.
 
 3. **Use ProtoBot's defined vocabulary.** State-driven EARS
@@ -298,7 +298,7 @@ agents must:
    by layer: host-independent elicitation skills emit portable-response
    fields defined in [`ears-and-review.md`][ears-and-review-doc]
    ("Portable Response", including `Responsible system`). Cite the
-   [Adapter Contract][agent-harness-doc] only for host-mapping named
+   [Adapter Contract][agent-harness-doc] only when mapping named
    fields (`Affected interfaces`, `Observable at the named boundary alone`)
    onto ADR-0002 persistence fields (`applies_to`, `verification.mode`).
    Do not demand persistence fields from host-independent skills;
@@ -309,5 +309,5 @@ agents must:
    the skill against the specification hierarchy, not only
    sibling skills. Findings should include
    capability-registration gaps, harness-specific frontmatter
-   that violates Toolkit skill rules, and terminology that
-   conflicts with `overview.md` or `components.md`.
+   that violates Toolkit skill rules, and terminology
+   conflicting with `overview.md` or `components.md`.
