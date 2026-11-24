@@ -4,7 +4,7 @@
   `python scripts/lint.py` for `pre-commit run`; pre-install tools and
   populate the hook cache with `pre-commit install-hooks`.
   Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
-  (specific files), `--check-parity` (validate config and hook cache),
+  (specific files), `--check-parity` (validate config and offline hook cache),
   `--online-if-ci` (allow network when CI=true).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
@@ -39,8 +39,8 @@ rejects a `.skillsaw-baseline.json` ceiling increase.
 
 1. **Respect the prompt context budget.** Never raise or delete a
    `.skillsaw-baseline.json` ceiling row for an existing file. After a
-   genuine prose shrink, lower the `agents-md` warn limit in
-   `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
+   genuine prose shrink, lower the `agents-md` warn limit, then run
+   `skillsaw baseline` to ratchet the ceiling
    down.
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
@@ -68,7 +68,7 @@ create, modify, or consolidate entries within `AGENTS.md` itself.
    list or governed collection before drafting or revising one.
 
 2. **Reuse established terminology.** Match sibling entries' terms for
-   the same concepts. An undeclared alias for a term already used in the
+   the same concepts. An undeclared alias for a term used in the
    same list or governed collection is a defect.
 
 3. **Review agents must check sibling-entry terminology.** When reviewing
@@ -89,11 +89,12 @@ create, modify, or consolidate entries within `AGENTS.md` itself.
    check this restatement. Findings should include intra-entry
    terminology drift, not only sibling-entry terminology matching.
 
-**Examples of sibling entries:** numbered rules in `AGENTS.md` (other
-rules in the list); specification documents under `docs/` (other governed
-Markdown files); skill files under `.agents/skills/` (other skill files);
-module READMEs (other module READMEs and `docs/` specification documents
-describing the module).
+### Examples of sibling entries
+
+Numbered rules in `AGENTS.md` (other rules in the list); specification
+documents under `docs/` (other governed Markdown files); skill files under
+`.agents/skills/` (other skill files); module READMEs (other module READMEs
+and `docs/` specification documents describing the module).
 
 ## Specification document hierarchy
 
@@ -206,8 +207,8 @@ must follow these rules:
    `git merge-base <default-branch-ref> HEAD`; a base-branch check is not
    evidence. Require it to pass without
    `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. The check requires each registered artifact
-   path or canonical-content delta to match an `artifact_id` in an
+   `artifact.unregistered`. The check matches each registered artifact
+   path or canonical-content delta to an `artifact_id` in an
    `artifact_operations[]` entry in a proposed change set, and
    rejects unregistering an artifact-registry entry present on the
    comparison base (the default-branch tree, or the commit named by
@@ -216,8 +217,9 @@ must follow these rules:
    artifact-registry entry (`kind`, `owner`, `validator`) require no
    artifact operation. Reviewers must flag identifiable hand edits, not
    claim CLI provenance from an operation record. Findings should include
-   each listed diagnostic and any identified hand edit in the affected
-   artifact or project configuration;
+   each listed diagnostic and any hand edit in the inspected
+   registered specification artifact or
+   [.protobot/project.yaml](.protobot/project.yaml);
    when Rule 4 identifies staleness in a registered specification
    artifact, a staleness finding must prescribe `ears-manager artifact put`,
    not a hand edit.
@@ -296,7 +298,7 @@ must:
    by layer: host-independent elicitation skills emit portable-response
    fields defined in [`ears-and-review.md`][ears-and-review-doc]
    ("Portable Response", including `Responsible system`). Cite the
-   [Adapter Contract][agent-harness-doc] only when mapping named
+   [Adapter Contract][agent-harness-doc] only for host-mapping named
    fields (`Affected interfaces`, `Observable at the named boundary alone`)
    onto ADR-0002 persistence fields (`applies_to`, `verification.mode`).
    Do not demand persistence fields from host-independent skills;
