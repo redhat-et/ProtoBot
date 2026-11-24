@@ -221,17 +221,17 @@ must follow these rules:
    artifact, a staleness finding must prescribe `ears-manager artifact put`,
    not a hand edit.
 
-7. **Preserve accepted architecture decision records.**
-   Accepted architecture decision records (`docs/decisions/`) are
-   immutable historical records. Never rewrite or replace accepted
-   decision text in place. When design evolution amends an accepted
-   architecture decision record, append a dated amendment block
-   (`**[Amended Month Year]**`) with the change, its rationale, and
-   references to updated architecture documents; review agents must
-   verify no in-place rewrite or replacement and each amendment
-   appends the dated amendment block (`**[Amended Month Year]**`) with
-   the change, its rationale, and references to updated architecture
-   documents.
+7. **Preserve accepted and superseded architecture decision records.**
+   Accepted and superseded records under `docs/decisions/` are
+   immutable: never rewritten or replaced in place, never deleted or
+   renamed, even after supersession or component retirement. To amend a
+   record, append a dated amendment block citing the change, its
+   rationale, and updated architecture documents. The only authorized
+   transition is one dated accepted-to-superseded status-line change per
+   the [supersession
+   skill](.agents/skills/adr-supersession/SKILL.md). Review agents must
+   verify no in-place rewrite, deletion, or rename, and amendments and
+   transitions match it.
 
 ## Agent skills
 
