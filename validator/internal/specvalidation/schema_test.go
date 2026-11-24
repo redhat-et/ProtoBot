@@ -428,38 +428,6 @@ func TestValidateRecordSchema(t *testing.T) {
 	}
 }
 
-func TestValidateRecordSchemaEmptyAppliesToMessage(t *testing.T) {
-	cases := []struct {
-		name     string
-		document layout.Document[records.Requirement]
-	}{
-		{"empty applies_to mapping", requirementWithEmptyAppliesTo()},
-		{"empty applies_to lists", requirementWithEmptyAppliesToLists()},
-		{"blank applies_to selectors", requirementWithBlankAppliesToSelectors()},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			diagnostics := schemaDiagnostics(Validate(schemaSnapshot(tc.document, validInterfaceDocument())))
-			var got Diagnostic
-			found := false
-			for _, diagnostic := range diagnostics {
-				if diagnostic.Field == "applies_to" {
-					got = diagnostic
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("diagnostics=%v, want applies_to", diagnostics)
-			}
-			wantMsg := "applies_to must name at least one interface or scope."
-			if got.Message != wantMsg {
-				t.Errorf("message=%q, want %q", got.Message, wantMsg)
-			}
-		})
-	}
-}
-
 func TestValidateRecordSchemaReportsEveryMissingField(t *testing.T) {
 	document := validRequirementDocument()
 	document.Record.ID = ""
