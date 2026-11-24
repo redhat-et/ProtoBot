@@ -1,8 +1,0 @@
-# managed by ears-manager; do not edit by hand
-id: protobot-cli
-name: ProtoBot CLI
-type: cli
-spec_approach: prose
-description: Command-line interface for project governance and specification validation.
-created: "2026-10-05T16:01:00Z"
-status: active

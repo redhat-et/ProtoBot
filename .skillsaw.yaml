@@ -26,4 +26,4 @@ rules:
     # while AGENTS.md still exists.
     limits:
       agents-md:
-        warn: 3900
+        warn: 3300

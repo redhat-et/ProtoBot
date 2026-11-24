@@ -10,11 +10,9 @@ extends: default
 #   bundle/**
 
 # fullsend.yaml and prioritize.yaml are managed by fullsend, not editable here.
-# .protobot/ is canonical ears-manager encoding, not hand-edited YAML.
 ignore: |
   .github/workflows/fullsend.yaml
   .github/workflows/prioritize.yml
-  .protobot/
 
 rules:
   comments:  # renovate-bot dosen't put 2 spaces before the version number

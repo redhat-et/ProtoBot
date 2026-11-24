@@ -9,12 +9,18 @@ PYTHONDONTWRITEBYTECODE=1 OPENCODE_BIN=/path/to/opencode-1.18.30/bin/opencode \
   python -m unittest discover -s tests/drafting-table -p 'test_*.py' -v
 ```
 
-The driver builds the real `ears-manager`, `source-control-manager`, and
-`drafting-table-guard` binaries from the existing Go modules, provisions an
-isolated temporary Git project, and uses a loopback-only recorded model endpoint
-plus recording WMS and `gh` stubs. It never edits the checkout or registered
-specification artifacts. The contract fixture inputs, expected state, and
-deferred steps are in
+The driver builds the `ears-manager`, `source-control-manager`, and
+`drafting-table-guard` binaries from the Go modules. Removal R1
+([#406](https://github.com/redhat-et/ProtoBot/issues/406)) deleted the
+`ears-manager` module, so the replay does not run until the Drafting Table
+wiring is reworked
+([#428](https://github.com/redhat-et/ProtoBot/issues/428)); re-enable the
+replay with that change.
+
+The driver provisions an isolated temporary Git project and uses a
+loopback-only recorded model endpoint plus recording WMS and `gh` stubs. It
+never edits the checkout or registered specification artifacts. The contract
+fixture inputs, expected state, and deferred steps are in
 `docs/architecture/fixtures/drafting-table-opencode-golden.jsonl`.
 
 The actual `ears-manager artifact list` implementation is used by the guard

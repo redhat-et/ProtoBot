@@ -130,7 +130,7 @@ a non-ProtoBot target, use that repository's checks. For ProtoBot, run:
   cd "$FULLSEND_TARGET_ROOT"
   python3 scripts/check_harness_integrity.py
   python scripts/lint.py --all-files
-  for module in drafting-table ears-manager source-control-manager validator wms; do
+  for module in drafting-table source-control-manager validator wms; do
     (cd "$module" && go test ./...)
   done
 )
