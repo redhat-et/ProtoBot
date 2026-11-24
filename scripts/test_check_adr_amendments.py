@@ -1258,6 +1258,75 @@ class GitRepoCheckTests(unittest.TestCase):
         finally:
             os.environ.pop("PRE_COMMIT_FROM_REF", None)
 
+    def test_unsafe_github_base_sha_falls_back_to_default_branch(self) -> None:
+        """An unsafe GITHUB_BASE_SHA is skipped, falling back to default branch."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        marker = self.root / "base_sha_injection_marker"
+        os.environ["GITHUB_BASE_SHA"] = f"--upload-pack=touch {marker}"
+        try:
+            rc, output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("rewritten or replaced in place", output)
+            self.assertFalse(marker.exists())
+        finally:
+            os.environ.pop("GITHUB_BASE_SHA", None)
+
+    def test_unsafe_github_base_sha_without_fallback_fails_closed(self) -> None:
+        """An unsafe GITHUB_BASE_SHA with no resolvable fallback fails closed."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        _git(self.root, "branch", "-D", "main")
+        marker = self.root / "base_sha_injection_marker"
+        os.environ["GITHUB_BASE_SHA"] = f"--upload-pack=touch {marker}"
+        try:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc, _output = self._check()
+            self.assertEqual(1, rc)
+            self.assertFalse(marker.exists())
+            self.assertIn("cannot resolve default-branch baseline", stderr.getvalue())
+        finally:
+            os.environ.pop("GITHUB_BASE_SHA", None)
+
+    def test_unsafe_github_base_ref_falls_back_to_default_branch(self) -> None:
+        """An unsafe GITHUB_BASE_REF is skipped, falling back to default branch."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR.replace(
+                "Use one file per record.",
+                "Use JSONL storage instead.",
+            ),
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "rewrite ADR in place")
+        marker = self.root / "base_ref_injection_marker"
+        os.environ["GITHUB_BASE_REF"] = f"--upload-pack=touch {marker}"
+        try:
+            rc, output = self._check()
+            self.assertEqual(1, rc)
+            self.assertIn("rewritten or replaced in place", output)
+            self.assertFalse(marker.exists())
+        finally:
+            os.environ.pop("GITHUB_BASE_REF", None)
+
     def test_github_base_ref_environment_variable(self) -> None:
         """GITHUB_BASE_REF resolves the baseline branch when main is renamed or custom."""
         _git(self.root, "checkout", "-b", "feature")

@@ -24,6 +24,8 @@ An explicit ref, ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, or
 ``--upload-pack=...``) is rejected before use, via the shared
 ``scripts/git_base.py`` helper also used by
 ``scripts/check_spec_validator.py`` and ``scripts/check_baseline_ratchet.py``.
+Unsafe environment variables are skipped in favor of subsequent fallback
+tiers, while an unsafe explicit ref fails closed immediately.
 """
 
 from __future__ import annotations
@@ -735,6 +737,13 @@ def resolve_baseline_ref(
     When a ref or commit SHA is not present locally, an attempt is made
     to fetch it from ``origin`` with ``--depth=1``.
 
+    Candidate refs from ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, and
+    ``GITHUB_BASE_REF`` are validated with ``is_safe_git_ref`` before use.
+    An unsafe candidate is skipped so resolution falls through to
+    subsequent tiers or default-branch candidates, matching
+    ``scripts/git_base.py``. An unsafe *explicit_ref* fails closed
+    immediately.
+
     Returns ``None`` when no baseline ref can be resolved (fail closed).
     """
 
@@ -849,9 +858,7 @@ def resolve_baseline_ref(
             return resolved
 
     base_sha = os.environ.get("GITHUB_BASE_SHA")
-    if base_sha:
-        if not is_safe_git_ref(base_sha):
-            return None
+    if base_sha and is_safe_git_ref(base_sha):
         resolved = _resolve_commit(base_sha)
         if not resolved and _fetch_target(repo_root, base_sha):
             resolved = _resolve_commit(base_sha)
@@ -860,9 +867,7 @@ def resolve_baseline_ref(
         return None
 
     base_ref = os.environ.get("GITHUB_BASE_REF")
-    if base_ref:
-        if not is_safe_git_ref(base_ref):
-            return None
+    if base_ref and is_safe_git_ref(base_ref):
         clean_base = base_ref
         for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
             if clean_base.startswith(prefix):

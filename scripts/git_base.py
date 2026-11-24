@@ -40,7 +40,10 @@ Public surface:
     resolved base equals ``HEAD`` (a legitimate self-comparison, not a
     failure). Returns ``(None, False)`` when nothing resolves
     (deterministic fail-closed): callers decide how to treat a missing
-    base rather than silently comparing a tree with itself.
+    base rather than silently comparing a tree with itself. Shallow-
+    clone remediation (such as deepening history when a merge-base
+    cannot be computed) is left to each caller; this function performs
+    purely local git queries and does not attempt network operations.
 
 An explicit override is trusted directly once it is confirmed to exist:
 it is returned as given, not reduced to a merge base, so a caller that
@@ -138,7 +141,13 @@ get_merge_base = git_merge_base
 
 
 def is_shallow_repository(repo_root: Path) -> bool:
-    """Return True when *repo_root* is a shallow git clone."""
+    """Return True when *repo_root* is a shallow git clone.
+
+    Deepening a shallow clone or fetching missing history is a network-
+    and CI-environment concern left to each caller;
+    ``resolve_comparison_base`` does not attempt network operations or
+    history deepening on shallow checkouts.
+    """
     result = _run_git(repo_root, "rev-parse", "--is-shallow-repository")
     return (
         result is not None
@@ -187,6 +196,12 @@ def resolve_comparison_base(
     ``(merge_base, is_head)``; ``is_head`` is True only when the
     resolved base equals HEAD. Returns ``(None, False)`` when nothing
     resolves (deterministic fail-closed).
+
+    Shallow-clone remediation (e.g. deepening the clone when a candidate
+    ref exists but its merge-base with HEAD cannot be computed due to
+    shallow history) is each caller's own responsibility (see
+    ``is_shallow_repository``); this function performs purely local git
+    queries and never attempts network operations or history deepening.
     """
     environ = os.environ if env is None else env
 
