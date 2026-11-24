@@ -200,6 +200,35 @@ class HistoricalMutationTests(unittest.TestCase):
         lines = ["alpha", "bravo"]
         self.assertEqual([], checker.historical_mutations(lines, list(lines)))
 
+    def test_inline_pre_code_span_does_not_mask_subsequent_lines(self) -> None:
+        """An inline code span containing `<pre>` does not mask later lines."""
+        old = ["alpha", "bravo", "Use `<pre>` for code."]
+        new = old + [
+            "",
+            "**[Amended November 2026]**",
+            "",
+            "Valid amendment text.",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_genuine_pre_block_after_inline_code_span_still_masked(self) -> None:
+        """A real <pre> block is still masked even after an inline code span."""
+        old = ["alpha", "Use `<pre>` for code.", "bravo"]
+        new = list(old)
+        new += [
+            "<pre>",
+            "**[Amended November 2026]**",
+            "</pre>",
+        ]
+        self.assertEqual(
+            [
+                (None, 4, 4, "<pre>"),
+                (None, 5, 5, "**[Amended November 2026]**"),
+                (None, 6, 6, "</pre>"),
+            ],
+            checker.historical_mutations(old, new),
+        )
+
 
 class AcceptedStatusTests(unittest.TestCase):
     def test_accepted_header_is_detected(self) -> None:
