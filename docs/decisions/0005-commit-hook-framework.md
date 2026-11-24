@@ -7,7 +7,6 @@
 - [Context](#context)
 - [Decision](#decision)
 - [Consequences](#consequences)
-- [Amendment (November 2026)](#amendment-november-2026)
 - [Related Documents](#related-documents)
 
 ## Context
@@ -273,8 +272,8 @@ One rule governs every hook:
 A hook that needs a secret token has cause 4.
 A pass without the token is not evidence that the hook works.
 Permitted gate languages are `python` with pinned `additional_dependencies`,
-`system` with a standard-library `python3` entry, and `pygrep` with no entry
-and no dependency.
+`system` with a standard-library `python3` entry, and `pygrep` with an inline
+pattern entry and no dependency.
 The `pygrep` language is built into `pre-commit`.
 The gate configuration permits `text-unicode-replacement-char`
 (`.pre-commit-config.yaml:158-161`).
@@ -295,8 +294,10 @@ At commit `eb021b7`, `.pre-commit-config.yaml` has 44 hook entries: 20 using
 `language: python`, 20 using `language: system`, 1 using `language: pygrep`,
 and 3 remote entries.
 It has 20 Python hooks, not 21.
-After cutover, the gate configuration keeps 31 local hooks: 19 python, 1
-pygrep, and 11 system.
+At commit `4269c68`, `.pre-commit-config.yaml` has 44 hook entries: 22 using
+`language: python`, 18 using `language: system`, 1 using `language: pygrep`,
+and 3 remote entries. After cutover, the gate configuration keeps 31 local
+hooks: 20 python, 1 pygrep, and 10 system.
 
 The following table supersedes the table in Decision item 4:
 
@@ -385,15 +386,16 @@ In Decision item 3, the five-cause rule supersedes the three-cause sentence:
 
 A skipped hook is defined as a hook that reports `(no files to check)Skipped`,
 or that reports a skip for any other reason.
-At commit `eb021b7`, no tracked `*.toml` or `*.xml` files exist.
+At commit `4269c68`, no tracked `*.toml` or `*.xml` files exist.
 The rehearsal fails on a skipped hook, except for `check-toml` and `check-xml`
 when they report no matching files.
 This exception list is closed.
 A new hook requires a tracked matching file or an amendment.
 The rehearsal does not rely on process exit codes for skips because
 `pre-commit` exits 0 when hooks skip.
-The job parses command output to record the set of skipped hooks.
-The rehearsal fails when that set is not a subset of the closed list.
+The job records each skipped hook with its skip reason.
+The rehearsal fails unless every skipped hook is `check-toml` or `check-xml` and
+reports `(no files to check)Skipped`.
 
 Negative fixture rules apply exclusively to repository-owned checkers.
 These checkers are hooks whose entry runs `scripts/check_*.py` or a
@@ -404,22 +406,25 @@ The fixture must produce a nonzero exit and a named diagnostic.
 The `test-*` hook that covers the checker must assert that diagnostic.
 A hook that runs a repository-owned test module provides its own negative
 fixture.
-The verified checker table at commit `eb021b7` is:
+The verified checker table at commit `4269c68` is:
 
 | Hook | Test hook | Negative test | Expected diagnostic |
 | --- | --- | --- | --- |
-| `adr-amendments` | `test-adr-amendments` | `scripts/test_check_adr_amendments.py:186` | `rewritten or replaced in place` |
-| `baseline-ratchet` | `test-baseline-ratchet` | `scripts/test_check_baseline_ratchet.py:44` | `ceiling for AGENTS.md increased` |
+| `adr-amendments` | `test-adr-amendments` | `scripts/test_check_adr_amendments.py:1071` | `rewritten or replaced in place` |
+| `baseline-ratchet` | `test-baseline-ratchet` | `scripts/test_check_baseline_ratchet.py:57` | `ceiling for AGENTS.md increased` |
 | `harness-integrity` (offline) | `test-harness-integrity` | `scripts/test_check_harness_integrity.py:154` | `missing top-level base entry` |
 | `check-portable-null-device` | `test-check-portable-null-device` | `scripts/test_check_portable_null_device.py:279` | `os.DevNull` |
 | `validator-spec-parity` | `test-validator-spec-parity` | `scripts/test_check_validator_spec_parity.py:557` | `sample.error` |
 | `validator-fixtures` | `test-validator-fixtures` | `scripts/test_check_validator_fixtures.py:602` | `prohibited` |
 | `spec-validator` | `test-spec-validator` | `scripts/test_check_spec_validator.py:102` | `spec validator failed` |
 | `test-pre-commit-cache` | itself | `scripts/test_pre_commit_cache.py:294` | `cannot run the pinned upstream pre-script` |
-| `test-select-comparison-base` | itself | `scripts/test_select_comparison_base.py:244` | `::error::` |
-| `test-lint-wrapper` | itself | `scripts/test_lint.py:2570` | `pre-commit install-hooks` |
+| `test-select-comparison-base` | itself | `scripts/test_select_comparison_base.py:244` | `is not present in this checkout` |
+| `test-lint-wrapper` | itself | `scripts/test_lint.py:3321` | `pre-commit install-hooks` |
 
-At commit `eb021b7`, `eval-corpus-schema` has no test hook.
+`scripts/test_select_comparison_base.py:244` asserts only the `::error::`
+prefix. Cutover step 12 extends that assertion to the message.
+
+At commit `4269c68`, `eval-corpus-schema` has no test hook.
 Issue #580 requires a negative fixture for `eval-corpus-schema` when it converts
 the hook to `language: python`.
 Until issue #580 lands, the gate configuration does not claim negative-fixture
@@ -434,6 +439,13 @@ A formatter must not run on the working tree.
 The clause "any skipped test" requires that every `test-*` hook matches at
 least one tracked file.
 A `test-*` hook that reports a skip fails the rehearsal.
+A `test-*` hook passes only when its output reports no skipped test.
+The job reads the summary line.
+The unittest summary form is "OK (skipped=N)".
+The pytest summary form is "N skipped".
+The rehearsal fails when N is greater than zero.
+For example, `scripts/test_check_spec_validator.py` skips its end-to-end tests
+when `go` is absent (:81, :200-201), and that run does not count as a pass.
 
 The rehearsal executes two runs on each runner label: one in the job
 environment, and one under `env -i`.
@@ -500,7 +512,7 @@ The rehearsal runs as a matrix job named `gate-rehearsal` with labels
 Each matrix job executes both run environments.
 The cutover adds `gate-rehearsal` to the `needs` list
 (`.github/workflows/ci-workflow.yaml:421-427`).
-`scripts/test_lint.py:2966-2981` changes from forbidding every direct run to
+`scripts/test_lint.py:3747-3750` changes from forbidding every direct run to
 permitting direct `pre-commit run` invocations exclusively in the
 `gate-rehearsal` job.
 The test names the job and exact commands.
@@ -520,7 +532,7 @@ That statement is true of dedicated module jobs in
 `.github/workflows/ci-workflow.yaml`.
 However, all-files `gofmt` and `go-vet` hooks match `\.go$` files across the
 repository (`.pre-commit-config.yaml:259-270`).
-`scripts/check_govet.py:29-49` maps `drafting-table/guard.go` to its module
+`scripts/check_govet.py:30-49` maps `drafting-table/guard.go` to its module
 directory.
 The cutover must preserve that all-files coverage.
 Issue #560 owns standardizing Go module CI checks and adding a dedicated module
@@ -531,16 +543,22 @@ Base-aware validation is resolved across CI jobs:
 - The `validator` job already resolves an event-specific base and fails closed
   (`scripts/select_comparison_base.py:125-155`). It requires no change.
 - The cutover ships base resolution for the `pre-commit` job.
-  `scripts/lint.py` obtains the base from `scripts/select_comparison_base.py`
-  and exports it to each checker under the name that the checker reads:
-  `PROTOBOT_VALIDATOR_BASE` for `spec-validator`, `BASELINE_RATCHET_BASE_REF`
-  for `baseline-ratchet`, and `PRE_COMMIT_FROM_REF` for `adr-amendments`. On a
-  pull request event, an unresolved base causes a nonzero exit.
+  The job runs `scripts/select_comparison_base.py` with `DEFAULT_BRANCH`,
+  `PULL_REQUEST_BASE_SHA`, `MERGE_GROUP_BASE_SHA`, and `PUSH_BEFORE_SHA`, and
+  records `merge_base` and `exact_base`.
+  It exports `GITHUB_BASE_SHA` from `merge_base` and `PROTOBOT_VALIDATOR_BASE`
+  from `exact_base`.
+  It exports `BASELINE_RATCHET_BASE_REF` and `PRE_COMMIT_FROM_REF` from
+  `exact_base` when `exact_base` is set, and from `merge_base` otherwise.
+  A pull request or merge group uses `merge_base`.
+  A default-branch push uses `exact_base`.
+  A push to another branch uses `merge_base` against the default branch.
+  The job checks out enough history to contain the base commit.
 - Issue #578 removes the `HEAD` fallback in `scripts/check_spec_validator.py`
   and makes a missing base fail. Until issue #578 lands, the cutover passes an
   explicit base, so the fallback is not used.
 - On a pull request, the `pre-commit` job fails when it cannot resolve a base.
-  On a push, `scripts/check_baseline_ratchet.py:450-453` may skip with exit
+  On a push, `scripts/check_baseline_ratchet.py:641-643` may skip with exit
   code 0 on a shallow checkout. The job reports the skip and does not claim
   ratchet coverage. A skip is not a pass.
 
@@ -588,7 +606,7 @@ that leaves the gate configuration:
 
 The cutover does not keep `zizmor` in the gate configuration.
 It does not keep an offline mode either.
-While `scripts/lint.py:19-20` and `:1359` set `ZIZMOR_NO_ONLINE_AUDITS=true`
+While `scripts/lint.py:19-20` and `:1710` set `ZIZMOR_NO_ONLINE_AUDITS=true`
 for offline runs, offline mode disables 5 online audits (`ref-confusion`,
 `ref-version-mismatch`, `known-vulnerable-actions`, `impostor-commit`, and
 `stale-action-refs`) and degrades 2 others (`artipacked` and `typosquat-uses`).
@@ -602,7 +620,7 @@ The `ci-success` merge check blocks merge until defects are resolved.
 ### Cutover order (supersedes the Cutover order subsection)
 
 It supersedes the Cutover order subsection in Consequences.
-The cutover executes as one atomic change across 12 steps:
+The cutover executes as one atomic change across 15 steps:
 
 1. Create `.github/pre-commit-ci.yaml` with these 14 placements:
    `markdownlint-cli2`, `hadolint`, `renovate-config-validator`, `gofmt`,
@@ -617,10 +635,8 @@ The cutover executes as one atomic change across 12 steps:
    the gate configuration.
 3. In `.github/pre-commit-ci.yaml`, extend the `zizmor` `files:` regex to
    match `.github/pre-commit-ci.yaml`.
-4. Teach `scripts/lint.py` to read both configuration files, run one preflight
-   per configuration, and export the resolved comparison base to
-   `PROTOBOT_VALIDATOR_BASE` for `spec-validator`, `BASELINE_RATCHET_BASE_REF`
-   for `baseline-ratchet`, and `PRE_COMMIT_FROM_REF` for `adr-amendments`.
+4. Teach `scripts/lint.py` to read both configuration files and run one
+   preflight per configuration.
 5. Add `actions/setup-go` to the `pre-commit` job in
    `.github/workflows/ci-workflow.yaml`, using the Go version from
    `validator/go.mod`, before the `scripts/lint.py` step.
@@ -629,16 +645,26 @@ The cutover executes as one atomic change across 12 steps:
 7. Install `pyyaml` and `jsonschema` for `python3` in the `pre-commit` job
    before the `scripts/lint.py` step. Pin both versions in
    `.github/workflows/ci-workflow.yaml`.
-8. Update `scripts/test_lint.py:2966-2981` to permit direct `pre-commit run`
-   invocations exclusively in the `gate-rehearsal` job.
-9. Add the `gate-rehearsal` job to `.github/workflows/ci-workflow.yaml` and add
-   it to the `ci-success` `needs` list at lines 421-427.
-10. Amend `AGENTS.md:3-12` to describe the gate configuration, point agents at
+8. Add `fetch-depth: 0` to the `pre-commit` job checkout, or fetch the selected
+   base commit.
+9. Bind `DEFAULT_BRANCH`, `PULL_REQUEST_BASE_SHA`, `MERGE_GROUP_BASE_SHA`, and
+   `PUSH_BEFORE_SHA` to `scripts/select_comparison_base.py`, and export
+   `GITHUB_BASE_SHA`, `PROTOBOT_VALIDATOR_BASE`, `BASELINE_RATCHET_BASE_REF`,
+   and `PRE_COMMIT_FROM_REF` as the Base-aware validation subsection states.
+10. Update `scripts/test_lint.py:3747-3750` to permit direct `pre-commit run`
+    invocations exclusively in the `gate-rehearsal` job.
+11. Add the `gate-rehearsal` job to `.github/workflows/ci-workflow.yaml` and
+    add it to the `ci-success` `needs` list at lines 421-427.
+12. Extend the `test-select-comparison-base` negative fixture to assert the
+    message `is not present in this checkout`
+    (`scripts/select_comparison_base.py:141`).
+13. Amend `AGENTS.md:3-12` to describe the gate configuration, point agents at
     direct `pre-commit run --files <changed>`, and send `gofmt` and `go-vet` to
-    CI. Verify that the `CLAUDE.md` symlink remains intact. Correct
-    `.fullsend/README.md:76-78`, which describes `scripts/lint.py`.
-11. Prove the rehearsal passes on the resulting tree across both runner labels.
-12. Roll back the cutover commit as a whole on failure. A hook returns to the
+    CI. Correct `.fullsend/README.md:11` (the no-egress claim) and
+    `.fullsend/README.md:76-78` (the `scripts/lint.py` claim). Verify that the
+    `CLAUDE.md` symlink remains intact.
+14. Prove the rehearsal passes on the resulting tree across both runner labels.
+15. Roll back the cutover commit as a whole on failure. A hook returns to the
     gate configuration only after it passes `gate-rehearsal`.
 
 `CLAUDE.md` is a tracked symlink to `AGENTS.md`.
@@ -665,13 +691,15 @@ issue tracking:
 | Convert the three `language: system` hooks | Give `eval-corpus-schema`, `test-pre-commit-cache`, and `test-select-comparison-base` `language: python` with pinned `pyyaml` and `jsonschema`, then return them to the gate configuration. | `.pre-commit-config.yaml` | #580 |
 | Retire the cache bootstrap | The gate no longer depends on the archive, and removing it deletes the runner warm step and the restore path. | `.fullsend/`, `scripts/` | #581 |
 | Standardize Go module CI checks | Add dedicated module CI jobs for `drafting-table` and unify module checks. | CI workflow | #560 |
-| Implement the cutover | Implement the atomic 12-step cutover order. | Repository | #582 |
+| Implement the cutover | Implement the atomic 15-step cutover order. | Repository | #582 |
 
-In Related Documents, pull request #532 is added as the change that introduced
-the pre-commit cache bootstrap.
 Issues #442, #512, and #520 in Related Documents record Fullsend runs in which
 the Fullsend pre-commit step failed (see the Observed failures table in
 Context).
+Related Documents: [PR #532](https://github.com/redhat-et/ProtoBot/pull/532)
+introduced the cache bootstrap described in Context. This amendment records
+the link here because the ADR-immutability checker permits insertions only
+inside a dated amendment block.
 
 ### Terminology, scope, and prose corrections
 
@@ -699,7 +727,7 @@ It extends Decision item 1 and Consequences:
   original spelling because accepted text is immutable.
 - `CLAUDE.md` parity: `CLAUDE.md` is a tracked symlink to `AGENTS.md` with mode
   120000. Changes to `AGENTS.md` automatically apply to `CLAUDE.md`. Cutover
-  step 10 verifies that the symlink remains intact.
+  step 13 verifies that the symlink remains intact.
 - IdeaBot reference: This amendment updates the bare reference at
   `docs/architecture/related-work.md:111` to `IdeaBot ADR-0005/0006`. This
   distinguishes IdeaBot architecture records from ProtoBot ADR-0005.
@@ -718,7 +746,6 @@ It extends Decision item 1 and Consequences:
 - [Issue #550: Convert the PyPI-capable cloned pre-commit hooks to repo: local](https://github.com/redhat-et/ProtoBot/issues/550)
 - [PR #496: fix(#442): define ADR supersession, rename, and deletion lifecycle](https://github.com/redhat-et/ProtoBot/pull/496)
 - [PR #523: docs(#512): govern module README files under AGENTS.md sibling rules](https://github.com/redhat-et/ProtoBot/pull/523)
-- [PR #532: feat(#524): seed the offline pre-commit cache for sandboxed agents](https://github.com/redhat-et/ProtoBot/pull/532)
 - [PR #555: fix(#550): convert GitHub-cloning pre-commit hooks to repo: local](https://github.com/redhat-et/ProtoBot/pull/555)
 - [fullsend#9694: Sandbox TLS environment dropping](https://github.com/fullsend-ai/fullsend/issues/9694)
 - [agents#2105: Sandbox git TLS configuration](https://github.com/fullsend-ai/agents/issues/2105)
