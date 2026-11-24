@@ -23,12 +23,14 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   author-actionable finding solely for that state. A completed failure
   belongs in the review verdict, with the local check used to identify the
   actual diagnostic.
-- Before detailed specification analysis, run
-  `python3 scripts/check_spec_validator.py` on a checkout or worktree of the
-  recorded PR head
-  ([#547](https://github.com/redhat-et/ProtoBot/issues/547)). A comparison
-  base that the event requires but Git cannot resolve is a blocking freshness
-  finding, and it stops detailed specification analysis.
+- Before detailed specification analysis, resolve the merge base of the
+  recorded PR base branch and the PR head, then run
+  `PROTOBOT_VALIDATOR_BASE=<merge-base> python3 scripts/check_spec_validator.py`
+  on a checkout or worktree of the recorded PR head
+  ([#547](https://github.com/redhat-et/ProtoBot/issues/547)). An unresolved PR
+  base or merge base is a blocking freshness finding that stops detailed
+  specification analysis. Do not accept the script's `HEAD` fallback, or a
+  passing result that skipped the base-relative checks, as a freshness pass.
 - Read the full diff. Then read every file the diff cites or depends on. For
   design documents, read the sibling documents end to end. Contradictions
   live in the parts that nobody cites.
@@ -99,8 +101,9 @@ The Drafting Table agent creates and refines backlog requests
   or comments. A check that found nothing (the branch is up to date with
   `main`, the merge is clean, and no stale wording is left) goes in the "What
   was checked" section of the local document, never in the posted review or
-  its comments. A comparison base that Git cannot resolve is a blocking
-  freshness finding, not a check that found nothing. Do not create a GitHub review when
+  its comments. An unresolved PR base or merge base, or a validator result
+  that skipped the base-relative checks, is a blocking freshness finding, not
+  a check that found nothing. Do not create a GitHub review when
   no actionable comments are selected; preserve the required local verdict
   and "What was checked" sections.
 - Duplicate each finding posted inline once in the main GitHub review body, in
