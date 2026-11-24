@@ -225,13 +225,14 @@ must follow these rules:
 7. **Preserve accepted and superseded architecture decision records.**
    Accepted and superseded records under `docs/decisions/` are
    immutable: never rewritten or replaced in place, never deleted or
-   renamed, even after supersession or component retirement. A record
-   may append a dated amendment block citing the change, its rationale,
-   and updated architecture documents. The only authorized transition
-   is one dated accepted-to-superseded status-line change per the
-   [supersession skill](.agents/skills/adr-supersession/SKILL.md).
-   Review agents must verify no in-place rewrite, deletion, or rename,
-   and that amendments and transitions match it.
+   renamed, even after supersession or component retirement. To amend a
+   record, append a dated amendment block citing the change, its
+   rationale, and updated architecture documents. The only authorized
+   transition is one dated accepted-to-superseded status-line change per
+   the [supersession
+   skill](.agents/skills/adr-supersession/SKILL.md). Review agents must
+   verify no in-place rewrite, deletion, or rename, and amendments and
+   transitions match it.
 
 ## Agent skills
 

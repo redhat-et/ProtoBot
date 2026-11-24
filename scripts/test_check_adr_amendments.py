@@ -62,7 +62,7 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 class HistoricalMutationTests(unittest.TestCase):
     def test_insertions_are_allowed(self) -> None:
-        """Appending or inserting lines is not a historical mutation."""
+        """Insertions that carry a dated amendment marker are allowed."""
         old = ["alpha", "bravo", "charlie"]
         new = [
             "alpha",
@@ -72,6 +72,23 @@ class HistoricalMutationTests(unittest.TestCase):
             "**[Amended November 2026]** Added a trailing note.",
         ]
         self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_undated_paragraph_inserted_in_middle_fails(self) -> None:
+        """An undated paragraph inserted in the middle is a mutation."""
+        old = ["alpha", "bravo", "charlie"]
+        new = ["alpha", "undated note", "bravo", "charlie"]
+        self.assertEqual(
+            [(None, 2, 2, "undated note")], checker.historical_mutations(old, new)
+        )
+
+    def test_undated_paragraph_appended_at_tail_fails(self) -> None:
+        """An undated paragraph appended at the tail is a mutation."""
+        old = ["alpha", "bravo", "charlie"]
+        new = old + ["undated trailing note"]
+        self.assertEqual(
+            [(None, 4, 4, "undated trailing note")],
+            checker.historical_mutations(old, new),
+        )
 
     def test_replaced_line_is_reported(self) -> None:
         """Rewriting a historical line reports its baseline and HEAD line."""
@@ -99,7 +116,12 @@ class HistoricalMutationTests(unittest.TestCase):
         # Mutate what was baseline line 10; it is now at HEAD line 13.
         new[12] = "line 10 changed"
         self.assertEqual(
-            [(10, 13, 13, "line 10")],
+            [
+                (10, 13, 13, "line 10"),
+                (None, 6, 6, "extra 1"),
+                (None, 7, 7, "extra 2"),
+                (None, 8, 8, "extra 3"),
+            ],
             checker.historical_mutations(old, new),
         )
 
@@ -137,7 +159,14 @@ class HistoricalMutationTests(unittest.TestCase):
         old.append(status)
         old += ["", "## Decision", "", "Use one file per record."]
         new = old[:29] + ["```text", status, "```"] + old[30:]
-        self.assertEqual([(30, 31, 31, status)], checker.historical_mutations(old, new))
+        self.assertEqual(
+            [
+                (30, 31, 31, status),
+                (None, 30, 30, "```text"),
+                (None, 32, 32, "```"),
+            ],
+            checker.historical_mutations(old, new),
+        )
 
     def test_replaced_status_line_reports_single_mutation(self) -> None:
         """A status line replaced by a fenced line reports one mutation, not two.
@@ -513,7 +542,26 @@ class SupersessionTransitionTests(unittest.TestCase):
         """An amendment marker with no year is not recognized, so the transition fails."""
         new = self._with_status("> Status: **Superseded by ADR-0004** — November 2026")
         new += ["", "**[Amended]** Superseded by ADR-0004."]
-        self._assert_status_rewrite_rejected(new)
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertEqual(
+            [
+                (
+                    self.status_idx + 1,
+                    self.status_idx + 1,
+                    self.status_idx + 1,
+                    self.old[self.status_idx],
+                ),
+                (
+                    None,
+                    self.status_idx + 1,
+                    self.status_idx + 1,
+                    new[self.status_idx],
+                ),
+                (None, len(new) - 1, len(new) - 1, ""),
+                (None, len(new), len(new), "**[Amended]** Superseded by ADR-0004."),
+            ],
+            mutations,
+        )
 
     def test_amendment_marker_inside_fenced_code_block_fails(self) -> None:
         """A marker quoted inside a fenced code block does not authorize the transition."""
@@ -672,7 +720,13 @@ class SupersessionTransitionTests(unittest.TestCase):
         new = list(self.old)
         new += ["", "> Status: **Superseded by ADR-0005** — November 2026"]
         mutations = checker.historical_mutations(self.old, new)
-        self.assertEqual([(None, len(new), len(new), new[-1])], mutations)
+        self.assertEqual(
+            [
+                (None, len(new), len(new), new[-1]),
+                (None, len(new) - 1, len(new) - 1, ""),
+            ],
+            mutations,
+        )
 
     def test_unmodified_adr_with_two_status_lines_passes(self) -> None:
         """A baseline that already has two status lines is not flagged when unchanged."""
@@ -685,7 +739,13 @@ class SupersessionTransitionTests(unittest.TestCase):
         old = list(self.old) + ["", "> Status: **Accepted** — September 2026"]
         new = list(old) + ["", "> Status: **Superseded by ADR-0005** — November 2026"]
         mutations = checker.historical_mutations(old, new)
-        self.assertEqual([(None, len(new), len(new), new[-1])], mutations)
+        self.assertEqual(
+            [
+                (None, len(new), len(new), new[-1]),
+                (None, len(new) - 1, len(new) - 1, ""),
+            ],
+            mutations,
+        )
 
     def test_duplicate_accepted_line_before_superseded_line_fails(self) -> None:
         """A duplicate Accepted line kept beside the new Superseded line fails.
@@ -916,6 +976,26 @@ class SupersessionTransitionTests(unittest.TestCase):
             ["```", "```\u00a0", "**[Amended November 2026]**"]
         )
         self._assert_transition_rejected(new)
+
+    def test_pre_block_marker_does_not_authorize(self) -> None:
+        """A marker inside a raw HTML preformatted block does not authorize."""
+        new = self._transition_with_tail(
+            ["<pre>", "**[Amended November 2026]**", "</pre>"]
+        )
+        self._assert_transition_rejected(new)
+
+    def test_pre_block_status_cannot_authorize(self) -> None:
+        """A status line inside a raw HTML preformatted block cannot authorize."""
+        new = list(self.old)
+        new[self.status_idx : self.status_idx + 1] = [
+            "<pre>",
+            "> Status: **Superseded by ADR-0004** — November 2026",
+            "</pre>",
+        ]
+        new += ["", "**[Amended November 2026]**", "Superseded by ADR-0004."]
+        mutations = checker.historical_mutations(self.old, new)
+        self.assertTrue(mutations)
+        self.assertIn(self.old[self.status_idx], [m[3] for m in mutations])
 
 
 class PathFilterTests(unittest.TestCase):

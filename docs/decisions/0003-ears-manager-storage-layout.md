@@ -103,9 +103,9 @@ keys, explicit null values, and custom tags before typed decoding.
 ADR-0004 adopts ProtoBot V2 and deletes `ears-manager` and `.protobot/`
 rather than reworking this storage layout (removal PR R1, tracked in
 issue #406). This ADR's file stays in place per the supersession,
-rename, and deletion lifecycle in `AGENTS.md` Rule 7; only its status
-line changes. See [ADR-0004: Adopt ProtoBot
-V2](0004-adopt-protobot-v2.md) and the
+rename, and deletion lifecycle in `AGENTS.md` Rule 7; only its existing
+text changes at the status line, and the amendment block is appended.
+See [ADR-0004: Adopt ProtoBot V2](0004-adopt-protobot-v2.md) and the
 [ProtoBot V2 design proposal](../architecture/ProtoBotV2.md) for the
 replacement decision; removal step R6 retires the superseded V1
 architecture documents under `docs/architecture/`.

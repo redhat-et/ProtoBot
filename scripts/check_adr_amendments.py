@@ -75,6 +75,14 @@ _AMBIGUOUS_STATUS = re.compile(
     r"^[ \t]*>[ \t]*status:.*(?<![A-Za-z0-9])(?:accepted|superseded)(?![A-Za-z0-9])",
     re.IGNORECASE | re.MULTILINE,
 )
+# A dated amendment marker at the start of a line. Unlike
+# _AMENDMENT_MARKER, an issue annotation inside the brackets is
+# allowed and the marker may share its line with prose, because
+# committed records use forms such as ``**[Amended November 2026,
+# #547]** `ears-manager check` accepts ...``.
+_DATED_AMENDMENT_LINE = re.compile(
+    rf"^\*\*\[Amended (?:{_MONTH_NAMES}) \d{{4}}(?:, #[0-9]+)?\]\*\*",
+)
 _AMENDMENT_MARKER = re.compile(
     rf"^\*\*\[Amended (?:{_MONTH_NAMES}) \d{{4}}\]\*\*$",
     re.MULTILINE,
@@ -257,14 +265,52 @@ def _html_comment_mask(lines: list[str]) -> list[bool]:
     return mask
 
 
+_PRE_OPEN = re.compile(r"<pre\b", re.IGNORECASE)
+_PRE_CLOSE = re.compile(r"</pre\b", re.IGNORECASE)
+
+
+def _pre_block_mask(lines: list[str]) -> list[bool]:
+    """Return a per-line mask that is True while *lines* is inside a <pre> block.
+
+    A line is masked when it starts inside a block or ends inside one.
+    Open and close tags are tracked across lines, case-insensitively,
+    and several blocks on one line are handled.
+    """
+    mask: list[bool] = []
+    in_pre = False
+    for line in lines:
+        starts_inside = in_pre
+        idx = 0
+        while idx < len(line):
+            if in_pre:
+                close = _PRE_CLOSE.search(line, idx)
+                if close is None:
+                    break
+                in_pre = False
+                idx = close.end()
+            else:
+                open_at = _PRE_OPEN.search(line, idx)
+                if open_at is None:
+                    break
+                in_pre = True
+                idx = open_at.end()
+        mask.append(starts_inside or in_pre)
+    return mask
+
+
 def _hidden_line_mask(lines: list[str]) -> list[bool]:
     """Return a per-line mask for lines hidden from the rendered document.
 
-    A line inside a fenced code block or an HTML comment is hidden.
+    A line inside a fenced code block, an HTML comment, or a raw HTML
+    preformatted block is hidden.
     """
     fenced = _fenced_code_mask(lines)
     commented = _html_comment_mask(lines)
-    return [in_fence or in_comment for in_fence, in_comment in zip(fenced, commented)]
+    preformatted = _pre_block_mask(lines)
+    return [
+        in_fence or in_comment or in_pre
+        for in_fence, in_comment, in_pre in zip(fenced, commented, preformatted)
+    ]
 
 
 def _accepted_status_index(lines: list[str]) -> int | None:
@@ -301,31 +347,43 @@ def _dated_superseded_status_index(lines: list[str]) -> int | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _has_visible_marker(
+    new_lines: list[str],
+    start: int,
+    end: int,
+    hidden: list[bool],
+    marker: re.Pattern[str],
+) -> bool:
+    """Return True when a marker line matching *marker* sits in *new_lines* [start:end].
+
+    A line matches when *marker* matches from the start of the line;
+    ``_AMENDMENT_MARKER`` ends with ``$``, so for the authorized
+    transition the marker must occupy the whole line. The line must
+    sit outside every hidden region.
+    """
+    return any(
+        marker.match(new_lines[idx]) and not hidden[idx] for idx in range(start, end)
+    )
+
+
 def _has_appended_amendment_block(
     baseline_lines: list[str],
     new_lines: list[str],
     opcodes: list[tuple[str, int, int, int, int]],
 ) -> bool:
     """Return True when a dated amendment marker is inserted after the last
-    *baseline_lines* line and outside any fenced code block or HTML
-    comment in *new_lines*. The marker line must match
-    ``**[Amended Month Year]**`` exactly, so a marker wrapped in a
-    single-line comment already fails.
+    *baseline_lines* line and outside any hidden region in *new_lines*.
+    The marker line must match ``**[Amended Month Year]**`` exactly, so
+    a marker wrapped in a single-line comment already fails.
     """
-    fenced = _fenced_code_mask(new_lines)
-    commented = _html_comment_mask(new_lines)
+    hidden = _hidden_line_mask(new_lines)
     tail_start = len(baseline_lines)
-    for tag, i1, _i2, j1, j2 in opcodes:
-        if tag != "insert" or i1 != tail_start:
-            continue
-        for idx in range(j1, j2):
-            if (
-                _AMENDMENT_MARKER.fullmatch(new_lines[idx])
-                and not fenced[idx]
-                and not commented[idx]
-            ):
-                return True
-    return False
+    return any(
+        tag == "insert"
+        and i1 == tail_start
+        and _has_visible_marker(new_lines, j1, j2, hidden, _AMENDMENT_MARKER)
+        for tag, i1, _i2, j1, j2 in opcodes
+    )
 
 
 def _authorized_transition(
@@ -483,6 +541,35 @@ def _fenced_status_mutations(
     return mutations
 
 
+def _unexpected_insertion_mutations(
+    new_lines: list[str],
+    opcodes: list[tuple[str, int, int, int, int]],
+) -> list[_Mutation]:
+    """Return inserted lines that are not part of a dated amendment block.
+
+    Every inserted range must carry at least one dated amendment marker
+    outside every hidden region; otherwise every inserted line in the
+    range is reported. The marker may carry an issue annotation,
+    because committed records use forms such as ``**[Amended November
+    2026, #547]**``, and a block may sit before trailing sections, so a
+    tail-only rule would reject the repository's own convention.
+    Inserted status fields are left to the extra-status check, so one
+    line is never reported twice.
+    """
+    hidden = _hidden_line_mask(new_lines)
+    mutations: list[_Mutation] = []
+    for tag, _i1, _i2, j1, j2 in opcodes:
+        if tag != "insert":
+            continue
+        if _has_visible_marker(new_lines, j1, j2, hidden, _DATED_AMENDMENT_LINE):
+            continue
+        for idx in range(j1, j2):
+            if _is_status_field(new_lines[idx]):
+                continue
+            mutations.append((None, idx + 1, idx + 1, new_lines[idx]))
+    return mutations
+
+
 def _mutation_opcodes(
     old_lines: list[str],
     new_lines: list[str],
@@ -514,15 +601,15 @@ def historical_mutations(
 ) -> list[_Mutation]:
     """Return ``(baseline line, HEAD line start, HEAD line end, text)`` mutations.
 
-    Insertions are allowed so dated amendment blocks can be added. Any
-    delete or replace opcode means accepted or superseded decision text
-    was rewritten or replaced in place, except for the single authorized
-    accepted-to-superseded status transition (see
-    ``_authorized_transition``). A status field in *new_lines* that no
-    baseline status field and no authorized transition accounts for is
-    also reported, with a baseline line of ``None``. A baseline status
-    field that the diff moves inside a fenced code block is reported
-    with its baseline and HEAD lines.
+    Insertions are allowed only inside an inserted range that carries
+    a dated amendment marker. Any delete or replace opcode means
+    accepted or superseded decision text was rewritten or replaced in
+    place, except for the single authorized accepted-to-superseded
+    status transition (see ``_authorized_transition``). A status field
+    in *new_lines* that no baseline status field and no authorized
+    transition accounts for is also reported, with a baseline line of
+    ``None``. A baseline status field that the diff moves inside a
+    fenced code block is reported with its baseline and HEAD lines.
 
     Line numbers may be ``None``: a deleted line has no HEAD line, and
     an extra status line has no baseline line.
@@ -539,6 +626,7 @@ def historical_mutations(
         + _fenced_status_mutations(
             old_lines, opcodes, old_fenced, new_fenced, authorized
         )
+        + _unexpected_insertion_mutations(new_lines, opcodes)
     )
 
 
