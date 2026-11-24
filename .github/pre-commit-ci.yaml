@@ -139,22 +139,3 @@ repos:
         language: system
         pass_filenames: false
         files: ^(scripts/(check_gate_invariant|test_check_gate_invariant)\.py|\.pre-commit-config\.yaml)$
-      # `pre-commit run --all-files` reports these hooks as
-      # `(no files to check)Skipped` because the repository tracks
-      # no files of these types. The gate rehearsal fails on any
-      # skipped hook, so they run in CI. They validate files when
-      # the repository gains them.
-      - id: check-toml
-        name: check-toml
-        description: Ensure toml files are valid
-        entry: check-toml
-        language: python
-        additional_dependencies: ["pre-commit-hooks==6.0.0"]
-        types: [toml]
-      - id: check-xml
-        name: check-xml
-        description: Check that XML files are valid
-        entry: check-xml
-        language: python
-        additional_dependencies: ["pre-commit-hooks==6.0.0"]
-        types: [xml]

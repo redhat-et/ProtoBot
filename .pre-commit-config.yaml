@@ -89,10 +89,25 @@ repos:
         language: python
         additional_dependencies: ["pre-commit-hooks==6.0.0"]
         types: [symlink]
-      # check-toml and check-xml are CI-only (see
-      # .github/pre-commit-ci.yaml): the repository tracks no .toml
-      # or .xml files, so they skip, and the gate rehearsal fails
-      # on any skipped hook.
+      # check-toml and check-xml stay in the gate: no cause in the
+      # ADR-0005 placement rule applies. The repository tracks no
+      # .toml or .xml files, so both report
+      # "(no files to check)Skipped"; the rehearsal's closed
+      # exception list allows exactly that skip for these two hooks.
+      - id: check-toml
+        name: check-toml
+        description: Ensure toml files are valid
+        entry: check-toml
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [toml]
+      - id: check-xml
+        name: check-xml
+        description: Check that XML files are valid
+        entry: check-xml
+        language: python
+        additional_dependencies: ["pre-commit-hooks==6.0.0"]
+        types: [xml]
       - id: debug-statements
         name: debug-statements
         description: debugger imports and breakpoint() calls

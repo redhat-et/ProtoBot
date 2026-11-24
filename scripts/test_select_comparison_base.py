@@ -246,6 +246,7 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertEqual("", stdout)
         self.assertIn("::error::", stderr)
+        self.assertIn("is not present in this checkout", stderr)
 
     def test_error_annotation_stays_single_line(self) -> None:
         status, _, stderr = self._run({"DEFAULT_BRANCH": "ma\nin"})

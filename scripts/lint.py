@@ -54,6 +54,7 @@ Usage::
     python scripts/lint.py --online                    # allow network access
     python scripts/lint.py --online-if-ci              # --online when CI=true
     python scripts/lint.py --print-pre-commit-version  # pinned version
+    python scripts/lint.py --print-fullsend-pre-commit-version  # Fullsend pin
 
 CI runs ``python3 scripts/lint.py --all-files --online-if-ci`` and
 installs the pre-commit version that ``--print-pre-commit-version``
@@ -90,13 +91,20 @@ CI_CONFIG_PATH = REPO_ROOT / ".github" / "pre-commit-ci.yaml"
 
 # The pre-commit version this wrapper requires. CI installs exactly
 # this version; it reads the value through --print-pre-commit-version.
-# It deliberately differs from PRECOMMIT_VERSION in
-# scripts/pre_commit_cache.py (4.5.1, the version Fullsend ships): CI
+# It deliberately differs from FULLSEND_PRE_COMMIT_VERSION below: CI
 # and developers validate the full hook set on this newer release,
 # while the gate-rehearsal job proves the gate configuration on the
 # exact version Fullsend runs in its sandbox. Change either pin only
 # with the other in mind.
 PRE_COMMIT_VERSION = "4.6.2"
+
+# The pre-commit version the Fullsend sandbox image ships and the
+# Fullsend runner post-script installs when no executable resolves.
+# gate-rehearsal installs this version, reading it through
+# --print-fullsend-pre-commit-version. PRECOMMIT_VERSION in
+# scripts/pre_commit_cache.py must equal this value until issue #581
+# retires the bootstrap.
+FULLSEND_PRE_COMMIT_VERSION = "4.5.1"
 
 # Bootstrap tarball copied into the sandbox by the Fullsend pre-script
 # (see .fullsend/README.md).
@@ -196,8 +204,9 @@ def _load_config(path: Path) -> dict[str, Any]:
     """Parse one pre-commit configuration file.
 
     PyYAML is imported here, not at module import time, so paths that
-    read no configuration (``--print-pre-commit-version``;
-    ``--all-files`` and ``--files`` with network access assumed) run
+    read no configuration (``--print-pre-commit-version`` and
+    ``--print-fullsend-pre-commit-version``; ``--all-files`` and
+    ``--files`` with network access assumed) run
     without PyYAML. An absent file is an empty configuration — merge
     skew for the CI configuration; any other read error propagates.
     """
@@ -1975,6 +1984,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the pinned pre-commit version and exit; CI installs it",
     )
+    parser.add_argument(
+        "--print-fullsend-pre-commit-version",
+        action="store_true",
+        help=(
+            "print the pre-commit version the Fullsend sandbox ships and "
+            "gate-rehearsal installs, and exit"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.print_pre_commit_version:
@@ -1984,6 +2001,15 @@ def main(argv: list[str] | None = None) -> int:
                 "--check-parity, --all-files, or --files"
             )
         print(PRE_COMMIT_VERSION)
+        return 0
+
+    if args.print_fullsend_pre_commit_version:
+        if args.check_parity or args.all_files or args.files:
+            parser.error(
+                "--print-fullsend-pre-commit-version cannot be combined with "
+                "--check-parity, --all-files, or --files"
+            )
+        print(FULLSEND_PRE_COMMIT_VERSION)
         return 0
 
     online = args.online or (args.online_if_ci and _ci_is_enabled())

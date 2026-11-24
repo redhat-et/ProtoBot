@@ -20,8 +20,10 @@ from unittest.mock import ANY, call, patch
 
 if __package__:
     from scripts import lint as checker
+    from scripts import pre_commit_cache
 else:
     import lint as checker
+    import pre_commit_cache
 
 
 # env_specs sentinel: link an environment's bin/python to the running
@@ -3983,6 +3985,58 @@ class PrintPreCommitVersionTests(unittest.TestCase):
         mock_run.assert_not_called()
 
 
+class PrintFullsendPreCommitVersionTests(unittest.TestCase):
+    """``--print-fullsend-pre-commit-version`` mirrors the wrapper pin flag.
+
+    The Fullsend pin is the version the sandbox image ships and the
+    runner post-script installs when no executable resolves; the
+    gate-rehearsal job installs it (ADR-0005).
+    """
+
+    def test_prints_fullsend_pin_without_reading_config(self) -> None:
+        def _fail_if_called(path: Path) -> None:
+            self.fail("--print-fullsend-pre-commit-version must not read the config")
+
+        buf = io.StringIO()
+        with (
+            patch.object(checker, "_load_config", side_effect=_fail_if_called),
+            patch("subprocess.run") as mock_run,
+            contextlib.redirect_stdout(buf),
+        ):
+            rc = checker.main(["--print-fullsend-pre-commit-version"])
+        self.assertEqual(0, rc)
+        self.assertRegex(checker.FULLSEND_PRE_COMMIT_VERSION, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(f"{checker.FULLSEND_PRE_COMMIT_VERSION}\n", buf.getvalue())
+        mock_run.assert_not_called()
+
+    def test_print_fullsend_version_rejects_mode_and_scope_flags(self) -> None:
+        for flags in (
+            ["--print-fullsend-pre-commit-version", "--check-parity"],
+            ["--print-fullsend-pre-commit-version", "--all-files"],
+            ["--print-fullsend-pre-commit-version", "--files", "a.py"],
+        ):
+            with self.subTest(flags=flags):
+                buf = io.StringIO()
+                with (
+                    contextlib.redirect_stderr(buf),
+                    patch("subprocess.run") as mock_run,
+                    self.assertRaises(SystemExit) as raised,
+                ):
+                    checker.main(flags)
+                self.assertEqual(2, raised.exception.code)
+                mock_run.assert_not_called()
+                self.assertIn("cannot be combined with", buf.getvalue())
+
+    def test_fullsend_pin_equals_the_bootstrap_cache_pin(self) -> None:
+        # ADR-0005: PRECOMMIT_VERSION in scripts/pre_commit_cache.py
+        # must equal FULLSEND_PRE_COMMIT_VERSION until issue #581
+        # retires the bootstrap.
+        self.assertEqual(
+            pre_commit_cache.PRECOMMIT_VERSION,
+            checker.FULLSEND_PRE_COMMIT_VERSION,
+        )
+
+
 class MainCiInvocationTests(unittest.TestCase):
     """The CI invocation must work without reading any configuration.
 
@@ -4629,7 +4683,7 @@ class CiWorkflowContractTests(unittest.TestCase):
     _PRE_COMMIT_JOB = "pre-commit"
     _CI_SUCCESS_JOB = "ci-success"
     _FULLSEND_PIN_COMMAND = (
-        "python3 scripts/pre_commit_cache.py --print-pre-commit-version"
+        "python3 scripts/lint.py --print-fullsend-pre-commit-version"
     )
 
     # Guards the rehearsal step must carry (ADR-0005 Decision item 3):
@@ -4649,6 +4703,23 @@ class CiWorkflowContractTests(unittest.TestCase):
         "PRE_COMMIT_HOME",
         "ls -A",
         "Skipped",
+    )
+
+    # The base exports the pre-commit job must wire (ADR-0005
+    # Base-aware validation). The select step's id is free; the
+    # source of each export is not. The last two take exact_base
+    # with a merge_base fallback.
+    _BASE_EXPORT_PATTERNS = (
+        r"GITHUB_BASE_SHA: \$\{\{ steps\.\w+\.outputs\.merge_base \}\}",
+        r"PROTOBOT_VALIDATOR_BASE: \$\{\{ steps\.\w+\.outputs\.exact_base \}\}",
+        (
+            r"BASELINE_RATCHET_BASE_REF: \$\{\{ steps\.\w+\.outputs\.exact_base"
+            r" \|\| steps\.\w+\.outputs\.merge_base \}\}"
+        ),
+        (
+            r"PRE_COMMIT_FROM_REF: \$\{\{ steps\.\w+\.outputs\.exact_base"
+            r" \|\| steps\.\w+\.outputs\.merge_base \}\}"
+        ),
     )
 
     def setUp(self) -> None:
@@ -4838,13 +4909,75 @@ class CiWorkflowContractTests(unittest.TestCase):
 
     def test_gate_rehearsal_installs_the_fullsend_pre_commit_version(self) -> None:
         # The Fullsend pin, not the wrapper pin: the rehearsal proves
-        # the gate on the version the sandbox runs.
+        # the gate on the version the sandbox runs. scripts/lint.py
+        # owns both pins; the rehearsal reads the Fullsend pin through
+        # --print-fullsend-pre-commit-version.
         self.assertTrue(
             any(
                 self._FULLSEND_PIN_COMMAND in command
                 for command in self.rehearsal_commands
             )
         )
+
+    def test_gate_rehearsal_probes_the_pre_commit_hooks_repository(self) -> None:
+        # ADR-0005 amendment: the ls-remote probe names
+        # pre-commit/pre-commit-hooks, the repository the gate once
+        # cloned. The deny rule establishes the condition; the probe
+        # only confirms that the deny rule is active.
+        commands = self._rehearsal_direct_run_commands()
+        self.assertTrue(
+            any(
+                "git ls-remote" in command
+                and "https://github.com/pre-commit/pre-commit-hooks" in command
+                for command in commands
+            ),
+            "the rehearsal must probe git ls-remote against "
+            "https://github.com/pre-commit/pre-commit-hooks",
+        )
+
+    def test_gate_rehearsal_positive_controls_prove_local_git_and_pypi(self) -> None:
+        # ADR-0005 amendment: denial covers network transports only,
+        # so each run carries positive controls. A file:// clone
+        # proves local Git operates; a --no-deps pip download of
+        # iniconfig proves PyPI access operates.
+        commands = self._rehearsal_direct_run_commands()
+        self.assertTrue(
+            any(
+                all(token in command for token in ("git clone", "file://"))
+                for command in commands
+            ),
+            "the rehearsal must clone a file:// repository as a positive control",
+        )
+        self.assertTrue(
+            any(
+                all(
+                    token in command
+                    for token in ("pip download", "--no-deps", "iniconfig")
+                )
+                for command in commands
+            ),
+            "the rehearsal must download iniconfig from PyPI as a positive control",
+        )
+
+    def test_gate_rehearsal_skip_check_records_and_limits_allowed_skips(self) -> None:
+        # ADR-0005 amendment: the rehearsal records each skipped hook
+        # with its skip reason, then fails unless every skipped hook
+        # is check-toml or check-xml reporting no files to check. The
+        # exception list is closed: a new hook needs a tracked
+        # matching file or an amendment. The reason is asserted as
+        # "no files to check" because pre-commit prints it inside the
+        # "(...)Skipped" marker: a literal-marker grep and a parsed
+        # reason check both name it, so either form satisfies the
+        # contract.
+        commands = self._rehearsal_direct_run_commands()
+        self.assertTrue(
+            any("grep" in command and "Skipped" in command for command in commands),
+            "the skip check must grep the run log to record each skipped hook",
+        )
+        step_text = "\n".join(commands)
+        for token in ("check-toml", "check-xml", "no files to check"):
+            with self.subTest(token=token):
+                self.assertIn(token, step_text)
 
     def test_pre_commit_job_sets_up_go_before_installing_pre_commit(self) -> None:
         # ADR-0005 Decision item 5: scripts/lint.py runs the Go hooks
@@ -4857,6 +4990,83 @@ class CiWorkflowContractTests(unittest.TestCase):
             job_text.index("actions/setup-go@"),
             job_text.index("Install pre-commit"),
         )
+
+    def test_pre_commit_job_checkout_fetches_the_full_history(self) -> None:
+        # ADR-0005 cutover step 8: the job resolves a comparison
+        # base, so the checkout must hold enough history to contain
+        # the base commit.
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        self.assertIn("fetch-depth: 0", job_text)
+        self.assertLess(
+            job_text.index("actions/checkout@"),
+            job_text.index("fetch-depth: 0"),
+        )
+
+    def test_pre_commit_job_installs_pyyaml_and_jsonschema_before_lint(self) -> None:
+        # ADR-0005 cutover step 7: the CI configuration's
+        # language: system hooks import PyYAML and jsonschema without
+        # declaring the dependency, so the job installs both pins for
+        # python3 (venv or equivalent) before scripts/lint.py runs.
+        commands = _job_commands(self.text, self._PRE_COMMIT_JOB)
+        lint_at = next(
+            index
+            for index, command in enumerate(commands)
+            if command == "python3 scripts/lint.py --all-files --online-if-ci"
+        )
+        for pin in ("pyyaml==6.0.3", "jsonschema==4.25.1"):
+            with self.subTest(pin=pin):
+                install_at = [
+                    index for index, command in enumerate(commands) if pin in command
+                ]
+                self.assertTrue(install_at, f"no command installs {pin}")
+                self.assertLess(min(install_at), lint_at)
+
+    def test_pre_commit_job_exports_github_token_to_the_lint_step(self) -> None:
+        # ADR-0005 Accepted risk: GH_TOKEN lets zizmor run its online
+        # audits at merge time; without the token 5 audits skip even
+        # in online mode. A job-level env block and the lint step's
+        # own env both satisfy the export.
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        self.assertIn("GH_TOKEN: ${{ github.token }}", job_text)
+
+    def test_pre_commit_job_selects_the_comparison_base(self) -> None:
+        # ADR-0005 cutover step 9: the job binds the four event
+        # inputs to scripts/select_comparison_base.py, which fails
+        # closed when the event requires a base git cannot provide,
+        # before the lint step consumes the exports.
+        commands = _job_commands(self.text, self._PRE_COMMIT_JOB)
+        self.assertIn("python3 scripts/select_comparison_base.py", commands)
+        self.assertLess(
+            commands.index("python3 scripts/select_comparison_base.py"),
+            commands.index("python3 scripts/lint.py --all-files --online-if-ci"),
+        )
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        for binding in (
+            "DEFAULT_BRANCH:",
+            "PULL_REQUEST_BASE_SHA:",
+            "MERGE_GROUP_BASE_SHA:",
+            "PUSH_BEFORE_SHA:",
+        ):
+            with self.subTest(binding=binding):
+                self.assertIn(binding, job_text)
+
+    def test_pre_commit_job_exports_the_comparison_base(self) -> None:
+        # ADR-0005 Base-aware validation: GITHUB_BASE_SHA comes from
+        # merge_base, PROTOBOT_VALIDATOR_BASE from exact_base, and
+        # BASELINE_RATCHET_BASE_REF and PRE_COMMIT_FROM_REF from
+        # exact_base with a merge_base fallback.
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        for pattern in self._BASE_EXPORT_PATTERNS:
+            with self.subTest(pattern=pattern):
+                self.assertRegex(job_text, pattern)
 
     def test_ci_success_needs_gate_rehearsal(self) -> None:
         job_text = _split_job(self.text, self._CI_SUCCESS_JOB)[0]
