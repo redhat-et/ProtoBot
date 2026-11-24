@@ -43,6 +43,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LINT="${REPO_ROOT}/scripts/lint.py"
 FAKE_CACHE_BUILDER="${REPO_ROOT}/tests/lint/build_fake_pre_commit_cache.py"
+# Use the real interpreter, not a version-manager shim: pyenv-style shims
+# rewrite PATH before exec, which would let an installed pre-commit shadow
+# the stub placed at the front of PATH in run_with_stub.
+PYTHON="$(python3 -c 'import sys; print(sys.executable)')"
 PASS=0
 FAIL=0
 
@@ -58,12 +62,16 @@ CREATED_FILES=()
 STAGED_FILES=()
 
 cleanup() {
-    for f in "${STAGED_FILES[@]}"; do
-        git -C "${REPO_ROOT}" restore --staged -- "${f}" 2>/dev/null || true
-    done
-    for f in "${CREATED_FILES[@]}"; do
-        rm -f "${f}"
-    done
+    if [[ "${#STAGED_FILES[@]}" -gt 0 ]]; then
+        for f in "${STAGED_FILES[@]}"; do
+            git -C "${REPO_ROOT}" restore --staged -- "${f}" 2>/dev/null || true
+        done
+    fi
+    if [[ "${#CREATED_FILES[@]}" -gt 0 ]]; then
+        for f in "${CREATED_FILES[@]}"; do
+            rm -f "${f}"
+        done
+    fi
     rm -rf "${WORKDIR}"
 }
 trap cleanup EXIT INT TERM HUP
@@ -75,7 +83,7 @@ if ! command -v pre-commit >/dev/null 2>&1; then
     exit 1
 fi
 
-python3 "${FAKE_CACHE_BUILDER}" "${REPO_ROOT}" "${WARM_CACHE}"
+"${PYTHON}" "${FAKE_CACHE_BUILDER}" "${REPO_ROOT}" "${WARM_CACHE}"
 
 # A stub `pre-commit` placed ahead of the real one on PATH. Records the
 # argv it was called with (one per line) and the environment variables
@@ -112,7 +120,7 @@ fail_test() {
 # Run lint.py against the *real* .pre-commit-config.yaml with an empty
 # cache directory (no db.db at all), network assumed unavailable.
 run_with_empty_cache() {
-    PRE_COMMIT_HOME="${EMPTY_CACHE}" env -u CI python3 "${LINT}" "$@" 2>&1
+    PRE_COMMIT_HOME="${EMPTY_CACHE}" env -u CI "${PYTHON}" "${LINT}" "$@" 2>&1
 }
 
 # Run lint.py against the real config through the stub `pre-commit`,
@@ -124,7 +132,7 @@ run_with_stub() {
     PATH="${STUB_BIN}:${PATH}" \
         PRE_COMMIT_HOME="${WARM_CACHE}" \
         STUB_CAPTURE_DIR="${STUB_CAPTURE}" \
-        env -u CI python3 "${LINT}" "$@" >/dev/null 2>&1 || rc=$?
+        env -u CI "${PYTHON}" "${LINT}" "$@" >/dev/null 2>&1 || rc=$?
     return "${rc}"
 }
 
@@ -148,7 +156,7 @@ while IFS= read -r repo_url; do
     if ! echo "${preflight_output}" | grep -qF "${repo_url}"; then
         missing_repos_ok=false
     fi
-done < <(python3 - "${REPO_ROOT}" <<'PY'
+done < <("${PYTHON}" - "${REPO_ROOT}" <<'PY'
 import sys
 import yaml
 from pathlib import Path
@@ -181,7 +189,7 @@ else
 fi
 
 warm_parity_rc=0
-warm_parity_output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI python3 "${LINT}" --check-parity)" || warm_parity_rc=$?
+warm_parity_output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI "${PYTHON}" "${LINT}" --check-parity)" || warm_parity_rc=$?
 if [[ "${warm_parity_rc}" -eq 0 ]] \
     && echo "${warm_parity_output}" | grep -qF "PARITY CHECK PASSED"; then
     pass_test "--check-parity passes offline once every configured repo/revision is cached"
@@ -276,7 +284,7 @@ assert_wiring() {
 
     local rc=0
     local output
-    output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI python3 "${LINT}" --files "${relative_path}" 2>&1)" || rc=$?
+    output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI "${PYTHON}" "${LINT}" --files "${relative_path}" 2>&1)" || rc=$?
     rm -f "${full_path}"
 
     local ok=true
@@ -332,7 +340,7 @@ STAGED_FILES+=("${dummy_del}")
 rm -f "${dummy_del_path}"
 
 del_rc=0
-del_output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI python3 "${LINT}" 2>&1)" || del_rc=$?
+del_output="$(PRE_COMMIT_HOME="${WARM_CACHE}" env -u CI "${PYTHON}" "${LINT}" 2>&1)" || del_rc=$?
 
 git -C "${REPO_ROOT}" restore --staged -- "${dummy_del}" 2>/dev/null || true
 
