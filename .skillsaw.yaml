@@ -21,7 +21,9 @@ rules:
     # then ratchets that finding (ceiling mode) and rejects token
     # growth. Consolidate existing rules or move instructions into
     # on-demand skills before adding prose. After a successful
-    # shrink, run `skillsaw baseline` to lower the ceiling.
+    # shrink, lower the warn limit first, then run `skillsaw baseline`
+    # to lower the ceiling; the ratchet rejects deleting a ceiling row
+    # while AGENTS.md still exists.
     limits:
       agents-md:
-        warn: 3950
+        warn: 3900

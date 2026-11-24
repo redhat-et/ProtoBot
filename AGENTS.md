@@ -32,16 +32,17 @@ Agents must follow these rules:
 
 ## Context budget and prompt efficiency
 
-`AGENTS.md` enters every dispatched prompt. The `context-budget` rule's
-`agents-md` warn limit in `.skillsaw.yaml` triggers the finding;
-[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py)
-rejects a `.skillsaw-baseline.json` ceiling increase.
+`AGENTS.md` enters every dispatched agent's prompt, capped by
+`context-budget`'s `agents-md` warn limit in `.skillsaw.yaml` and
+ratcheted by
+[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
 
-1. **Respect the prompt context budget.** Do not raise a
-   `.skillsaw-baseline.json` ceiling to fit new prose. After a genuine
-   shrink, lower the `agents-md` warn limit in `.skillsaw.yaml`, then run
-   `skillsaw baseline` to ratchet the ceiling down
-   (`.skillsaw.yaml:27`).
+1. **Respect the prompt context budget.** Never raise or delete a
+   `.skillsaw-baseline.json` ceiling row while the file that the ceiling
+   tracks still exists. After a genuine prose shrink, lower the
+   `agents-md` warn limit in
+   `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
+   downward (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
@@ -58,12 +59,12 @@ A governed scope defines applicability; its list or governed collection
 defines the sibling set. A **module README** is the top-level
 `README.md` of a directory with a `go.mod`.
 
-When creating or modifying any numbered rule in `AGENTS.md`, any
-specification document under `docs/`, any skill file under
-`.agents/skills/`, any module README, or any entry in a future governed
-scope, agents must follow these rules. Review agents must enforce these
-rules reflexively on PRs that create, modify, or consolidate entries
-within `AGENTS.md` itself.
+When creating or modifying a numbered rule in `AGENTS.md`,
+specification document under `docs/`, skill file under
+`.agents/skills/`, module README, or entry in a future governed scope,
+agents must follow these rules. Review agents must enforce these rules
+reflexively on PRs that create, modify, or consolidate entries within
+`AGENTS.md` itself.
 
 1. **Read all sibling entries first.** Read every other entry in the
    list or governed collection before drafting or revising an entry.
@@ -99,8 +100,8 @@ and `docs/` specification documents describing the module).
 
 ## Specification document hierarchy
 
-Every `docs/` Markdown file is a governed hierarchy member; the prefix,
-not the list, defines membership.
+Every `docs/` Markdown file is a governed hierarchy member; the
+`docs/` prefix, not the list, defines membership.
 
 - `docs/vision.md` — registered Vision artifact (purpose, users,
   outcomes).
@@ -119,7 +120,7 @@ not the list, defines membership.
 - [`docs/architecture/jobsite-sandbox.md`][jobsite-sandbox-doc] —
   Job Site sandbox contract and local conformance suite.
 - `docs/architecture/user-interaction-flow.md` — phase details,
-  sequence diagrams, and testing strategy.
+  sequence diagrams, testing strategy.
 - `docs/architecture/drafting-table-ux.md` — stable interaction
   contract for the first local Drafting Table.
 - [`docs/architecture/agent-harness/`][agent-harness-doc] — Agent
@@ -129,8 +130,8 @@ not the list, defines membership.
   internal and external projects informing the design.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
   versioned evaluation fixture schema and result contract.
-- `docs/architecture/open-questions.md` — unresolved design
-  questions across all areas.
+- `docs/architecture/open-questions.md` — unresolved design questions
+  across all areas.
 - `docs/decisions/` — architecture decision records.
 
 [git-integration-doc]: docs/architecture/git-integration.md
@@ -181,7 +182,8 @@ must follow these rules:
    elsewhere.** When a PR changes a contract, lifecycle, or
    behavior description in a specification document, search
    every other governed Markdown document under `docs/` for
-   prose describing that behavior and flag any stale.
+   prose describing the same behavior and flag any
+   not updated to match.
 
 5. **Update registered specification artifacts through
    `ears-manager artifact put`.** Registered specification artifacts
@@ -228,11 +230,11 @@ must follow these rules:
    rewritten or replaced in place. When design evolution amends an accepted
    architecture decision record, append a dated amendment block
    (`**[Amended Month Year]**`) with the change, its rationale, and
-   references to updated architecture documents. Review agents must
-   verify accepted decision text is never rewritten or replaced in
-   place, and that amendments append the dated amendment block
-   (`**[Amended Month Year]**`) with the change, its rationale, and
-   references to updated architecture documents.
+   references to updated architecture documents; review agents must
+   verify no in-place rewrite or replacement and each amendment
+   appends the dated amendment block (`**[Amended Month Year]**`) with
+   the change, its rationale, and references to updated architecture
+   documents.
 
 ## Agent skills
 

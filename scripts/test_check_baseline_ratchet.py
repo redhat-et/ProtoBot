@@ -40,6 +40,19 @@ def _baseline(*entries: dict[str, object]) -> dict[str, object]:
     return {"version": "1", "violations": list(entries)}
 
 
+def _skillsaw_config(agents_md_limit: object) -> dict[str, object]:
+    """Return a skillsaw config with one ``agents-md`` limit entry."""
+    return {
+        "rules": {
+            "context-budget": {
+                "limits": {
+                    "agents-md": agents_md_limit,
+                }
+            }
+        }
+    }
+
+
 class CompareCeilingsTests(unittest.TestCase):
     def test_increase_is_rejected(self) -> None:
         """Fail when a ceiling value rises relative to the base."""
@@ -95,6 +108,87 @@ class CompareCeilingsTests(unittest.TestCase):
 
         self.assertEqual([], diagnostics)
 
+    def test_dropped_ceiling_for_existing_file_is_rejected(self) -> None:
+        """Reject dropping a baseline ceiling entry if the file still exists."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / "AGENTS.md").write_text("dummy", encoding="utf-8")
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(_ceiling(value=4000)),
+                repo_root=repo_root,
+            )
+
+        self.assertEqual(
+            [
+                (
+                    "ERROR: .skillsaw-baseline.json ceiling for AGENTS.md "
+                    "(context-budget) was removed while the file still exists. "
+                    "Baseline ceilings may only ratchet downwards or remain "
+                    "unchanged, not be deleted."
+                )
+            ],
+            diagnostics,
+        )
+
+    def test_dropped_ceiling_for_deleted_file_is_accepted(self) -> None:
+        """Permit dropping a ceiling if the tracked file was deleted."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(
+                    _ceiling(file_path="docs/nonexistent_deleted_file.md", value=100)
+                ),
+                repo_root=Path(tmp_dir),
+            )
+
+        self.assertEqual([], diagnostics)
+
+    def test_dropped_ceiling_for_dangling_symlink_is_rejected(self) -> None:
+        """A broken symlink still occupies the tracked path."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            os.symlink(repo_root / "missing-target", repo_root / "AGENTS.md")
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(_ceiling(value=4000)),
+                repo_root=repo_root,
+            )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("was removed while the file still exists", diagnostics[0])
+
+    def test_dropped_ceiling_is_skipped_without_repo_root(self) -> None:
+        """Skip dropped-ceiling detection when file existence cannot be checked."""
+        diagnostics = checker.compare_ceilings(
+            _baseline(),
+            _baseline(_ceiling(value=4000)),
+        )
+
+        self.assertEqual([], diagnostics)
+
+    def test_dropped_ceiling_for_non_context_budget_rule_is_rejected(self) -> None:
+        """Retain ceilings for every rule, not only context-budget."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / "docs").mkdir()
+            (repo_root / "docs/vision.md").write_text("dummy", encoding="utf-8")
+            diagnostics = checker.compare_ceilings(
+                _baseline(),
+                _baseline(
+                    _ceiling(
+                        file_path="docs/vision.md",
+                        rule_id="content-section-length",
+                        value=500,
+                    )
+                ),
+                repo_root=repo_root,
+            )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("(content-section-length)", diagnostics[0])
+        self.assertIn("was removed while the file still exists", diagnostics[0])
+
     def test_non_ceiling_entries_are_ignored(self) -> None:
         """Ignore baseline rows that are not ceiling mode."""
         head = _baseline(
@@ -114,11 +208,21 @@ class CompareCeilingsTests(unittest.TestCase):
 
         self.assertEqual([], checker.compare_ceilings(head, base))
 
-    def test_duplicate_head_entries_use_the_maximum(self) -> None:
-        """Reject when any duplicate head value exceeds the base."""
+    def test_duplicate_head_entries_are_rejected_as_ambiguous(self) -> None:
+        """Reject duplicate ceiling keys instead of choosing a tie-break."""
+        head = _baseline(_ceiling(value=4000), _ceiling(value=4100))
+
+        with self.assertRaises(checker.BaselineRatchetError) as raised:
+            checker.ceiling_values(head, "working tree")
+
+        self.assertIn("more than one ceiling for AGENTS.md", str(raised.exception))
+
+    def test_supplied_head_index_is_used_instead_of_rebuilding_it(self) -> None:
+        """Use the caller's head index so the working tree is indexed once."""
         diagnostics = checker.compare_ceilings(
-            _baseline(_ceiling(value=4000), _ceiling(value=4100)),
+            _baseline(),
             _baseline(_ceiling(value=4000)),
+            head_index={("AGENTS.md", "context-budget"): [4100]},
         )
 
         self.assertEqual(1, len(diagnostics))
@@ -194,6 +298,167 @@ class CompareCeilingsTests(unittest.TestCase):
         self.assertEqual(1, len(diagnostics))
         self.assertIn("docs/vision.md", diagnostics[0])
         self.assertIn("increased from 2050 to 2100", diagnostics[0])
+
+
+class WarnLimitTests(unittest.TestCase):
+    def test_warn_limit_exceeding_ceiling_is_rejected(self) -> None:
+        """Reject an agents-md warn limit above the tracked ceiling."""
+        diagnostics = checker.compare_warn_limits(
+            {("AGENTS.md", "context-budget"): [4000]},
+            _skillsaw_config({"warn": 4100}),
+        )
+
+        self.assertEqual(
+            [
+                (
+                    "ERROR: .skillsaw.yaml context-budget warn limit for "
+                    "AGENTS.md (4100) exceeds baseline ceiling (4000). Lower the "
+                    "warn limit in .skillsaw.yaml to match or precede the ceiling."
+                )
+            ],
+            diagnostics,
+        )
+
+    def test_warn_limit_equal_to_ceiling_is_accepted(self) -> None:
+        """Allow an agents-md warn limit equal to the ceiling."""
+        diagnostics = checker.compare_warn_limits(
+            {("AGENTS.md", "context-budget"): [4000]},
+            _skillsaw_config({"warn": 4000}),
+        )
+
+        self.assertEqual([], diagnostics)
+
+    def test_warn_limit_below_ceiling_is_accepted(self) -> None:
+        """Allow an agents-md warn limit below the ceiling."""
+        diagnostics = checker.compare_warn_limits(
+            {("AGENTS.md", "context-budget"): [4009]},
+            _skillsaw_config({"warn": 3950}),
+        )
+
+        self.assertEqual([], diagnostics)
+
+    def test_integer_shorthand_warn_limit_is_accepted(self) -> None:
+        """Allow skillsaw's integer shorthand for the agents-md limit."""
+        diagnostics = checker.compare_warn_limits(
+            {("AGENTS.md", "context-budget"): [4000]},
+            _skillsaw_config(4000),
+        )
+
+        self.assertEqual([], diagnostics)
+
+    def test_present_non_numeric_warn_limit_is_rejected(self) -> None:
+        """Report a present limit whose value is not numeric as the wrong type."""
+        for entry in ({}, {"warn": "4000"}, {"warn": True}, None, True):
+            with self.subTest(entry=entry):
+                diagnostics = checker.compare_warn_limits(
+                    {("AGENTS.md", "context-budget"): [4000]},
+                    _skillsaw_config(entry),
+                )
+
+                self.assertEqual(1, len(diagnostics))
+                self.assertIn("is not a numeric warn limit", diagnostics[0])
+                self.assertIn("limits.agents-md", diagnostics[0])
+
+    def test_absent_warn_limit_is_reported_as_missing(self) -> None:
+        """Report an absent agents-md key as missing, not as the wrong type."""
+        config = {"rules": {"context-budget": {"limits": {"other-file": 4000}}}}
+
+        diagnostics = checker.compare_warn_limits(
+            {("AGENTS.md", "context-budget"): [4000]},
+            config,
+        )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn("is missing from", diagnostics[0])
+        self.assertNotIn("is not a numeric warn limit", diagnostics[0])
+
+    def test_non_agents_context_budget_ceiling_is_ignored(self) -> None:
+        """Do not infer skillsaw categories for other tracked context-budget files."""
+        diagnostics = checker.compare_warn_limits(
+            {(".agents/skills/helper/SKILL.md", "context-budget"): [3000]},
+            _skillsaw_config({"warn": 9999}),
+        )
+
+        self.assertEqual([], diagnostics)
+
+    def test_missing_config_fails_closed(self) -> None:
+        """Fail closed when .skillsaw.yaml is absent but AGENTS.md is tracked."""
+        diagnostics = checker.compare_warn_limits(
+            {("AGENTS.md", "context-budget"): [4000]},
+            None,
+        )
+
+        self.assertEqual(1, len(diagnostics))
+        self.assertIn(".skillsaw.yaml is missing", diagnostics[0])
+        self.assertIn("baseline ceiling (4000)", diagnostics[0])
+
+
+class LoadSkillsawConfigTests(unittest.TestCase):
+    def test_absent_config_returns_none(self) -> None:
+        """Return None when .skillsaw.yaml is absent."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self.assertIsNone(checker.load_skillsaw_config(Path(tmp_dir)))
+
+    def test_valid_config_is_parsed(self) -> None:
+        """Parse a minimal context-budget configuration."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            config_path = repo_root / checker.SKILLSAW_CONFIG_RELATIVE_PATH
+            config_path.write_text(
+                "rules:\n"
+                "  context-budget:\n"
+                "    limits:\n"
+                "      agents-md:\n"
+                "        warn: 3950\n",
+                encoding="utf-8",
+            )
+
+            config = checker.load_skillsaw_config(repo_root)
+
+        self.assertIsNotNone(config)
+        self.assertEqual(3950, checker.agents_md_warn_limit(config or {}))
+
+    def test_empty_config_is_rejected(self) -> None:
+        """Fail closed when .skillsaw.yaml parses to None (e.g. an empty file)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+                "",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(checker.BaselineRatchetError) as raised:
+                checker.load_skillsaw_config(repo_root)
+
+        self.assertIn("must be a YAML mapping", str(raised.exception))
+
+    def test_invalid_yaml_is_rejected(self) -> None:
+        """Fail closed when .skillsaw.yaml is unparseable."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+                "rules: [invalid: yaml: :\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(checker.BaselineRatchetError) as raised:
+                checker.load_skillsaw_config(repo_root)
+
+        self.assertIn("invalid YAML in .skillsaw.yaml", str(raised.exception))
+
+    def test_non_mapping_config_is_rejected(self) -> None:
+        """Fail closed when .skillsaw.yaml is not a YAML mapping."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            (repo_root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+                "- not-a-mapping\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(checker.BaselineRatchetError) as raised:
+                checker.load_skillsaw_config(repo_root)
+
+        self.assertIn("must be a YAML mapping", str(raised.exception))
 
 
 class ParseBaselineTests(unittest.TestCase):
@@ -618,6 +883,7 @@ class CheckRepoTests(unittest.TestCase):
         self._git("config", "user.name", "Ratchet Test")
         self._git("config", "commit.gpgsign", "false")
         self._write_baseline(_baseline(_ceiling(value=4000)))
+        self._write_config(3950)
         self._git("add", checker.BASELINE_RELATIVE_PATH)
         self._git("commit", "-m", "base ceiling")
 
@@ -636,6 +902,18 @@ class CheckRepoTests(unittest.TestCase):
         path = self.root / checker.BASELINE_RELATIVE_PATH
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
+    def _write_config(self, warn: int) -> None:
+        """Write a minimal .skillsaw.yaml with the given agents-md warn limit."""
+        path = self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH
+        path.write_text(
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            f"        warn: {warn}\n",
+            encoding="utf-8",
+        )
+
     def test_increase_against_base_ref_fails(self) -> None:
         """Fail when the working-tree ceiling exceeds the committed base."""
         self._write_baseline(_baseline(_ceiling(value=4100)))
@@ -650,6 +928,7 @@ class CheckRepoTests(unittest.TestCase):
     def test_decrease_against_base_ref_passes(self) -> None:
         """Pass when the working-tree ceiling is lowered."""
         self._write_baseline(_baseline(_ceiling(value=3900)))
+        self._write_config(3900)
 
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
 
@@ -668,6 +947,96 @@ class CheckRepoTests(unittest.TestCase):
             messages[0],
         )
 
+    def test_dropped_ceiling_for_existing_file_fails(self) -> None:
+        """Fail when a tracked file's ceiling is removed but the file remains."""
+        (self.root / "AGENTS.md").write_text("dummy", encoding="utf-8")
+        self._write_baseline(_baseline())
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("was removed while the file still exists", messages[0])
+        self.assertIn("(context-budget)", messages[0])
+
+    def test_dropped_ceiling_for_deleted_file_passes(self) -> None:
+        """Pass when a tracked file and its ceiling are both removed."""
+        self._write_baseline(_baseline())
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
+
+    def test_warn_limit_exceeding_ceiling_fails(self) -> None:
+        """Reject .skillsaw.yaml when its agents-md warn limit exceeds the ceiling."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            "        warn: 4100\n",
+            encoding="utf-8",
+        )
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn(
+            "context-budget warn limit for AGENTS.md (4100) exceeds "
+            "baseline ceiling (4000)",
+            messages[0],
+        )
+
+    def test_warn_limit_at_or_below_ceiling_passes(self) -> None:
+        """Accept .skillsaw.yaml when its agents-md warn limit is synchronized."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules:\n"
+            "  context-budget:\n"
+            "    limits:\n"
+            "      agents-md:\n"
+            "        warn: 3950\n",
+            encoding="utf-8",
+        )
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
+
+    def test_malformed_config_fails_closed_without_tracked_agents_ceiling(
+        self,
+    ) -> None:
+        """Fail closed on malformed config even without an AGENTS.md ceiling."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).write_text(
+            "rules: [\n",
+            encoding="utf-8",
+        )
+        self._write_baseline(_baseline())
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("invalid YAML in .skillsaw.yaml", messages[0])
+
+    def test_missing_config_with_tracked_agents_ceiling_fails_closed(self) -> None:
+        """Fail closed when .skillsaw.yaml is deleted but AGENTS.md is tracked."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).unlink()
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn(".skillsaw.yaml is missing", messages[0])
+
+    def test_missing_config_without_tracked_agents_ceiling_passes(self) -> None:
+        """Allow an absent .skillsaw.yaml when no AGENTS.md ceiling is tracked."""
+        (self.root / checker.SKILLSAW_CONFIG_RELATIVE_PATH).unlink()
+        self._write_baseline(_baseline())
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("none increased", messages[0])
+
     def test_merge_base_missing_uses_named_ref_in_source_label(self) -> None:
         """Use the named ref as the source label when merge-base returns None."""
         with patch.object(checker, "git_merge_base", return_value=None):
@@ -679,14 +1048,26 @@ class CheckRepoTests(unittest.TestCase):
             messages[0],
         )
 
-    def test_missing_working_tree_baseline_skips(self) -> None:
-        """Skip when the working tree has no baseline file."""
+    def test_missing_working_tree_baseline_with_deleted_file_passes(self) -> None:
+        """Allow baseline deletion when every referenced ceiling file was deleted."""
         (self.root / checker.BASELINE_RELATIVE_PATH).unlink()
 
         exit_code, messages = checker.check_repo(self.root, base_ref="main")
 
         self.assertEqual(0, exit_code)
         self.assertIn("No .skillsaw-baseline.json", messages[0])
+        self.assertIn("deleted files", messages[0])
+
+    def test_missing_working_tree_baseline_with_existing_file_fails(self) -> None:
+        """Reject baseline deletion while a referenced ceiling file remains."""
+        (self.root / "AGENTS.md").write_text("dummy", encoding="utf-8")
+        (self.root / checker.BASELINE_RELATIVE_PATH).unlink()
+
+        exit_code, messages = checker.check_repo(self.root, base_ref="main")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("was removed while the file still exists", messages[0])
+        self.assertIn("(context-budget)", messages[0])
 
     def test_missing_explicit_base_ref_fails(self) -> None:
         """Fail closed when --base-ref does not exist."""
