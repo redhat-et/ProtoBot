@@ -43,6 +43,14 @@ Rules (ADR-0005):
   Function and method bodies are not scanned, because they do not
   execute at import time (``scripts/lint.py`` imports PyYAML inside
   ``_load_config``).
+  An import inside the body of a ``try`` statement is an optional
+  dependency when one handler catches ``ImportError``,
+  ``Exception``, or every exception (a bare ``except``). An optional
+  dependency does not require installation, so the import is allowed
+  in the entry script and in repository files, at any nesting depth.
+  The ``else`` and ``finally`` bodies of the ``try`` statement are
+  not guarded. An import with an unrelated handler only, for example
+  ``except ValueError``, is still a violation.
 * Every ``scripts/check_NAME.py`` gate checker has a companion hook
   that runs ``scripts/test_check_NAME.py``, so its negative fixtures
   run in the rehearsal.
@@ -79,6 +87,9 @@ THIRD_PARTY_FIX = (
 # redirection, substitution, and expansion; upgrade to a shell tokenizer
 # if an entry ever needs a quoted operator character.
 SHELL_METACHARACTERS = frozenset("&|;><`$\n\r")
+# A handler that names one of these exceptions, or a bare ``except``,
+# catches the ImportError that a missing dependency raises.
+OPTIONAL_DEPENDENCY_EXCEPTS = frozenset(("ImportError", "Exception"))
 
 
 @dataclass
@@ -415,11 +426,11 @@ def _check_entry_script(
 def _import_diagnostics(script: str, tree: ast.Module, repo_root: Path) -> list[str]:
     """Return every import violation reachable from *script*.
 
-    The entry script is inspected with ``ast.walk``, so imports nested
-    in functions count. Repository files that any import loads are
-    parsed and inspected for their module-scope imports with the same
-    rules. The visited set holds repository-file paths, so each file is
-    inspected once and the recursion stays bounded.
+    The entry script is inspected at any nesting depth, so imports
+    nested in functions count. Repository files that any import loads
+    are parsed and inspected for their module-scope imports with the
+    same rules. The visited set holds repository-file paths, so each
+    file is inspected once and the recursion stays bounded.
     """
     entry = ScanFrame(
         file=script,
@@ -432,12 +443,19 @@ def _import_diagnostics(script: str, tree: ast.Module, repo_root: Path) -> list[
 
 
 def _scan_imports(
-    imports: list[ast.Import | ast.ImportFrom],
+    imports: list[tuple[ast.Import | ast.ImportFrom, bool]],
     chain: tuple[ScanFrame, ...],
     state: ScanState,
 ) -> None:
-    """Inspect *imports* and every repository file they load."""
-    for node in imports:
+    """Inspect *imports* and every repository file they load.
+
+    An optional-dependency import is skipped: the module works
+    without the dependency installed, so neither the import nor a
+    repository file it names can break the gate.
+    """
+    for node, optional in imports:
+        if optional:
+            continue
         if isinstance(node, ast.Import):
             for alias in node.names:
                 _scan_dotted_import(alias.name, chain, state)
@@ -773,16 +791,16 @@ def _dedupe(files: list[str]) -> list[str]:
     return list(dict.fromkeys(files))
 
 
-def _all_imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]:
-    """Return every import node in *tree*, at any nesting depth."""
-    return [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-    ]
+def _all_imports(tree: ast.Module) -> list[tuple[ast.Import | ast.ImportFrom, bool]]:
+    """Return every import in *tree*, at any nesting depth, with its guard."""
+    collector = _ImportCollector(module_scope_only=False)
+    collector.visit(tree)
+    return collector.imports
 
 
-def _module_scope_imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]:
+def _module_scope_imports(
+    tree: ast.Module,
+) -> list[tuple[ast.Import | ast.ImportFrom, bool]]:
     """Return the imports that execute when the module is imported.
 
     Module-level ``if``, ``try``, and loop blocks run at import time,
@@ -791,27 +809,84 @@ def _module_scope_imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]
     imports do not: the repository treats a function-nested import as
     an optional dependency that the module does not require at import
     time (``scripts/lint.py`` imports PyYAML inside ``_load_config``).
+    Each returned import carries its optional-dependency guard state.
     """
-    imports: list[ast.Import | ast.ImportFrom] = []
-    for statement in tree.body:
-        imports.extend(_statement_imports(statement))
-    return imports
+    collector = _ImportCollector(module_scope_only=True)
+    collector.visit(tree)
+    return collector.imports
 
 
-def _statement_imports(node: ast.AST) -> list[ast.Import | ast.ImportFrom]:
-    """Return imports in *node*'s subtree, outside function bodies.
+class _ImportCollector(ast.NodeVisitor):
+    """Collect each import node and whether it is an optional dependency.
 
-    A class body executes when its class statement runs, so imports
-    inside it count; methods are function bodies and do not count.
+    An import is an optional dependency when it is lexically inside
+    the body of a ``try`` statement one of whose handlers catches
+    ``ImportError``, ``Exception``, or every exception (a bare
+    ``except``): the module then works without the dependency
+    installed. The handlers, ``else`` body, and ``finally`` body of
+    that ``try`` statement gain no guard from it. A nested ``try``
+    body inherits the guard of an outer handler. When
+    *module_scope_only* is set, imports inside function and async
+    function bodies are not collected: they run only when the function
+    is called, not at module import time. Class bodies are always
+    collected: they run when the class statement runs.
     """
-    if isinstance(node, (ast.Import, ast.ImportFrom)):
-        return [node]
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return []
-    imports: list[ast.Import | ast.ImportFrom] = []
-    for child in ast.iter_child_nodes(node):
-        imports.extend(_statement_imports(child))
-    return imports
+
+    def __init__(self, module_scope_only: bool) -> None:
+        self.imports: list[tuple[ast.Import | ast.ImportFrom, bool]] = []
+        self._module_scope_only = module_scope_only
+        self._optional = False
+
+    def visit_Import(self, node: ast.Import) -> None:
+        """Record one ``import`` statement with its guard state."""
+        self.imports.append((node, self._optional))
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """Record one ``from`` import statement with its guard state."""
+        self.imports.append((node, self._optional))
+
+    def visit_Try(self, node: ast.Try) -> None:
+        """Guard the ``try`` body when one handler catches a failed import."""
+        outer_optional = self._optional
+        self._optional = outer_optional or _has_optional_dependency_handler(node)
+        for statement in node.body:
+            self.visit(statement)
+        self._optional = outer_optional
+        for handler in node.handlers:
+            for statement in handler.body:
+                self.visit(statement)
+        for statement in (*node.orelse, *node.finalbody):
+            self.visit(statement)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Descend into the body only when every nested import counts."""
+        if not self._module_scope_only:
+            self.generic_visit(node)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+
+def _has_optional_dependency_handler(node: ast.Try) -> bool:
+    """Return True when one handler of *node* catches a failed import.
+
+    A bare ``except`` and a handler that names ``ImportError`` or
+    ``Exception``, alone or in a tuple, catch the ``ImportError`` a
+    missing dependency raises, so the ``try`` body holds optional
+    dependencies.
+    """
+    for handler in node.handlers:
+        if handler.type is None or _is_optional_dependency_except(handler.type):
+            return True
+    return False
+
+
+def _is_optional_dependency_except(exception_type: ast.expr) -> bool:
+    """Return True when *exception_type* names a failed-import handler."""
+    if isinstance(exception_type, ast.Name):
+        return exception_type.id in OPTIONAL_DEPENDENCY_EXCEPTS
+    if isinstance(exception_type, ast.Tuple):
+        return any(_is_optional_dependency_except(item) for item in exception_type.elts)
+    return False
 
 
 def _import_diagnostic(

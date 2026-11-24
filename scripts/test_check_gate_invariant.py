@@ -97,13 +97,6 @@ FUNCTION_NESTED_IMPORT_SCRIPT_SOURCE = (
     "    import yaml\n"
     "    return 0\n"
 )
-TRY_NESTED_IMPORT_SCRIPT_SOURCE = (
-    "from __future__ import annotations\n"
-    "try:\n"
-    "    import yaml\n"
-    "except ImportError:\n"
-    "    yaml = None\n"
-)
 
 
 def gate_config(*hook_blocks: str) -> str:
@@ -296,16 +289,109 @@ class CheckConfigTests(unittest.TestCase):
         self.assertIn("yaml", diagnostics[0])
         self.assertIn("scripts/check_widget.py", diagnostics[0])
 
-    def test_system_script_try_nested_import_fails(self) -> None:
-        """Reject a third-party module imported inside a ``try:`` block."""
-        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
-        self.write_widget_scripts(TRY_NESTED_IMPORT_SCRIPT_SOURCE)
+    def test_system_script_optional_dependency_import_passes(self) -> None:
+        """Allow a third-party import that a ``try`` handler guards."""
+        sources = {
+            "ImportError handler": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    import yaml\n"
+                "except ImportError:\n"
+                "    yaml = None\n"
+            ),
+            "Exception handler": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    import yaml\n"
+                "except Exception:\n"
+                "    yaml = None\n"
+            ),
+            "bare except handler": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    import yaml\n"
+                "except:\n"
+                "    yaml = None\n"
+            ),
+            "tuple handler with ImportError": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    import yaml\n"
+                "except (ImportError, ValueError):\n"
+                "    yaml = None\n"
+            ),
+            "nested try inherits the guard": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    try:\n"
+                "        import yaml\n"
+                "    except ValueError:\n"
+                "        yaml = None\n"
+                "except ImportError:\n"
+                "    yaml = None\n"
+            ),
+            "function-nested guarded import": (
+                "from __future__ import annotations\n"
+                "def run() -> int:\n"
+                "    try:\n"
+                "        import yaml\n"
+                "    except ImportError:\n"
+                "        return 1\n"
+                "    return 0\n"
+            ),
+        }
+        for label, source in sources.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts(source)
 
-        diagnostics = self.run_checker().diagnostics
+                report = self.run_checker()
 
-        self.assertEqual(1, len(diagnostics))
-        self.assertIn("yaml", diagnostics[0])
-        self.assertIn("scripts/check_widget.py", diagnostics[0])
+                self.assertEqual([], report.diagnostics)
+
+    def test_system_script_unguarded_try_import_fails(self) -> None:
+        """Reject a third-party import in a ``try`` that no handler guards."""
+        sources = {
+            "unrelated handler": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    import yaml\n"
+                "except ValueError:\n"
+                "    yaml = None\n"
+            ),
+            "try else body": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    pass\n"
+                "except ImportError:\n"
+                "    pass\n"
+                "else:\n"
+                "    import yaml\n"
+            ),
+            "try finally body": (
+                "from __future__ import annotations\n"
+                "try:\n"
+                "    pass\n"
+                "except ImportError:\n"
+                "    pass\n"
+                "finally:\n"
+                "    import yaml\n"
+            ),
+        }
+        for label, source in sources.items():
+            with self.subTest(case=label):
+                self.write_config(
+                    gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK)
+                )
+                self.write_widget_scripts(source)
+
+                diagnostics = self.run_checker().diagnostics
+
+                self.assertEqual(1, len(diagnostics))
+                self.assertIn("yaml", diagnostics[0])
+                self.assertIn("scripts/check_widget.py", diagnostics[0])
 
     def test_transitive_third_party_import_fails(self) -> None:
         """Reject a third-party import inside an imported repository module."""
@@ -372,6 +458,23 @@ class CheckConfigTests(unittest.TestCase):
         self.assertIn("yaml", diagnostics[0])
         self.assertIn("scripts/helper.py", diagnostics[0])
 
+    def test_repository_module_class_body_guarded_import_passes(self) -> None:
+        """Allow a guarded import inside a repository module class body."""
+        guarded_source = (
+            "class Settings:\n"
+            "    try:\n"
+            "        import yaml\n"
+            "    except ImportError:\n"
+            "        yaml = None\n"
+        )
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import helper\n")
+        self.write_script("scripts/helper.py", guarded_source)
+
+        report = self.run_checker()
+
+        self.assertEqual([], report.diagnostics)
+
     def test_repository_module_function_nested_import_passes(self) -> None:
         """Allow a function-nested import in a repository module."""
         self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
@@ -379,6 +482,17 @@ class CheckConfigTests(unittest.TestCase):
         self.write_script("scripts/helper.py", "def load():\n    import yaml\n")
 
         self.assertEqual([], self.run_checker().diagnostics)
+
+    def test_repository_module_optional_dependency_import_passes(self) -> None:
+        """Allow a guarded third-party import inside an imported module."""
+        guarded_source = "try:\n    import yaml\nexcept ImportError:\n    yaml = None\n"
+        self.write_config(gate_config(WIDGET_CHECKER_HOOK, WIDGET_COMPANION_HOOK))
+        self.write_widget_scripts("import helper\n")
+        self.write_script("scripts/helper.py", guarded_source)
+
+        report = self.run_checker()
+
+        self.assertEqual([], report.diagnostics)
 
     def test_relative_import_resolves_and_scans_helper(self) -> None:
         """Resolve a relative import against the importing package."""

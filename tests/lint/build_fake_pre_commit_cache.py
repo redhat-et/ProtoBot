@@ -9,19 +9,21 @@ Both pre-commit configurations (ADR-0005) are covered; a configuration
 file that does not exist is merge skew and is skipped. For every
 non-local, non-meta repository this writes a minimal manifest
 (``.pre-commit-hooks.yaml``) declaring each configured hook id as a
-``language: system`` / ``entry: true`` no-op. ``repo: local`` hooks
-that install an environment (``language: python``, with or without
-``additional_dependencies``) register under pre-commit's own
-``local:<deps>`` keys, and their fake repository directory holds a
-fake python environment: a ``pyvenv.cfg`` plus a ``bin/python`` symlink
-to the running interpreter that satisfy pre-commit's health check, a
-touched ``.install_state_v2``, and one no-op ``bin/<entry>`` stub per
-hook so third-party tools (ruff, yamllint, ...) never install.
-Everything registers in a ``db.db`` matching pre-commit's own ``Store``
-schema. ``pre-commit`` then loads every repo's manifest (it always
-does this up front, regardless of which files are given) without
-attempting to clone anything, and the real ``language: system`` hooks
-run unmodified against whatever files are passed in.
+``language: system`` / ``entry: true`` no-op. For every ``repo: local``
+hook that installs an environment (``language: python``, with or
+without ``additional_dependencies``) it registers pre-commit's own
+``local:<deps>`` key (or bare ``local`` without dependencies) and a
+healthy ``py_env-<version>`` directory, so the offline pre-flight's
+dependency-environment check passes. The fake environment holds a
+``pyvenv.cfg`` plus a ``bin/python`` symlink to the running interpreter
+that satisfy pre-commit's health check, a touched ``.install_state_v2``,
+and one no-op ``bin/<entry>`` stub per hook so third-party tools (ruff,
+yamllint, ...) never install. Everything registers in a ``db.db``
+matching pre-commit's own ``Store`` schema. ``pre-commit`` then loads
+every repo's manifest (it always does this up front, regardless of
+which files are given) without attempting to clone anything, and the
+real ``language: system`` hooks run unmodified against whatever files
+are passed in.
 
 This intentionally does not exercise third-party tool behaviour
 (ruff, yamllint, shellcheck, ...) — that is CI's job, via a real
@@ -37,6 +39,7 @@ Usage::
 from __future__ import annotations
 
 import os
+import shlex
 import sqlite3
 import sys
 from pathlib import Path
@@ -50,24 +53,75 @@ _NON_CLONED_REPOS = {"local", "meta"}
 _CONFIG_PATHS = (".pre-commit-config.yaml", ".github/pre-commit-ci.yaml")
 
 # shortcut: pre-commit names a python environment directory after the
-# interpreter it resolves as the default (``py_env-python<X.Y>``), and
-# the fake below reuses this builder's interpreter. They agree only
-# while pre-commit resolves the same <X.Y>; when they diverge,
-# pre-commit rebuilds the environments and needs network access.
-# Upgrade by asking pre-commit itself for its default version.
+# interpreter it resolves as the default (``py_env-python<X.Y>``). The
+# helper below asks pre-commit itself when importable and otherwise
+# reuses this builder's interpreter; the two agree only while
+# pre-commit resolves the same <X.Y>. When they diverge, pre-commit
+# rebuilds the environments and needs network access.
 
 
-def _entry_name(hook: dict[str, object]) -> str | None:
-    """Return the command name *hook* runs, or None without one."""
-    entry = hook.get("entry")
-    if not isinstance(entry, str) or not entry.strip():
+def _python_environment_version() -> str:
+    """Return the python environment suffix pre-commit would select."""
+    try:
+        from pre_commit.languages.python import get_default_version
+    except ImportError:
+        return f"python{sys.version_info.major}.{sys.version_info.minor}"
+    return get_default_version()
+
+
+def _hook_executable(entry: str) -> str | None:
+    """Return the executable name a hook ``entry`` invokes, if any."""
+    try:
+        words = shlex.split(entry)
+    except ValueError:
+        words = entry.split()
+    if not words:
         return None
-    return entry.split()[0]
+    executable = Path(words[0]).name
+    return executable or None
+
+
+def _write_local_environment(repo_dir: Path, entries: tuple[str, ...] = ()) -> None:
+    """Write a Python environment that passes the pre-flight health check.
+
+    ``_hook_installed`` in pre-commit's repository module requires a
+    ``pyvenv.cfg`` whose ``version_info`` matches what ``bin/python``
+    reports and an existing ``.install_state_v2``; the health check
+    also runs ``bin/python`` directly. Each hook ``entry`` also gets an
+    executable stub in ``bin``: pre-commit merges the config's
+    ``language: python`` and ``entry`` over the fake manifest, so it
+    looks for those executables in this environment. The stubs let
+    matching hooks run as no-ops instead of installing the real tools.
+    """
+    environment = repo_dir / f"py_env-{_python_environment_version()}"
+    bin_dir = environment / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (environment / "pyvenv.cfg").write_text(
+        f"version_info = {sys.version_info.major}.{sys.version_info.minor}."
+        f"{sys.version_info.micro}.final.0\n",
+        encoding="utf-8",
+    )
+    python_link = bin_dir / "python"
+    if not python_link.exists():
+        os.symlink(sys.executable, python_link)
+    (environment / ".install_state_v2").touch()
+    for entry in entries:
+        executable = _hook_executable(entry)
+        if executable is None:
+            continue
+        stub = bin_dir / executable
+        # An entry such as ``python script.py`` names the interpreter
+        # link itself; writing through that symlink would overwrite
+        # the running interpreter.
+        if os.path.lexists(stub):
+            continue
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
 
 
 def _collect_env_hooks(
     repo_config: dict[str, object],
-    env_rows: dict[str, set[str]],
+    env_rows: dict[str, list[str]],
 ) -> None:
     """Register ``repo: local`` hooks that install an environment.
 
@@ -85,38 +139,15 @@ def _collect_env_hooks(
             continue
         deps = hook.get("additional_dependencies") or []
         key = f"local:{','.join(deps)}" if deps else "local"
-        entry_name = _entry_name(hook)
-        if entry_name is not None:
-            env_rows.setdefault(key, set()).add(entry_name)
-
-
-def _write_fake_env(repo_dir: Path, entry_names: set[str]) -> None:
-    """Write a python environment that pre-commit treats as installed.
-
-    ``_hook_installed`` in pre-commit's repository module requires a
-    ``pyvenv.cfg`` whose ``version_info`` matches what ``bin/python``
-    reports and an existing ``.install_state_v2``; the health check
-    also runs ``bin/python`` directly. The entry stubs let matching
-    hooks run as no-ops instead of installing the real tools.
-    """
-    env_dir = repo_dir / (
-        f"py_env-python{sys.version_info.major}.{sys.version_info.minor}"
-    )
-    bin_dir = env_dir / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    version = ".".join(str(part) for part in sys.version_info)
-    (env_dir / "pyvenv.cfg").write_text(f"version_info = {version}\n", encoding="utf-8")
-    python_link = bin_dir / "python"
-    if not python_link.exists():
-        os.symlink(sys.executable, python_link)
-    (env_dir / ".install_state_v2").touch()
-    for entry_name in entry_names:
-        stub = bin_dir / entry_name
-        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        stub.chmod(0o755)
+        hook_entry = hook.get("entry")
+        if isinstance(hook_entry, str) and hook_entry.strip():
+            env_rows.setdefault(key, []).append(hook_entry)
 
 
 def build(repo_root: Path, cache_dir: Path) -> None:
+    # pre-commit resolves PRE_COMMIT_HOME with os.path.realpath before it
+    # stores repository paths, so the rows must use the resolved root too.
+    cache_dir = cache_dir.resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
     db_path = cache_dir / "db.db"
     if db_path.exists():
@@ -132,9 +163,9 @@ def build(repo_root: Path, cache_dir: Path) -> None:
             "    PRIMARY KEY (repo, ref)"
             ");",
         )
-        # ``local:<deps>`` key -> hook entry names sharing that
-        # environment.
-        env_rows: dict[str, set[str]] = {}
+        # ``local:<deps>`` key (or bare ``local``) -> hook entries
+        # sharing that environment.
+        env_rows: dict[str, list[str]] = {}
         fake_repo_count = 0
         for config_name in _CONFIG_PATHS:
             config_path = repo_root / config_name
@@ -171,7 +202,7 @@ def build(repo_root: Path, cache_dir: Path) -> None:
             fake_repo_dir = cache_dir / f"fake_repo_{fake_repo_count}"
             fake_repo_count += 1
             fake_repo_dir.mkdir(exist_ok=True)
-            _write_fake_env(fake_repo_dir, env_rows[key])
+            _write_local_environment(fake_repo_dir, tuple(env_rows[key]))
             conn.execute(
                 "INSERT OR REPLACE INTO repos (repo, ref, path) VALUES (?, ?, ?)",
                 (key, "1", str(fake_repo_dir)),
