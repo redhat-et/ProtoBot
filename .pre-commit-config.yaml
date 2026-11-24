@@ -353,7 +353,7 @@ repos:
         entry: python3 scripts/check_validator_spec_parity.py
         language: system
         pass_filenames: false
-        files: ^(validator/internal/.+|validator/README\.md|docs/architecture/ProtoBotV2\.md|scripts/check_validator_spec_parity\.py)$
+        files: ^(validator/internal/.+|validator/README\.md|docs/architecture/ProtoBotV2\.md|docs/architecture\.md|scripts/check_validator_spec_parity\.py)$
       - id: test-validator-spec-parity
         name: test-validator-spec-parity
         entry: python3 scripts/test_check_validator_spec_parity.py
