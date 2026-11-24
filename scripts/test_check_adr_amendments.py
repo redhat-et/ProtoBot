@@ -200,6 +200,45 @@ class HistoricalMutationTests(unittest.TestCase):
         lines = ["alpha", "bravo"]
         self.assertEqual([], checker.historical_mutations(lines, list(lines)))
 
+    def test_inline_pre_code_span_does_not_mask_subsequent_lines(self) -> None:
+        """An inline code span containing `<pre>` does not mask later lines."""
+        old = ["alpha", "bravo", "Use `<pre>` for code."]
+        new = old + [
+            "",
+            "**[Amended November 2026]**",
+            "",
+            "Valid amendment text.",
+        ]
+        self.assertEqual([], checker.historical_mutations(old, new))
+
+    def test_genuine_pre_block_after_inline_code_span_still_masked(self) -> None:
+        """A real <pre> block is still masked even after an inline code span."""
+        old = ["alpha", "Use `<pre>` for code.", "bravo"]
+        new = list(old)
+        new += [
+            "<pre>",
+            "**[Amended November 2026]**",
+            "</pre>",
+        ]
+        self.assertEqual(
+            [
+                (None, 4, 4, "<pre>"),
+                (None, 5, 5, "**[Amended November 2026]**"),
+                (None, 6, 6, "</pre>"),
+            ],
+            checker.historical_mutations(old, new),
+        )
+
+    def test_blockquote_pre_block_is_masked(self) -> None:
+        """A blockquote-prefixed <pre> block is masked."""
+        lines = ["> <pre>", "> hidden", "> </pre>"]
+        self.assertEqual([True, True, True], checker._pre_block_mask(lines))
+
+    def test_repeated_pre_blocks_on_line_are_masked(self) -> None:
+        """Repeated <pre> blocks on a single line are handled."""
+        lines = ["<pre>a</pre> <pre>", "hidden", "</pre>"]
+        self.assertEqual([True, True, True], checker._pre_block_mask(lines))
+
 
 class AcceptedStatusTests(unittest.TestCase):
     def test_accepted_header_is_detected(self) -> None:
@@ -1062,6 +1101,25 @@ class GitRepoCheckTests(unittest.TestCase):
         path = self.root / self.adr_rel
         path.write_text(
             _ACCEPTED_ADR + "\n**[Amended November 2026]** Clarified consequences.\n",
+            encoding="utf-8",
+        )
+        rc, output = self._check(self.adr_rel.as_posix())
+        self.assertEqual(0, rc)
+        self.assertEqual("", output)
+
+    def test_appended_amendment_after_inline_pre_code_span_passes(self) -> None:
+        """An ADR with an inline `<pre>` code span and appended amendment passes."""
+        path = self.root / self.adr_rel
+        adr_with_inline_pre = _ACCEPTED_ADR.replace(
+            "Use one file per record.",
+            "Use `<pre>` for code.",
+        )
+        path.write_text(adr_with_inline_pre, encoding="utf-8")
+        _git(self.root, "add", self.adr_rel.as_posix())
+        _git(self.root, "commit", "--no-gpg-sign", "-m", "update ADR with inline pre")
+        path.write_text(
+            adr_with_inline_pre
+            + "\n**[Amended November 2026]** Clarified consequences.\n",
             encoding="utf-8",
         )
         rc, output = self._check(self.adr_rel.as_posix())
