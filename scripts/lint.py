@@ -1,46 +1,71 @@
 #!/usr/bin/env python3
 """Thin wrapper around ``pre-commit`` for offline and CI lint runs.
 
-``.pre-commit-config.yaml`` is the single source of truth for which
-hooks run and how. This script adds only the behaviour needed for
-sandboxed coding agents that lack network access:
+Two pre-commit configurations share one hook set (ADR-0005,
+``docs/decisions/0005-commit-hook-framework.md``). The gate
+configuration, ``.pre-commit-config.yaml``, holds only ``repo: local``
+hooks and obeys the gate invariant: ``pre-commit run --all-files``
+against it passes with a fresh ``PRE_COMMIT_HOME`` when VCS access is
+denied. The CI configuration, ``.github/pre-commit-ci.yaml``, holds
+every hook that needs a VCS clone, the Go toolchain, or a
+default-branch ref. This script runs both, one ``pre-commit run
+--config <path>`` invocation per existing configuration, and adds only
+the behaviour needed for sandboxed coding agents that lack network
+access:
 
 * It pins ``PRE_COMMIT_HOME`` so a pre-seeded cache is used.
-* It pre-flights every cloned hook repository/revision and every local
-  hook environment with ``additional_dependencies`` against that cache,
-  and fails with an actionable message instead of letting ``pre-commit``
-  crash with an opaque traceback.
+* It pre-flights every non-local hook repository/revision of every
+  existing configuration and every local hook environment with
+  ``additional_dependencies`` against that cache, and fails with an
+  actionable message (naming the missing repository, revision, and
+  bootstrap command) instead of letting ``pre-commit`` crash with an
+  opaque traceback.
 * When the cache is cold and a bootstrap tarball was copied into the
   sandbox (by the Fullsend pre-script, see ``.fullsend/README.md``),
   it restores the cache from that tarball first and re-runs the
-  pre-flight. The restore never runs with ``--online``, and the
-  tarball is deleted only after a complete restore passes the
-  pre-flight.
+  pre-flight. The restore covers the gate configuration's
+  requirements, because the archive is built from
+  ``.pre-commit-config.yaml``. The restore never runs with
+  ``--online``, and the tarball is deleted only after a complete
+  restore passes the pre-flight.
 * It exports ``ZIZMOR_NO_ONLINE_AUDITS=true`` while offline, so the
   ``zizmor`` hook skips audits that require network access.
 * It replicates the previous script's default file-selection
   behaviour (changed files vs ``HEAD``, including unstaged edits)
   instead of ``pre-commit run``'s own default (staged files only).
 
+A missing ``.github/pre-commit-ci.yaml`` is merge skew — a branch that
+predates the cutover — and counts as an empty configuration, so such a
+branch still passes with the gate configuration alone. A missing gate
+configuration is an error.
+
+An offline run of this wrapper pre-flights both configurations. The
+bootstrap archive is built from the gate configuration alone, so it
+does not hold the CI configuration's cloned hooks. The sandbox
+therefore runs the direct gate command (``pre-commit run --files
+<changed>`` against the gate configuration) instead of this wrapper.
+
 Usage::
 
     python scripts/lint.py --all-files                 # every tracked file
     python scripts/lint.py --files a.py b.yaml         # specific files
     python scripts/lint.py                             # changed files vs HEAD
-    python scripts/lint.py --check-parity              # validate config/cache
+    python scripts/lint.py --check-parity              # validate configs/cache
     python scripts/lint.py --online                    # allow network access
     python scripts/lint.py --online-if-ci              # --online when CI=true
     python scripts/lint.py --print-pre-commit-version  # pinned version
+    python scripts/lint.py --print-fullsend-pre-commit-version  # Fullsend pin
 
 CI runs ``python3 scripts/lint.py --all-files --online-if-ci`` and
 installs the pre-commit version that ``--print-pre-commit-version``
 prints. Under ``CI=true``, that invocation reads no configuration and
-needs no PyYAML; ``pre-commit`` validates the config itself.
+needs no PyYAML; ``pre-commit`` validates the configurations itself.
 
-Because ``.pre-commit-config.yaml`` is the only configuration this
-script reads, adding, removing, or reconfiguring a hook requires no
-change here — edit the YAML file and (if network access is available)
-run ``pre-commit install-hooks`` to refresh the cache.
+Adding, removing, or reconfiguring a hook requires no change here —
+edit the YAML files and (if network access is available) refresh the
+cache with ``pre-commit install-hooks`` for the gate configuration
+and ``pre-commit install-hooks --config .github/pre-commit-ci.yaml``
+for the CI configuration.
 """
 
 from __future__ import annotations
@@ -62,10 +87,24 @@ from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / ".pre-commit-config.yaml"
+CI_CONFIG_PATH = REPO_ROOT / ".github" / "pre-commit-ci.yaml"
 
 # The pre-commit version this wrapper requires. CI installs exactly
 # this version; it reads the value through --print-pre-commit-version.
+# It deliberately differs from FULLSEND_PRE_COMMIT_VERSION below: CI
+# and developers validate the full hook set on this newer release,
+# while the gate-rehearsal job proves the gate configuration on the
+# exact version Fullsend runs in its sandbox. Change either pin only
+# with the other in mind.
 PRE_COMMIT_VERSION = "4.6.2"
+
+# The pre-commit version the Fullsend sandbox image ships and the
+# Fullsend runner post-script installs when no executable resolves.
+# gate-rehearsal installs this version, reading it through
+# --print-fullsend-pre-commit-version. PRECOMMIT_VERSION in
+# scripts/pre_commit_cache.py must equal this value until issue #581
+# retires the bootstrap.
+FULLSEND_PRE_COMMIT_VERSION = "4.5.1"
 
 # Bootstrap tarball copied into the sandbox by the Fullsend pre-script
 # (see .fullsend/README.md).
@@ -149,13 +188,30 @@ def _cache_tarball() -> Path:
 # ── Config helpers ──────────────────────────────────────────────
 
 
-def _load_config() -> dict[str, Any]:
-    """Parse ``.pre-commit-config.yaml``.
+def _existing_config_paths() -> list[Path]:
+    """Return the existing configurations, gate first.
+
+    The gate and CI configurations together hold the hook set
+    (ADR-0005). A missing CI configuration is merge skew — a branch
+    that predates the cutover — and counts as an empty configuration,
+    so only the gate runs; ``main`` reports a missing gate
+    configuration as an error.
+    """
+    return [path for path in (CONFIG_PATH, CI_CONFIG_PATH) if path.exists()]
+
+
+def _load_config(path: Path) -> dict[str, Any]:
+    """Parse one pre-commit configuration file.
 
     PyYAML is imported here, not at module import time, so paths that
-    read no config (``--print-pre-commit-version``; ``--all-files`` and
-    ``--files`` with network access assumed) run without PyYAML.
+    read no configuration (``--print-pre-commit-version`` and
+    ``--print-fullsend-pre-commit-version``; ``--all-files`` and
+    ``--files`` with network access assumed) run
+    without PyYAML. An absent file is an empty configuration — merge
+    skew for the CI configuration; any other read error propagates.
     """
+    if not path.exists():
+        return {}
     try:
         import yaml
     except ImportError:
@@ -163,8 +219,21 @@ def _load_config() -> dict[str, Any]:
             "ERROR: PyYAML is required but not installed.\n"
             "       Install with:  pip install pyyaml"
         )
-    with open(CONFIG_PATH) as fh:
-        return yaml.safe_load(fh)
+    with open(path) as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def _load_each_config() -> list[tuple[Path, dict[str, Any]]]:
+    """Load every existing configuration once, gate first."""
+    return [(path, _load_config(path)) for path in _existing_config_paths()]
+
+
+def _relative(path: Path) -> str:
+    """Return *path* relative to the repository root, or as given."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def _configured_repos(config: dict[str, Any]) -> list[tuple[str, str]]:
@@ -233,10 +302,23 @@ def _configured_local_dependencies(
 def _default_python_language_version() -> str:
     """Return the ``language_version`` pre-commit selects for Python.
 
-    Mirrors ``pre_commit.languages.python.get_default_version`` for the
-    interpreter running this wrapper. The returned name is also the
-    suffix pre-commit uses for the hook environment directory.
+    The wrapper must agree with the environment name pre-commit
+    actually uses, so it asks ``pre_commit.languages.python.
+    get_default_version`` directly when that module is importable —
+    the wrapper's own probing cannot observe every input pre-commit
+    considers (for example the running interpreter's environment).
+    The independent mirror below — the same selection order
+    pre-commit applies, probing PATH and then the running
+    interpreter's own name — runs only where ``pre_commit`` cannot be
+    imported. The returned name is also the suffix pre-commit uses
+    for the hook environment directory.
     """
+    try:
+        from pre_commit.languages.python import get_default_version
+    except ImportError:
+        pass
+    else:
+        return get_default_version()
     major = str(sys.version_info[0])
     minor = f"{major}.{sys.version_info[1]}"
     implementation = (
@@ -472,13 +554,19 @@ def _missing_repos(
     return [pair for pair in configured if pair not in cached]
 
 
-def _bootstrap_command(pre_commit_home: Path) -> str:
-    return f'PRE_COMMIT_HOME="{pre_commit_home}" pre-commit install-hooks'
+def _bootstrap_command(pre_commit_home: Path, config_path: Path) -> str:
+    # install-hooks defaults to .pre-commit-config.yaml, so the
+    # remedy must name the configuration whose revisions are missing.
+    return (
+        f'PRE_COMMIT_HOME="{pre_commit_home}" pre-commit install-hooks '
+        f"--config {_relative(config_path)}"
+    )
 
 
 def _report_missing_repos(
     missing: list[tuple[str, str]],
     pre_commit_home: Path,
+    config_path: Path,
 ) -> None:
     plural = "" if len(missing) == 1 else "s"
     print(
@@ -491,7 +579,7 @@ def _report_missing_repos(
     print(
         "\nNo network access is assumed for this run, so the missing "
         "revision(s) cannot be fetched. With network access, run:\n"
-        f"  {_bootstrap_command(pre_commit_home)}\n"
+        f"  {_bootstrap_command(pre_commit_home, config_path)}\n"
         "then retry. Alternatively, re-run with --online (or "
         "--online-if-ci under CI=true) to let pre-commit fetch them "
         "directly.",
@@ -502,6 +590,7 @@ def _report_missing_repos(
 def _report_missing_local_dependency_environments(
     missing: list[tuple[str, tuple[str, ...]]],
     pre_commit_home: Path,
+    config_path: Path,
 ) -> None:
     plural = "" if len(missing) == 1 else "s"
     print(
@@ -514,7 +603,7 @@ def _report_missing_local_dependency_environments(
     print(
         "\nNo network access is assumed for this run, so the dependency "
         "environment(s) cannot be installed. With network access, run:\n"
-        f"  {_bootstrap_command(pre_commit_home)}\n"
+        f"  {_bootstrap_command(pre_commit_home, config_path)}\n"
         "then retry. Alternatively, re-run with --online (or "
         "--online-if-ci under CI=true) to let pre-commit install them "
         "directly.",
@@ -522,13 +611,19 @@ def _report_missing_local_dependency_environments(
     )
 
 
-def _preflight(online: bool, pre_commit_home: Path, config: dict[str, Any]) -> int:
+def _preflight(
+    online: bool,
+    pre_commit_home: Path,
+    config: dict[str, Any],
+    config_path: Path = CONFIG_PATH,
+) -> int:
     """Verify the cache covers every configured hook environment.
 
     Returns ``0`` when the cache is sufficient or network access is
     assumed available, and non-zero when a hook repository/revision or
     local dependency environment would require network access that is
-    not available.
+    not available. *config_path* names the configuration in the remedy
+    messages.
     """
     if online:
         return 0
@@ -551,9 +646,11 @@ def _preflight(online: bool, pre_commit_home: Path, config: dict[str, Any]) -> i
         not in missing_repo_pairs
     ]
     if missing_repos:
-        _report_missing_repos(missing_repos, pre_commit_home)
+        _report_missing_repos(missing_repos, pre_commit_home, config_path)
     if missing_local:
-        _report_missing_local_dependency_environments(missing_local, pre_commit_home)
+        _report_missing_local_dependency_environments(
+            missing_local, pre_commit_home, config_path
+        )
     if missing_repos or missing_local:
         return 1
     return 0
@@ -1576,6 +1673,7 @@ def _preflight_with_restore(
     online: bool,
     pre_commit_home: Path,
     config: dict[str, Any],
+    config_path: Path = CONFIG_PATH,
 ) -> int:
     """Run the cache pre-flight, restoring from the tarball once when cold.
 
@@ -1583,7 +1681,8 @@ def _preflight_with_restore(
     cache and the tarball is never unpacked. The missing-revision error
     is reported only when no restore fixed the cache, so a successful
     restore prints no spurious error. The tarball is deleted only after
-    a restored cache passes the pre-flight.
+    a restored cache passes the pre-flight. *config_path* names the
+    configuration in the remedy message.
     """
     if not online:
         configured = _configured_repos(config)
@@ -1598,11 +1697,60 @@ def _preflight_with_restore(
         if (missing_repos or missing_local) and _restore_cache(
             pre_commit_home, set(configured), config
         ):
-            rc = _preflight(online, pre_commit_home, config)
+            rc = _preflight(online, pre_commit_home, config, config_path)
             if rc == 0:
                 _delete_tarball()
             return rc
-    return _preflight(online, pre_commit_home, config)
+    return _preflight(online, pre_commit_home, config, config_path)
+
+
+def _report_config_preflight_failure(path: Path) -> None:
+    """Name the configuration whose pre-flight failed."""
+    print(
+        f"ERROR: the configuration {_relative(path)} failed the offline "
+        "cache pre-flight; the missing revision(s) reported above "
+        "belong to it.",
+        file=sys.stderr,
+    )
+
+
+def _preflight_configs(
+    online: bool,
+    pre_commit_home: Path,
+    configs: list[tuple[Path, dict[str, Any]]],
+) -> int:
+    """Run the offline cache pre-flight for every configuration once.
+
+    The bootstrap archive is built from the gate configuration alone,
+    so the gate runs through ``_preflight_with_restore`` and that one
+    call is also the gate's pre-flight: its return code is the gate's
+    result. Every other configuration runs through ``_preflight``. No
+    configuration is pre-flighted twice, so a cold cache reports each
+    missing-revision block exactly once. Each failure names its
+    configuration. Returns non-zero when any configuration fails,
+    before hooks run or configurations are validated. A missing CI
+    configuration never reaches this function
+    (``_existing_config_paths`` filtered it out), so merge skew
+    produces no pre-flight error.
+
+    The gate comes first (``_existing_config_paths`` orders it so) on
+    purpose: its restore can change the cache that the other
+    configurations are pre-flighted against. Each configuration's path
+    reaches the remedy message, so ``install-hooks`` fetches the
+    revisions of the configuration that reported them.
+    """
+    if online:
+        return 0
+    failed = False
+    for path, config in configs:
+        if path == CONFIG_PATH:
+            rc = _preflight_with_restore(online, pre_commit_home, config, path)
+        else:
+            rc = _preflight(online, pre_commit_home, config, path)
+        if rc != 0:
+            _report_config_preflight_failure(path)
+            failed = True
+    return 1 if failed else 0
 
 
 # ── File selection ──────────────────────────────────────────────
@@ -1644,6 +1792,149 @@ def _changed_files() -> list[str]:
 # ── Entrypoint ───────────────────────────────────────────────────
 
 
+def _pre_commit_run_command(path: Path, scope_args: list[str]) -> list[str]:
+    """Return the ``pre-commit run`` argv that runs *path*."""
+    return ["pre-commit", "run", "--config", str(path), *scope_args]
+
+
+def _run_pre_commit(argv: list[str]) -> int | None:
+    """Run one ``pre-commit`` command and return its exit code.
+
+    Returns None when the ``pre-commit`` binary cannot run — for
+    example it is not installed (``OSError``). The caller reports
+    that failure once per wrapper run, not once per configuration.
+    """
+    try:
+        return subprocess.run(argv, cwd=str(REPO_ROOT), check=False).returncode
+    except OSError:
+        return None
+
+
+def _report_missing_pre_commit() -> None:
+    """Report, once, that the ``pre-commit`` binary could not run."""
+    print(
+        "ERROR: cannot run pre-commit. Install the pinned version "
+        f"{PRE_COMMIT_VERSION}; `scripts/lint.py --print-pre-commit-version` "
+        "prints it.",
+        file=sys.stderr,
+    )
+
+
+def _run_each_config(paths: list[Path], scope_args: list[str]) -> int:
+    """Run ``pre-commit run`` once per configuration and wait for it.
+
+    Every configuration runs even when an earlier one fails or could
+    not launch, so one failing configuration cannot hide another's
+    findings. When any configuration fails, one stderr line names
+    every failing configuration — launch failures included — because
+    the exit code alone cannot say which one failed. Returns 1 when
+    any configuration could not launch, the first non-zero exit code
+    when hooks failed, or 0 when every configuration passes.
+    """
+    # Flush so lines this wrapper already printed (for example the
+    # cache restore notice) appear before the child's own output.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    first_rc = 0
+    launch_failed = False
+    launch_error_reported = False
+    failed: list[Path] = []
+    for path in paths:
+        rc = _run_pre_commit(_pre_commit_run_command(path, scope_args))
+        if rc is None:
+            # The binary could not launch. Report that once, record
+            # the configuration as failed, and keep going so the
+            # remaining configurations still run.
+            if not launch_error_reported:
+                _report_missing_pre_commit()
+                launch_error_reported = True
+            launch_failed = True
+            failed.append(path)
+            continue
+        if rc != 0:
+            if first_rc == 0:
+                first_rc = rc
+            failed.append(path)
+    if failed:
+        listing = ", ".join(_relative(path) for path in failed)
+        print(f"ERROR: these configurations failed: {listing}", file=sys.stderr)
+    if launch_failed:
+        return 1
+    return first_rc
+
+
+def _check_parity(pre_commit_home: Path, online: bool) -> int:
+    """Validate every existing configuration without running hooks.
+
+    ``pre-commit validate-config`` runs once per existing
+    configuration; an absent CI configuration is merge skew and is
+    skipped. On success one line names every configuration and states
+    that the offline cache covers the configured hook repositories and
+    local hook dependency environments — but only when the offline
+    pre-flight verified the cache; the online path skips the
+    pre-flight, so it claims validity alone.
+    """
+    paths = _existing_config_paths()
+    first_rc = 0
+    for path in paths:
+        rc = _run_pre_commit(["pre-commit", "validate-config", str(path)])
+        if rc is None:
+            _report_missing_pre_commit()
+            return 1
+        if rc != 0 and first_rc == 0:
+            first_rc = rc
+    if first_rc == 0:
+        listing = ", ".join(_relative(path) for path in paths)
+        if online:
+            print(f"PARITY CHECK PASSED: {listing} valid.")
+        else:
+            print(
+                f"PARITY CHECK PASSED: {listing} valid, and the offline "
+                f"cache ({pre_commit_home}) covers every configured hook "
+                "repository revision and local hook dependency environment."
+            )
+    return first_rc
+
+
+def _bare_scope_args(
+    configs: list[tuple[Path, dict[str, Any]]] | None,
+) -> list[str] | None:
+    """Return bare mode's scope arguments, or None when nothing runs.
+
+    ``["--files", *changed]`` normally; when no file changed, the
+    configurations decide: with no ``always_run`` hook in any of them
+    there is nothing to check, and any ``always_run`` hook keeps every
+    configuration running with ``--files`` and no file arguments
+    (``pre-commit`` honours ``always_run`` itself). Reading the
+    configurations for that decision is the only config read online
+    bare mode performs.
+    """
+    changed = _changed_files()
+    if not changed:
+        if configs is None:
+            configs = _load_each_config()
+        if not any(_any_always_run(config) for _, config in configs):
+            print("No files to check.")
+            return None
+    return ["--files", *changed]
+
+
+def _scope_args(
+    args: argparse.Namespace,
+    configs: list[tuple[Path, dict[str, Any]]] | None,
+) -> list[str] | None:
+    """Return the scope arguments shared by every ``run`` invocation.
+
+    None means there is nothing to run (bare mode, no changed files,
+    no ``always_run`` hook anywhere).
+    """
+    if args.all_files:
+        return ["--all-files"]
+    if args.files:
+        return ["--files", *args.files]
+    return _bare_scope_args(configs)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -1665,8 +1956,10 @@ def main(argv: list[str] | None = None) -> int:
         "--check-parity",
         action="store_true",
         help=(
-            "validate .pre-commit-config.yaml and confirm every configured "
-            "hook repository revision and every local hook dependency "
+            "validate both pre-commit configurations (.pre-commit-config.yaml "
+            "and .github/pre-commit-ci.yaml; a missing CI configuration is "
+            "merge skew and is skipped) and confirm every configured hook "
+            "repository revision and every local hook dependency "
             "environment are present in the offline cache, "
             "without running any hooks"
         ),
@@ -1691,6 +1984,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the pinned pre-commit version and exit; CI installs it",
     )
+    parser.add_argument(
+        "--print-fullsend-pre-commit-version",
+        action="store_true",
+        help=(
+            "print the pre-commit version the Fullsend sandbox ships and "
+            "gate-rehearsal installs, and exit"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.print_pre_commit_version:
@@ -1702,6 +2003,15 @@ def main(argv: list[str] | None = None) -> int:
         print(PRE_COMMIT_VERSION)
         return 0
 
+    if args.print_fullsend_pre_commit_version:
+        if args.check_parity or args.all_files or args.files:
+            parser.error(
+                "--print-fullsend-pre-commit-version cannot be combined with "
+                "--check-parity, --all-files, or --files"
+            )
+        print(FULLSEND_PRE_COMMIT_VERSION)
+        return 0
+
     online = args.online or (args.online_if_ci and _ci_is_enabled())
 
     pre_commit_home = _pre_commit_home()
@@ -1709,55 +2019,39 @@ def main(argv: list[str] | None = None) -> int:
     if not online:
         os.environ.setdefault("ZIZMOR_NO_ONLINE_AUDITS", "true")
 
-    # Read the config at most once, and only where a code path needs
-    # it: the offline cache pre-flight below, and bare mode's
-    # always_run check. The CI invocation (--all-files --online-if-ci
-    # under CI=true) needs neither, so it runs without PyYAML;
-    # pre-commit validates the config itself.
-    config: dict[str, Any] | None = None
+    if not CONFIG_PATH.exists():
+        print(
+            f"ERROR: the gate configuration {CONFIG_PATH} is missing; it is required.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Read each existing configuration at most once, and only where a
+    # code path needs it: the offline cache pre-flight below, and bare
+    # mode's always_run check. The CI invocation (--all-files
+    # --online-if-ci under CI=true) needs neither, so it runs without
+    # PyYAML; pre-commit validates the configurations itself.
+    configs: list[tuple[Path, dict[str, Any]]] | None = None
     if not online:
-        config = _load_config()
-        rc = _preflight_with_restore(online, pre_commit_home, config)
-        if rc != 0:
-            return rc
+        configs = _load_each_config()
+        preflight_rc = _preflight_configs(online, pre_commit_home, configs)
+        if preflight_rc != 0:
+            return preflight_rc
 
     if args.check_parity:
-        validate_rc = subprocess.run(
-            ["pre-commit", "validate-config", str(CONFIG_PATH)],
-            cwd=str(REPO_ROOT),
-            check=False,
-        ).returncode
-        if validate_rc == 0:
-            print(
-                "PARITY CHECK PASSED: .pre-commit-config.yaml is valid and "
-                "every configured hook repository revision and local hook "
-                "dependency environment is present in the offline cache "
-                f"({pre_commit_home})."
-            )
-        return validate_rc
+        return _check_parity(pre_commit_home, online)
 
-    cmd = ["pre-commit", "run"]
-    if args.all_files:
-        cmd.append("--all-files")
-    elif args.files:
-        cmd.append("--files")
-        cmd.extend(args.files)
+    scope_args = _scope_args(args, configs)
+    if scope_args is None:
+        return 0
+    if configs is not None:
+        paths = [path for path, _ in configs]
     else:
-        changed = _changed_files()
-        if not changed:
-            if config is None:
-                config = _load_config()
-            if not _any_always_run(config):
-                print("No files to check.")
-                return 0
-        cmd.append("--files")
-        cmd.extend(changed)
-
-    # os.execvp replaces this process without flushing Python's buffers,
-    # so the restore and warning lines must be flushed first.
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os.execvp(cmd[0], cmd)  # intentional process replacement
+        # Online --all-files/--files (and online bare mode after its
+        # always_run decision) reads no configuration: the path list
+        # alone selects what runs.
+        paths = _existing_config_paths()
+    return _run_each_config(paths, scope_args)
 
 
 if __name__ == "__main__":

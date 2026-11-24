@@ -15,12 +15,14 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, call, patch
 
 if __package__:
     from scripts import lint as checker
+    from scripts import pre_commit_cache
 else:
     import lint as checker
+    import pre_commit_cache
 
 
 # env_specs sentinel: link an environment's bin/python to the running
@@ -29,12 +31,54 @@ _RUNTIME = "runtime"
 
 
 def _expected_python_env_name() -> str:
-    """Return pre-commit's python environment suffix, computed independently."""
+    """Return pre-commit's python environment suffix, computed independently.
+
+    The mirror is independent of ``pre_commit``: the gate invariant
+    rejects third-party imports in a gate entry script, so the earlier
+    optional ``pre_commit`` import was removed. The body reproduces
+    pre-commit's ``get_default_version`` with the standard library
+    alone. It stays separate from ``checker._default_python_language_version``
+    so the tests remain a cross-check: ``sys.version_info`` alone
+    mispredicts the name where PATH holds no versioned interpreter,
+    and pre-commit then selects ``python3`` even under Python 3.14.
+    """
+    major = str(sys.version_info[0])
+    minor = f"{sys.version_info[0]}.{sys.version_info[1]}"
+    implementation = (
+        "python" if sys.implementation.name == "cpython" else sys.implementation.name
+    )
+    for potential in (minor, major):
+        executable = f"{implementation}{potential}"
+        if shutil.which(executable):
+            return executable
+    for executable_path in (sys.executable, os.path.realpath(sys.executable)):
+        executable = _sys_executable_name(executable_path, implementation)
+        if executable is not None and shutil.which(executable):
+            return executable
+    return "default"
+
+
+def _sys_executable_name(executable_path: str, implementation: str) -> str | None:
+    """Return the interpreter name pre-commit accepts for *executable_path*.
+
+    Mirror pre-commit's ``_find_by_sys_executable`` with its
+    ``_sys_executable_matches`` check: the lowercased basename, with
+    any ``.exe`` suffix removed, must not be the bare ``python`` or
+    ``pythonw`` name, must start with the running implementation, and
+    its version part must match the running ``sys.version_info``.
+    """
+    name = Path(executable_path.lower()).name.partition(".exe")[0]
+    if name in {"python", "pythonw"}:
+        return None
+    if not name.startswith(implementation):
+        return None
     try:
-        from pre_commit.languages.python import get_default_version
-    except ImportError:
-        return f"python{sys.version_info.major}.{sys.version_info.minor}"
-    return get_default_version()
+        version = tuple(
+            int(part) for part in name.removeprefix(implementation).split(".")
+        )
+    except ValueError:
+        return None
+    return name if sys.version_info[: len(version)] == version else None
 
 
 def _add_environment_health(environment_path: Path) -> None:
@@ -512,7 +556,64 @@ class PythonLanguageVersionTests(unittest.TestCase):
             return f"/usr/bin/{name}" if name == expected else None
 
         with patch("shutil.which", side_effect=which):
-            self.assertEqual(expected, checker._default_python_language_version())
+            self.assertEqual(expected, _expected_python_env_name())
+
+    def test_uses_major_only_interpreter_found_on_path(self) -> None:
+        """Probe the major-only name next, as pre-commit does."""
+        expected = f"python{sys.version_info.major}"
+
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name == expected else None
+
+        with patch("shutil.which", side_effect=which):
+            self.assertEqual(expected, _expected_python_env_name())
+
+    def test_falls_back_to_the_running_interpreter_name(self) -> None:
+        """Accept the running interpreter's own name when no probe hits.
+
+        The ``major.minor.micro`` name differs from both probed names,
+        so only the ``sys.executable`` fallback can return it.
+        """
+        expected = (
+            f"python{sys.version_info.major}.{sys.version_info.minor}."
+            f"{sys.version_info.micro}"
+        )
+
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name == expected else None
+
+        with (
+            patch("shutil.which", side_effect=which),
+            patch("sys.executable", f"/opt/bin/{expected}"),
+        ):
+            self.assertEqual(expected, _expected_python_env_name())
+
+    def _assert_default_for(self, executable: str) -> None:
+        """Assert the mirror returns ``default`` for *executable* on PATH."""
+
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name == executable else None
+
+        with (
+            patch("shutil.which", side_effect=which),
+            patch("sys.executable", f"/opt/bin/{executable}"),
+        ):
+            self.assertEqual("default", _expected_python_env_name())
+
+    def test_rejects_names_that_do_not_name_the_running_version(self) -> None:
+        """Reject a findable name for another version or implementation."""
+        other = f"python{sys.version_info.major}.{sys.version_info.minor + 1}"
+        for executable in (other, "python-custom", "pypy3"):
+            with self.subTest(executable=executable):
+                self._assert_default_for(executable)
+
+    def test_returns_the_default_marker_when_nothing_resolves(self) -> None:
+        """Return pre-commit's ``default`` marker after every name fails."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("sys.executable", "/opt/bin/python"),
+        ):
+            self.assertEqual("default", _expected_python_env_name())
 
     def test_explicit_language_version_names_environment(self) -> None:
         """An explicit language_version selects that environment directory."""
@@ -545,6 +646,32 @@ class AnyAlwaysRunTests(unittest.TestCase):
     def test_false_when_no_hook_declares_it(self) -> None:
         config = {"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]}
         self.assertFalse(checker._any_always_run(config))
+
+
+class ExistingConfigPathsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.root = Path(temporary_directory.name).resolve()
+
+    def test_returns_the_existing_configurations_gate_first(self) -> None:
+        gate = self.root / "gate.yaml"
+        ci = self.root / "ci.yaml"
+        absent_gate = self.root / "absent-gate.yaml"
+        absent_ci = self.root / "absent-ci.yaml"
+        gate.write_text("repos: []\n", encoding="utf-8")
+        ci.write_text("repos: []\n", encoding="utf-8")
+        for case, gate_path, ci_path, expected in (
+            ("both present", gate, ci, [gate, ci]),
+            ("merge skew: only the gate", gate, absent_ci, [gate]),
+            ("none present", absent_gate, absent_ci, []),
+        ):
+            with (
+                self.subTest(case=case),
+                patch.object(checker, "CONFIG_PATH", gate_path),
+                patch.object(checker, "CI_CONFIG_PATH", ci_path),
+            ):
+                self.assertEqual(expected, checker._existing_config_paths())
 
 
 class CachedReposTests(unittest.TestCase):
@@ -909,7 +1036,14 @@ class PreflightRestoreTests(unittest.TestCase):
         self.addCleanup(env_patcher.stop)
 
     def _current_interpreter(self) -> str:
-        return f"{sys.version_info.major}.{sys.version_info.minor}"
+        """The suffix pre-commit's default names the environment directory.
+
+        pre-commit probes PATH for ``python<X.Y>`` and falls back to
+        ``python<X>``, so the name comes from its default, not from
+        ``sys.version_info`` directly: a minimal PATH yields
+        ``py_env-python3`` even under Python 3.14.
+        """
+        return _expected_python_env_name().removeprefix("python")
 
     def _current_python(self) -> str:
         """The five-part form a real interpreter prints for sys.version_info."""
@@ -2864,28 +2998,50 @@ class PreflightRestoreTests(unittest.TestCase):
         self.assertIn("Restored the offline pre-commit cache", stdout.getvalue())
         self.assertFalse(self.tarball.exists())
 
-    def test_run_path_flushes_the_restore_line_before_exec(self) -> None:
-        # os.execvp replaces the process without flushing Python's
-        # buffers. A block-buffered stdout, as under a shell redirect,
-        # would lose the restore line without an explicit flush.
+    def test_run_path_flushes_the_restore_line_before_the_child_runs(self) -> None:
+        # The child inherits this process's stdout, so a block-buffered
+        # stream, as under a shell redirect, must be flushed before the
+        # child runs; otherwise the restore line appears after the
+        # child's own output.
         self._build_tarball(self._config_rows())
         raw = io.BytesIO()
         buffered = io.TextIOWrapper(raw, encoding="utf-8")
+        real_run = subprocess.run
+
+        def run_stub(command, **kwargs):
+            if command[:1] == ["pre-commit"]:
+                return subprocess.CompletedProcess(args=list(command), returncode=0)
+            return real_run(command, **kwargs)
+
         with (
             patch.dict(os.environ, {"PRE_COMMIT_HOME": str(self.home)}, clear=False),
+            patch.object(
+                checker,
+                "_existing_config_paths",
+                return_value=[checker.CONFIG_PATH],
+            ),
             patch.object(
                 checker,
                 "_load_config",
                 return_value=_CONFIG_TWO_REMOTE_ONE_LOCAL,
             ),
-            patch.object(checker, "_changed_files", return_value=["README.md"]),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run", side_effect=run_stub) as mock_run,
             patch("sys.stdout", buffered),
         ):
-            checker.main(["--files", "README.md"])
-        mock_execvp.assert_called_once_with(
-            "pre-commit", ["pre-commit", "run", "--files", "README.md"]
+            rc = checker.main(["--files", "README.md"])
+        mock_run.assert_any_call(
+            [
+                "pre-commit",
+                "run",
+                "--config",
+                str(checker.CONFIG_PATH),
+                "--files",
+                "README.md",
+            ],
+            cwd=str(checker.REPO_ROOT),
+            check=False,
         )
+        self.assertEqual(0, rc)
         self.assertIn(
             "Restored the offline pre-commit cache",
             raw.getvalue().decode("utf-8"),
@@ -3130,11 +3286,13 @@ class ChangedFilesTests(unittest.TestCase):
 
 
 class MainCliMappingTests(unittest.TestCase):
-    """``main()`` translates flags into a ``pre-commit run`` invocation.
+    """``main()`` translates flags into ``pre-commit run`` invocations.
 
     Every case below is already cached (satisfied pre-flight) so these
     tests exercise CLI translation, not the cache gate covered by
-    ``PreflightTests``.
+    ``PreflightTests``. ``_existing_config_paths`` is pinned to both
+    configurations so the cases stay deterministic on merge-skew trees
+    where ``.github/pre-commit-ci.yaml`` does not exist yet.
     """
 
     def setUp(self) -> None:
@@ -3154,95 +3312,353 @@ class MainCliMappingTests(unittest.TestCase):
         ci_patcher = patch.object(checker, "_ci_is_enabled", return_value=False)
         ci_patcher.start()
         self.addCleanup(ci_patcher.stop)
-        # Config has no cloned repos, so the cache is trivially satisfied.
+        # Both configurations exist and hold no cloned repositories or
+        # pinned local dependencies, so the cache is trivially
+        # satisfied.
+        self.gate_config = {"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]}
+        self.ci_config = {"repos": [{"repo": "local", "hooks": [{"id": "y"}]}]}
+        paths_patcher = patch.object(
+            checker,
+            "_existing_config_paths",
+            return_value=[checker.CONFIG_PATH, checker.CI_CONFIG_PATH],
+        )
+        paths_patcher.start()
+        self.addCleanup(paths_patcher.stop)
         config_patcher = patch.object(
             checker,
             "_load_config",
-            return_value={"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]},
+            side_effect=self._config_for_path,
         )
-        config_patcher.start()
+        self.load_config_mock = config_patcher.start()
         self.addCleanup(config_patcher.stop)
 
+    def _config_for_path(self, path: Path) -> dict[str, object]:
+        if path == checker.CONFIG_PATH:
+            return self.gate_config
+        return self.ci_config
+
+    def _expected_run_calls(
+        self, scope_args: list[str], paths: tuple[Path, ...] | None = None
+    ) -> list:
+        configurations = paths or (checker.CONFIG_PATH, checker.CI_CONFIG_PATH)
+        return [
+            call(
+                ["pre-commit", "run", "--config", str(path), *scope_args],
+                cwd=str(checker.REPO_ROOT),
+                check=False,
+            )
+            for path in configurations
+        ]
+
     def test_all_files_maps_to_pre_commit_all_files(self) -> None:
-        with patch("os.execvp") as mock_execvp:
-            checker.main(["--all-files"])
-        mock_execvp.assert_called_once_with(
-            "pre-commit", ["pre-commit", "run", "--all-files"]
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            rc = checker.main(["--all-files"])
+        self.assertEqual(
+            self._expected_run_calls(["--all-files"]), mock_run.call_args_list
         )
+        self.assertEqual(0, rc)
 
     def test_files_maps_to_pre_commit_files(self) -> None:
-        with patch("os.execvp") as mock_execvp:
-            checker.main(["--files", "a.py", "b.yaml"])
-        mock_execvp.assert_called_once_with(
-            "pre-commit", ["pre-commit", "run", "--files", "a.py", "b.yaml"]
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            rc = checker.main(["--files", "a.py", "b.yaml"])
+        self.assertEqual(
+            self._expected_run_calls(["--files", "a.py", "b.yaml"]),
+            mock_run.call_args_list,
         )
+        self.assertEqual(0, rc)
 
     def test_bare_mode_maps_to_changed_files(self) -> None:
         with (
             patch.object(checker, "_changed_files", return_value=["x.py"]),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
         ):
-            checker.main([])
-        mock_execvp.assert_called_once_with(
-            "pre-commit", ["pre-commit", "run", "--files", "x.py"]
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            rc = checker.main([])
+        self.assertEqual(
+            self._expected_run_calls(["--files", "x.py"]), mock_run.call_args_list
         )
+        self.assertEqual(0, rc)
 
     def test_bare_mode_with_no_changes_and_no_always_run_skips_pre_commit(
         self,
     ) -> None:
         with (
             patch.object(checker, "_changed_files", return_value=[]),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
         ):
             rc = checker.main([])
-        mock_execvp.assert_not_called()
+        mock_run.assert_not_called()
         self.assertEqual(0, rc)
 
     def test_bare_mode_with_no_changes_but_always_run_hook_still_runs(self) -> None:
-        always_run_config = {
-            "repos": [
-                {
-                    "repo": "local",
-                    "hooks": [{"id": "x", "always_run": True}],
-                }
-            ],
+        # An always_run hook in the gate keeps every configuration
+        # running with --files and no file arguments.
+        self.gate_config = {
+            "repos": [{"repo": "local", "hooks": [{"id": "a", "always_run": True}]}]
         }
         with (
-            patch.object(checker, "_load_config", return_value=always_run_config),
             patch.object(checker, "_changed_files", return_value=[]),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
         ):
-            checker.main([])
-        mock_execvp.assert_called_once_with(
-            "pre-commit", ["pre-commit", "run", "--files"]
-        )
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            rc = checker.main([])
+        self.assertEqual(self._expected_run_calls(["--files"]), mock_run.call_args_list)
+        self.assertEqual(0, rc)
 
-    def test_offline_bare_mode_reads_config_once(self) -> None:
-        # Regression test: the offline pre-flight and bare mode's
-        # always_run check must share one config read, not two. The
-        # test forces offline mode and stubs the pre-flight, so it
-        # runs the same way with and without CI=true and never reads
-        # the hook cache.
-        config = {"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]}
+    def test_bare_mode_with_no_changes_but_ci_always_run_hook_still_runs(self) -> None:
+        # An always_run hook in ANY configuration is enough: bare mode
+        # must not print "No files to check." while the CI
+        # configuration still has work to do.
+        self.ci_config = {
+            "repos": [{"repo": "local", "hooks": [{"id": "a", "always_run": True}]}]
+        }
         with (
-            patch.object(checker, "_ci_is_enabled", return_value=False),
-            patch.object(
-                checker, "_load_config", return_value=config
-            ) as mock_load_config,
-            patch.object(checker, "_preflight", return_value=0) as mock_preflight,
             patch.object(checker, "_changed_files", return_value=[]),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            rc = checker.main([])
+        self.assertEqual(self._expected_run_calls(["--files"]), mock_run.call_args_list)
+        self.assertEqual(0, rc)
+
+    def test_offline_bare_mode_loads_each_config_once_and_preflights_each_once(
+        self,
+    ) -> None:
+        # Regression test: the offline pre-flight and bare mode's
+        # always_run check must share one read per configuration, not
+        # two, and each configuration must be pre-flighted exactly
+        # once: the gate through the restore wrapper (whose call is
+        # the gate's pre-flight), the CI configuration through
+        # _preflight. The stubs force offline mode and skip the hook
+        # cache, so this runs the same way with and without CI=true.
+        with (
+            patch.object(checker, "_preflight", return_value=0) as mock_preflight,
+            patch.object(
+                checker, "_preflight_with_restore", return_value=0
+            ) as mock_restore,
+            patch.object(checker, "_changed_files", return_value=[]),
+            patch("subprocess.run") as mock_run,
         ):
             rc = checker.main([])
-        mock_load_config.assert_called_once()
-        mock_preflight.assert_called_once()
-        # The pre-flight ran offline and received the same config
-        # object that _load_config returned: bare mode reused the
-        # shared read instead of loading the config again.
-        self.assertFalse(mock_preflight.call_args[0][0])
-        self.assertIs(config, mock_preflight.call_args[0][2])
-        mock_execvp.assert_not_called()
+        self.assertEqual(
+            [
+                call(checker.CONFIG_PATH),
+                call(checker.CI_CONFIG_PATH),
+            ],
+            self.load_config_mock.call_args_list,
+        )
+        # Exactly one pre-flight per configuration, with no second
+        # pre-flight of the gate; each call also names its
+        # configuration so the remedy fetches the right revisions.
+        mock_restore.assert_called_once_with(
+            False, ANY, self.gate_config, checker.CONFIG_PATH
+        )
+        mock_preflight.assert_called_once_with(
+            False, ANY, self.ci_config, checker.CI_CONFIG_PATH
+        )
+        mock_run.assert_not_called()
         self.assertEqual(0, rc)
+
+    def test_missing_ci_config_runs_only_the_gate_configuration(self) -> None:
+        # Merge skew: a branch that predates the cutover has no
+        # .github/pre-commit-ci.yaml, so only the gate configuration
+        # runs and is read.
+        with (
+            patch.object(
+                checker, "_existing_config_paths", return_value=[checker.CONFIG_PATH]
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            rc = checker.main(["--all-files"])
+        self.assertEqual(
+            self._expected_run_calls(["--all-files"], (checker.CONFIG_PATH,)),
+            mock_run.call_args_list,
+        )
+        self.assertEqual(
+            [call(checker.CONFIG_PATH)], self.load_config_mock.call_args_list
+        )
+        self.assertEqual(0, rc)
+
+    def test_missing_gate_config_is_an_error(self) -> None:
+        # The gate configuration is required; unlike a missing CI
+        # configuration it is not merge skew.
+        absent_gate = self.home.parent / "absent-gate.yaml"
+        with (
+            patch.object(checker, "CONFIG_PATH", absent_gate),
+            patch("subprocess.run") as mock_run,
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(1, rc)
+        mock_run.assert_not_called()
+        self.assertIn(str(absent_gate), buf.getvalue())
+
+    def test_per_config_preflight_failure_names_the_failing_configuration(
+        self,
+    ) -> None:
+        # The gate cache is satisfied, but the CI configuration names a
+        # repository revision the cache does not hold: the failure must
+        # name .github/pre-commit-ci.yaml and stop before any hook or
+        # validation runs.
+        (self.home / "db.db").unlink()
+        _make_db(
+            self.home / "db.db",
+            [("https://example.invalid/foo", "aaaa")],
+        )
+        self.ci_config = {
+            "repos": [
+                {
+                    "repo": "https://example.invalid/foo",
+                    "rev": "bbbb",
+                    "hooks": [{"id": "foo"}],
+                }
+            ]
+        }
+        with patch("subprocess.run") as mock_run:
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(1, rc)
+        mock_run.assert_not_called()
+        self.assertIn(".github/pre-commit-ci.yaml", buf.getvalue())
+        self.assertIn("https://example.invalid/foo @ bbbb", buf.getvalue())
+        # The remedy must target the CI configuration: install-hooks
+        # defaults to the gate file and cannot fetch these revisions.
+        message = buf.getvalue()
+        self.assertIn("--config .github/pre-commit-ci.yaml", message)
+        self.assertNotIn("--config .pre-commit-config.yaml", message)
+
+    def test_every_configuration_runs_when_the_first_fails(self) -> None:
+        for return_codes, expected in (
+            ([1, 2], 1),  # both fail: the FIRST non-zero code wins
+            ([0, 3], 3),  # only the CI configuration fails: it propagates
+        ):
+            with self.subTest(return_codes=return_codes):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.side_effect = [
+                        subprocess.CompletedProcess(args=[], returncode=code)
+                        for code in return_codes
+                    ]
+                    rc = checker.main(["--all-files"])
+                self.assertEqual(2, mock_run.call_count)
+                self.assertEqual(expected, rc)
+
+    def test_failing_configurations_are_named(self) -> None:
+        # The exit code alone cannot say which configuration failed;
+        # one stderr line names every failing configuration, and a
+        # fully passing run prints no such line.
+        for return_codes, expected_line in (
+            (
+                [0, 3],
+                "ERROR: these configurations failed: .github/pre-commit-ci.yaml",
+            ),
+            (
+                [1, 2],
+                (
+                    "ERROR: these configurations failed: .pre-commit-config.yaml, "
+                    ".github/pre-commit-ci.yaml"
+                ),
+            ),
+        ):
+            with self.subTest(return_codes=return_codes):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.side_effect = [
+                        subprocess.CompletedProcess(args=[], returncode=code)
+                        for code in return_codes
+                    ]
+                    buf = io.StringIO()
+                    with contextlib.redirect_stderr(buf):
+                        checker.main(["--all-files"])
+                self.assertIn(expected_line, buf.getvalue())
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(0, rc)
+        self.assertNotIn("these configurations failed", buf.getvalue())
+
+    def test_missing_pre_commit_binary_fails_with_the_pinned_version(self) -> None:
+        # A missing pre-commit binary must not raise a traceback. Both
+        # configurations are attempted, one clear error names the
+        # pinned version, and the summary names both configurations.
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError("pre-commit")
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(1, rc)
+        self.assertEqual(2, mock_run.call_count)
+        message = buf.getvalue()
+        self.assertIn("cannot run pre-commit", message)
+        self.assertEqual(1, message.count("cannot run pre-commit"))
+        self.assertIn(checker.PRE_COMMIT_VERSION, message)
+        self.assertIn("--print-pre-commit-version", message)
+        self.assertIn(
+            "ERROR: these configurations failed: .pre-commit-config.yaml, "
+            ".github/pre-commit-ci.yaml",
+            message,
+        )
+
+    def test_launch_failure_still_runs_the_remaining_configurations(self) -> None:
+        # The gate configuration cannot launch; the CI configuration
+        # must still be attempted, and the summary must name only the
+        # gate.
+        with patch.object(
+            checker, "_run_pre_commit", side_effect=[None, 0]
+        ) as mock_run_pre_commit:
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(
+            [
+                [
+                    "pre-commit",
+                    "run",
+                    "--config",
+                    str(checker.CONFIG_PATH),
+                    "--all-files",
+                ],
+                [
+                    "pre-commit",
+                    "run",
+                    "--config",
+                    str(checker.CI_CONFIG_PATH),
+                    "--all-files",
+                ],
+            ],
+            [c.args[0] for c in mock_run_pre_commit.call_args_list],
+        )
+        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn(
+            "ERROR: these configurations failed: .pre-commit-config.yaml", message
+        )
+        self.assertNotIn(".github/pre-commit-ci.yaml", message)
+
+    def test_launch_failure_of_every_configuration_names_both(self) -> None:
+        # Both configurations cannot launch: one clear error (not one
+        # per configuration), the summary names both, and the return
+        # value is 1.
+        with patch.object(
+            checker, "_run_pre_commit", return_value=None
+        ) as mock_run_pre_commit:
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--all-files"])
+        self.assertEqual(2, mock_run_pre_commit.call_count)
+        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn(
+            "ERROR: these configurations failed: .pre-commit-config.yaml, "
+            ".github/pre-commit-ci.yaml",
+            message,
+        )
+        self.assertEqual(1, message.count("cannot run pre-commit"))
 
 
 class MainEnvironmentTests(unittest.TestCase):
@@ -3268,8 +3684,9 @@ class MainEnvironmentTests(unittest.TestCase):
     def test_offline_sets_pre_commit_home_and_zizmor_flag(self) -> None:
         with (
             patch.dict(os.environ, self._clean_env(), clear=True),
-            patch("os.execvp"),
+            patch("subprocess.run") as mock_run,
         ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             os.environ["PRE_COMMIT_HOME"] = str(self.home)
             checker.main(["--all-files"])
             self.assertEqual("true", os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
@@ -3277,8 +3694,9 @@ class MainEnvironmentTests(unittest.TestCase):
     def test_online_does_not_force_zizmor_offline(self) -> None:
         with (
             patch.dict(os.environ, self._clean_env(), clear=True),
-            patch("os.execvp"),
+            patch("subprocess.run") as mock_run,
         ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             os.environ["PRE_COMMIT_HOME"] = str(self.home)
             checker.main(["--all-files", "--online"])
             self.assertNotIn("ZIZMOR_NO_ONLINE_AUDITS", os.environ)
@@ -3286,8 +3704,9 @@ class MainEnvironmentTests(unittest.TestCase):
     def test_zizmor_flag_is_not_overridden_when_caller_set_it(self) -> None:
         with (
             patch.dict(os.environ, self._clean_env(), clear=True),
-            patch("os.execvp"),
+            patch("subprocess.run") as mock_run,
         ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             os.environ["PRE_COMMIT_HOME"] = str(self.home)
             os.environ["ZIZMOR_NO_ONLINE_AUDITS"] = "false"
             checker.main(["--all-files"])
@@ -3317,24 +3736,62 @@ class MainCheckParityTests(unittest.TestCase):
         ci_patcher = patch.object(checker, "_ci_is_enabled", return_value=False)
         ci_patcher.start()
         self.addCleanup(ci_patcher.stop)
+        # Both configurations exist (deterministic on merge-skew
+        # trees) and hold no cloned repositories, so the cache is
+        # trivially satisfied; tests that need remote repositories
+        # override self.gate_config or self.ci_config.
+        self.gate_config = {"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]}
+        self.ci_config = {"repos": [{"repo": "local", "hooks": [{"id": "y"}]}]}
+        paths_patcher = patch.object(
+            checker,
+            "_existing_config_paths",
+            return_value=[checker.CONFIG_PATH, checker.CI_CONFIG_PATH],
+        )
+        paths_patcher.start()
+        self.addCleanup(paths_patcher.stop)
+        config_patcher = patch.object(
+            checker,
+            "_load_config",
+            side_effect=self._config_for_path,
+        )
+        config_patcher.start()
+        self.addCleanup(config_patcher.stop)
+
+    def _config_for_path(self, path: Path) -> dict[str, object]:
+        if path == checker.CONFIG_PATH:
+            return self.gate_config
+        return self.ci_config
+
+    def _validate_call(self, path: Path) -> call:
+        return call(
+            ["pre-commit", "validate-config", str(path)],
+            cwd=str(checker.REPO_ROOT),
+            check=False,
+        )
 
     def test_cache_miss_reports_before_validating_config(self) -> None:
-        with (
-            patch.object(
-                checker,
-                "_load_config",
-                return_value=_CONFIG_TWO_REMOTE_ONE_LOCAL,
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
+        self.gate_config = _CONFIG_TWO_REMOTE_ONE_LOCAL
+        with patch("subprocess.run") as mock_run:
             buf = io.StringIO()
             with contextlib.redirect_stderr(buf):
                 rc = checker.main(["--check-parity"])
         mock_run.assert_not_called()
         self.assertEqual(1, rc)
-        self.assertIn("pre-commit install-hooks", buf.getvalue())
+        message = buf.getvalue()
+        self.assertIn("pre-commit install-hooks", message)
+        self.assertIn(".pre-commit-config.yaml", message)
+        # The remedy fetches the revisions of the configuration that
+        # reported them: install-hooks defaults to the gate file, so
+        # the remedy must name it.
+        self.assertIn("--config .pre-commit-config.yaml", message)
+        # The gate's missing-revision block prints exactly once: the
+        # restore wrapper's call is the gate's only pre-flight, so a
+        # cold cache never duplicates the report.
+        self.assertEqual(1, message.count("missing 2 hook repository revisions"))
+        self.assertEqual(1, message.count("pre-commit install-hooks"))
 
     def test_cold_cache_with_tarball_restores_then_validates(self) -> None:
+        self.gate_config = _CONFIG_TWO_REMOTE_ONE_LOCAL
         rows = [
             ("https://example.invalid/foo", "aaaa"),
             ("https://example.invalid/bar", "bbbb"),
@@ -3359,11 +3816,6 @@ class MainCheckParityTests(unittest.TestCase):
                 {"PROTOBOT_PRE_COMMIT_CACHE_TARBALL": str(tarball)},
                 clear=False,
             ),
-            patch.object(
-                checker,
-                "_load_config",
-                return_value=_CONFIG_TWO_REMOTE_ONE_LOCAL,
-            ),
             patch.object(checker, "_TARBALL_DELETE_ROOT", self.root),
             patch("subprocess.run") as mock_run,
         ):
@@ -3372,18 +3824,114 @@ class MainCheckParityTests(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 rc = checker.main(["--check-parity"])
         self.assertEqual(0, rc)
-        mock_run.assert_called_once()
+        self.assertEqual(
+            [
+                self._validate_call(checker.CONFIG_PATH),
+                self._validate_call(checker.CI_CONFIG_PATH),
+            ],
+            mock_run.call_args_list,
+        )
         self.assertIn("Restored the offline pre-commit cache", buf.getvalue())
         self.assertIn("PARITY CHECK PASSED", buf.getvalue())
         self.assertFalse(tarball.exists())
 
     def test_cache_hit_runs_validate_config(self) -> None:
         _make_db(self.home / "db.db", [])
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = checker.main(["--check-parity"])
+        self.assertEqual(0, rc)
+        self.assertEqual(
+            [
+                self._validate_call(checker.CONFIG_PATH),
+                self._validate_call(checker.CI_CONFIG_PATH),
+            ],
+            mock_run.call_args_list,
+        )
+        # The success line names both configuration paths and, because
+        # the offline pre-flight verified the cache, keeps the cache
+        # claim.
+        message = buf.getvalue()
+        self.assertIn("PARITY CHECK PASSED", message)
+        self.assertIn(".pre-commit-config.yaml", message)
+        self.assertIn(".github/pre-commit-ci.yaml", message)
+        self.assertIn("offline cache", message)
+
+    def test_missing_pre_commit_binary_fails_with_the_pinned_version(self) -> None:
+        # A missing pre-commit binary must not raise a traceback; the
+        # error names the pinned version to install.
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError("pre-commit")
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = checker.main(["--check-parity"])
+        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn("cannot run pre-commit", message)
+        self.assertIn(checker.PRE_COMMIT_VERSION, message)
+        self.assertIn("--print-pre-commit-version", message)
+
+    def test_validate_config_failure_propagates_exit_code(self) -> None:
+        _make_db(self.home / "db.db", [])
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
+            rc = checker.main(["--check-parity"])
+        self.assertEqual(1, rc)
+
+    def test_ci_config_validate_failure_propagates(self) -> None:
+        # The gate configuration validates, the CI configuration does
+        # not: both run and the CI failure decides the exit code.
+        _make_db(self.home / "db.db", [])
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                subprocess.CompletedProcess(args=[], returncode=0),
+                subprocess.CompletedProcess(args=[], returncode=1),
+            ]
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = checker.main(["--check-parity"])
+        self.assertEqual(1, rc)
+        self.assertEqual(2, mock_run.call_count)
+        self.assertNotIn("PARITY CHECK PASSED", buf.getvalue())
+
+    def test_online_check_parity_skips_cache_but_still_validates(self) -> None:
+        # No db.db at all; --online must bypass the cache gate and
+        # read no configuration, yet still validate each one. The
+        # pre-flight did not verify the cache, so the success line
+        # claims validity only — no cache claim.
+
+        def _fail_if_called(path: Path) -> None:
+            self.fail("online --check-parity must not read a configuration")
+
+        with (
+            patch.object(checker, "_load_config", side_effect=_fail_if_called),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = checker.main(["--check-parity", "--online"])
+        self.assertEqual(0, rc)
+        self.assertEqual(
+            [
+                self._validate_call(checker.CONFIG_PATH),
+                self._validate_call(checker.CI_CONFIG_PATH),
+            ],
+            mock_run.call_args_list,
+        )
+        message = buf.getvalue()
+        self.assertIn("PARITY CHECK PASSED", message)
+        self.assertIn(".github/pre-commit-ci.yaml", message)
+        self.assertNotIn("offline cache", message)
+
+    def test_absent_ci_config_validates_only_the_gate_config(self) -> None:
+        # Merge skew: without .github/pre-commit-ci.yaml only the gate
+        # configuration is validated and named.
         with (
             patch.object(
-                checker,
-                "_load_config",
-                return_value={"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]},
+                checker, "_existing_config_paths", return_value=[checker.CONFIG_PATH]
             ),
             patch("subprocess.run") as mock_run,
         ):
@@ -3392,39 +3940,23 @@ class MainCheckParityTests(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 rc = checker.main(["--check-parity"])
         self.assertEqual(0, rc)
-        mock_run.assert_called_once_with(
-            ["pre-commit", "validate-config", str(checker.CONFIG_PATH)],
-            cwd=str(checker.REPO_ROOT),
-            check=False,
+        self.assertEqual(
+            [self._validate_call(checker.CONFIG_PATH)], mock_run.call_args_list
         )
-        self.assertIn("PARITY CHECK PASSED", buf.getvalue())
-
-    def test_validate_config_failure_propagates_exit_code(self) -> None:
-        _make_db(self.home / "db.db", [])
-        with (
-            patch.object(
-                checker,
-                "_load_config",
-                return_value={"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]},
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
-            rc = checker.main(["--check-parity"])
-        self.assertEqual(1, rc)
+        message = buf.getvalue()
+        self.assertIn("PARITY CHECK PASSED", message)
+        self.assertIn(".pre-commit-config.yaml", message)
+        self.assertNotIn(".github/pre-commit-ci.yaml", message)
 
     def test_missing_local_dependency_environment_fails_before_config_validation(
         self,
     ) -> None:
+        # A local python hook with ``additional_dependencies`` needs its
+        # ``local:`` row and a healthy environment in the cache; without
+        # them the pre-flight fails before validate-config runs.
+        self.gate_config = _CONFIG_LOCAL_DEPENDENCIES
         _make_db(self.home / "db.db", [])
-        with (
-            patch.object(
-                checker,
-                "_load_config",
-                return_value=_CONFIG_LOCAL_DEPENDENCIES,
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
+        with patch("subprocess.run") as mock_run:
             buf = io.StringIO()
             with contextlib.redirect_stderr(buf):
                 rc = checker.main(["--check-parity"])
@@ -3432,38 +3964,23 @@ class MainCheckParityTests(unittest.TestCase):
         mock_run.assert_not_called()
         self.assertIn("local:pyyaml==6.0.3 @ 1", buf.getvalue())
 
-    def test_online_check_parity_skips_cache_but_still_validates(self) -> None:
-        # No db.db at all; --online must bypass the cache gate.
-        with (
-            patch.object(
-                checker,
-                "_load_config",
-                return_value=_CONFIG_TWO_REMOTE_ONE_LOCAL,
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
-            rc = checker.main(["--check-parity", "--online"])
-        self.assertEqual(0, rc)
-        mock_run.assert_called_once()
-
 
 class PrintPreCommitVersionTests(unittest.TestCase):
     def test_prints_pinned_version_without_reading_config(self) -> None:
-        def _fail_if_called() -> None:
+        def _fail_if_called(path: Path) -> None:
             self.fail("--print-pre-commit-version must not read the config")
 
         buf = io.StringIO()
         with (
             patch.object(checker, "_load_config", side_effect=_fail_if_called),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
             contextlib.redirect_stdout(buf),
         ):
             rc = checker.main(["--print-pre-commit-version"])
         self.assertEqual(0, rc)
         self.assertRegex(checker.PRE_COMMIT_VERSION, r"^\d+\.\d+\.\d+$")
         self.assertEqual(f"{checker.PRE_COMMIT_VERSION}\n", buf.getvalue())
-        mock_execvp.assert_not_called()
+        mock_run.assert_not_called()
 
     def test_print_version_rejects_mode_and_scope_flags(self) -> None:
         for flags in (
@@ -3475,12 +3992,12 @@ class PrintPreCommitVersionTests(unittest.TestCase):
                 buf = io.StringIO()
                 with (
                     contextlib.redirect_stderr(buf),
-                    patch("os.execvp") as mock_execvp,
+                    patch("subprocess.run") as mock_run,
                     self.assertRaises(SystemExit) as raised,
                 ):
                     checker.main(flags)
                 self.assertEqual(2, raised.exception.code)
-                mock_execvp.assert_not_called()
+                mock_run.assert_not_called()
                 self.assertIn("cannot be combined with", buf.getvalue())
 
     def test_print_version_ignores_online_flags(self) -> None:
@@ -3495,73 +4012,288 @@ class PrintPreCommitVersionTests(unittest.TestCase):
         with (
             patch.dict(os.environ, env, clear=True),
             contextlib.redirect_stdout(buf),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
         ):
             rc = checker.main(["--print-pre-commit-version", "--online-if-ci"])
             self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
         self.assertEqual(0, rc)
         self.assertEqual(f"{checker.PRE_COMMIT_VERSION}\n", buf.getvalue())
-        mock_execvp.assert_not_called()
+        mock_run.assert_not_called()
+
+
+class PrintFullsendPreCommitVersionTests(unittest.TestCase):
+    """``--print-fullsend-pre-commit-version`` mirrors the wrapper pin flag.
+
+    The Fullsend pin is the version the sandbox image ships and the
+    runner post-script installs when no executable resolves; the
+    gate-rehearsal job installs it (ADR-0005).
+    """
+
+    def test_prints_fullsend_pin_without_reading_config(self) -> None:
+        def _fail_if_called(path: Path) -> None:
+            self.fail("--print-fullsend-pre-commit-version must not read the config")
+
+        buf = io.StringIO()
+        with (
+            patch.object(checker, "_load_config", side_effect=_fail_if_called),
+            patch("subprocess.run") as mock_run,
+            contextlib.redirect_stdout(buf),
+        ):
+            rc = checker.main(["--print-fullsend-pre-commit-version"])
+        self.assertEqual(0, rc)
+        self.assertRegex(checker.FULLSEND_PRE_COMMIT_VERSION, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(f"{checker.FULLSEND_PRE_COMMIT_VERSION}\n", buf.getvalue())
+        mock_run.assert_not_called()
+
+    def test_print_fullsend_version_rejects_mode_and_scope_flags(self) -> None:
+        for flags in (
+            ["--print-fullsend-pre-commit-version", "--check-parity"],
+            ["--print-fullsend-pre-commit-version", "--all-files"],
+            ["--print-fullsend-pre-commit-version", "--files", "a.py"],
+        ):
+            with self.subTest(flags=flags):
+                buf = io.StringIO()
+                with (
+                    contextlib.redirect_stderr(buf),
+                    patch("subprocess.run") as mock_run,
+                    self.assertRaises(SystemExit) as raised,
+                ):
+                    checker.main(flags)
+                self.assertEqual(2, raised.exception.code)
+                mock_run.assert_not_called()
+                self.assertIn("cannot be combined with", buf.getvalue())
+
+    def test_fullsend_pin_equals_the_bootstrap_cache_pin(self) -> None:
+        # ADR-0005: PRECOMMIT_VERSION in scripts/pre_commit_cache.py
+        # must equal FULLSEND_PRE_COMMIT_VERSION until issue #581
+        # retires the bootstrap.
+        self.assertEqual(
+            pre_commit_cache.PRECOMMIT_VERSION,
+            checker.FULLSEND_PRE_COMMIT_VERSION,
+        )
 
 
 class MainCiInvocationTests(unittest.TestCase):
-    """The CI invocation must work without reading the config.
+    """The CI invocation must work without reading any configuration.
 
     CI runs ``python3 scripts/lint.py --all-files --online-if-ci``
-    under ``CI=true``. That path must not read
-    ``.pre-commit-config.yaml`` (so it needs no PyYAML) and must not
-    force zizmor's audits offline.
+    under ``CI=true``. That path must read no configuration (so it
+    needs no PyYAML), must not force zizmor's audits offline, and must
+    still run one ``pre-commit run --config <path>`` invocation per
+    existing configuration.
     """
 
-    def test_ci_invocation_runs_pre_commit_without_config(self) -> None:
-        def _fail_if_called() -> None:
-            self.fail("the CI invocation must not read the config")
-
+    def setUp(self) -> None:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
+        self.cache = Path(temporary_directory.name) / "cache"
+
+    def _ci_env(self) -> dict[str, str]:
         env = dict(os.environ)
         env["CI"] = "true"
-        env["PRE_COMMIT_HOME"] = str(Path(temporary_directory.name) / "cache")
+        env["PRE_COMMIT_HOME"] = str(self.cache)
         env.pop("ZIZMOR_NO_ONLINE_AUDITS", None)
+        return env
+
+    def test_ci_invocation_runs_pre_commit_without_config(self) -> None:
+        def _fail_if_called(path: Path) -> None:
+            self.fail("the CI invocation must not read the config")
+
         with (
-            patch.dict(os.environ, env, clear=True),
+            patch.dict(os.environ, self._ci_env(), clear=True),
+            patch.object(
+                checker,
+                "_existing_config_paths",
+                return_value=[checker.CONFIG_PATH, checker.CI_CONFIG_PATH],
+            ),
             patch.object(checker, "_load_config", side_effect=_fail_if_called),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
         ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             checker.main(["--all-files", "--online-if-ci"])
             # Assert inside the patch: the wrapper must not set the
             # zizmor flag for this online run.
             self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
-        mock_execvp.assert_called_once_with(
-            "pre-commit", ["pre-commit", "run", "--all-files"]
+        self.assertEqual(
+            [
+                call(
+                    [
+                        "pre-commit",
+                        "run",
+                        "--config",
+                        str(checker.CONFIG_PATH),
+                        "--all-files",
+                    ],
+                    cwd=str(checker.REPO_ROOT),
+                    check=False,
+                ),
+                call(
+                    [
+                        "pre-commit",
+                        "run",
+                        "--config",
+                        str(checker.CI_CONFIG_PATH),
+                        "--all-files",
+                    ],
+                    cwd=str(checker.REPO_ROOT),
+                    check=False,
+                ),
+            ],
+            mock_run.call_args_list,
         )
 
     def test_ci_invocation_with_files_scope_runs_without_config(self) -> None:
-        def _fail_if_called() -> None:
+        def _fail_if_called(path: Path) -> None:
             self.fail("the CI invocation must not read the config")
 
-        temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary_directory.cleanup)
-        env = dict(os.environ)
-        env["CI"] = "true"
-        env["PRE_COMMIT_HOME"] = str(Path(temporary_directory.name) / "cache")
-        env.pop("ZIZMOR_NO_ONLINE_AUDITS", None)
         with (
-            patch.dict(os.environ, env, clear=True),
+            patch.dict(os.environ, self._ci_env(), clear=True),
+            patch.object(
+                checker,
+                "_existing_config_paths",
+                return_value=[checker.CONFIG_PATH, checker.CI_CONFIG_PATH],
+            ),
             patch.object(checker, "_load_config", side_effect=_fail_if_called),
-            patch("os.execvp") as mock_execvp,
+            patch("subprocess.run") as mock_run,
         ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             checker.main(["--online-if-ci", "--files", "a.py", "b.yaml"])
             self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
-        mock_execvp.assert_called_once_with(
-            "pre-commit",
-            ["pre-commit", "run", "--files", "a.py", "b.yaml"],
+        self.assertEqual(
+            [
+                call(
+                    [
+                        "pre-commit",
+                        "run",
+                        "--config",
+                        str(checker.CONFIG_PATH),
+                        "--files",
+                        "a.py",
+                        "b.yaml",
+                    ],
+                    cwd=str(checker.REPO_ROOT),
+                    check=False,
+                ),
+                call(
+                    [
+                        "pre-commit",
+                        "run",
+                        "--config",
+                        str(checker.CI_CONFIG_PATH),
+                        "--files",
+                        "a.py",
+                        "b.yaml",
+                    ],
+                    cwd=str(checker.REPO_ROOT),
+                    check=False,
+                ),
+            ],
+            mock_run.call_args_list,
         )
 
+    def test_ci_invocation_on_a_merge_skew_tree_runs_only_the_gate_config(self) -> None:
+        # A branch that predates the cutover has no CI configuration:
+        # the online CI invocation runs the gate configuration alone.
+        def _fail_if_called(path: Path) -> None:
+            self.fail("the CI invocation must not read the config")
 
-# A `run:` key line. Group 1 is the indentation; group 2 is the
-# inline value, if any.
-_RUN_KEY_LINE = re.compile(r"^([ \t]*)run:(?:[ \t]+(.*))?$")
+        with (
+            patch.dict(os.environ, self._ci_env(), clear=True),
+            patch.object(
+                checker, "_existing_config_paths", return_value=[checker.CONFIG_PATH]
+            ),
+            patch.object(checker, "_load_config", side_effect=_fail_if_called),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            checker.main(["--all-files", "--online-if-ci"])
+            self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
+        mock_run.assert_called_once_with(
+            [
+                "pre-commit",
+                "run",
+                "--config",
+                str(checker.CONFIG_PATH),
+                "--all-files",
+            ],
+            cwd=str(checker.REPO_ROOT),
+            check=False,
+        )
+
+    def test_online_bare_mode_reads_configs_only_for_the_always_run_decision(
+        self,
+    ) -> None:
+        # Online bare mode with no changed files must decide whether
+        # any configuration declares always_run; that decision may
+        # read each configuration once, and nothing else may.
+        gate_config = {"repos": [{"repo": "local", "hooks": [{"id": "x"}]}]}
+        ci_config = {"repos": [{"repo": "local", "hooks": [{"id": "y"}]}]}
+
+        def _config_for_path(path: Path) -> dict[str, object]:
+            return gate_config if path == checker.CONFIG_PATH else ci_config
+
+        with (
+            patch.dict(os.environ, self._ci_env(), clear=True),
+            patch.object(
+                checker,
+                "_existing_config_paths",
+                return_value=[checker.CONFIG_PATH, checker.CI_CONFIG_PATH],
+            ),
+            patch.object(
+                checker, "_load_config", side_effect=_config_for_path
+            ) as mock_load_config,
+            patch.object(checker, "_changed_files", return_value=[]),
+            patch("subprocess.run") as mock_run,
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = checker.main(["--online-if-ci"])
+            self.assertIsNone(os.environ.get("ZIZMOR_NO_ONLINE_AUDITS"))
+        self.assertEqual(
+            [call(checker.CONFIG_PATH), call(checker.CI_CONFIG_PATH)],
+            mock_load_config.call_args_list,
+        )
+        mock_run.assert_not_called()
+        self.assertEqual(0, rc)
+        self.assertIn("No files to check.", buf.getvalue())
+
+
+# A `run:` key line. Group 1 is the indentation; group 2 is an
+# optional quote pair around the key; group 3 is the inline value, if
+# any. YAML also accepts `"run":`, `'run':`, and `run :`, so the key
+# may carry a quote pair and spaces before the colon. A step may also
+# be a sequence item with no name (`- run:` or a `- run: |` block), so
+# an optional `- ` item prefix is accepted.
+_RUN_KEY_LINE = re.compile(
+    r"""^([ \t]*)(?:-[ \t]+)?(["']?)run\2[ \t]*:(?:[ \t]+(.*))?$"""
+)
+
+# A top-level job key under `jobs:` (exactly two spaces of indent).
+# shortcut: keys under `on:` and `permissions:` also sit at two
+# spaces, but they never match a job id, so they only close the
+# current job; upgrade to a YAML parser if the workflow ever nests a
+# two-space scalar block that starts like a job key.
+_JOB_KEY_LINE = re.compile(r"^  (?P<job>[A-Za-z0-9_-]+):(?:[ \t]|$)")
+
+
+def _split_job(text: str, job_id: str) -> tuple[str, str]:
+    """Return ``(job text, remaining text)`` for top-level job *job_id*.
+
+    The job text covers the job key line and every line until the next
+    top-level key; the remaining text is everything else, so commands
+    extracted from it cannot come from *job_id*. Returns ``("", text)``
+    when the job is absent.
+    """
+    job: list[str] = []
+    rest: list[str] = []
+    into_job = False
+    for line in text.splitlines():
+        key = _JOB_KEY_LINE.match(line)
+        if key is not None:
+            into_job = key.group("job") == job_id
+        (job if into_job else rest).append(line)
+    return "\n".join(job), "\n".join(rest)
+
 
 # A direct `pre-commit run` invocation: the `pre-commit` command or
 # the `-m pre_commit` module form, each followed by a `run` token.
@@ -3619,31 +4351,41 @@ def _has_direct_pre_commit_run(text: str) -> bool:
     return _DIRECT_PRE_COMMIT_RUN.search(_without_yaml_comments(text)) is not None
 
 
-def _run_commands(text: str) -> list[str]:
-    """Return the command lines of every ``run:`` value in *text*.
+def _run_commands_by_step(text: str) -> list[list[str]]:
+    """Return the ``run:`` command lines of *text*, grouped by step.
 
-    Comment parts are removed first, so a comment that names a
-    command does not count and a step name never becomes a command.
-    The inline form (``run: <command>``) yields the command on the
-    same line. The block form (``run: |`` or ``run: >``) yields every
-    non-empty stripped line of the indented block that follows. The
-    helper parses text only, so the tests need no PyYAML.
+    Each ``run:`` key starts a new group holding that step's commands:
+    the inline value, or every non-empty stripped line of the indented
+    block that follows. The key may be quoted or spaced
+    (``"run":``, ``'run':``, ``run :``) and the step may be a
+    sequence item with no name (``- run:``). A block ends at the first
+    non-blank line that is not indented deeper than the ``run`` key
+    itself: for a ``- run: |`` item the key sits after the dash, so a
+    sibling field such as ``name:`` at the key's indentation ends the
+    block instead of becoming a command. Comment parts are removed
+    first, so a comment that names a command does not count and a step
+    name never becomes a command. The helper parses text only, so the
+    tests need no PyYAML.
     """
+    groups: list[list[str]] = []
     lines = _without_yaml_comments(text).splitlines()
-    commands: list[str] = []
     index = 0
     while index < len(lines):
         key = _RUN_KEY_LINE.match(lines[index])
         if key is None:
             index += 1
             continue
-        indent = key.group(1)
-        value = key.group(2) or ""
+        value = key.group(3) or ""
+        # The column where the run key (or its quote) starts; a block
+        # must be indented deeper than this, not merely deeper than a
+        # sequence dash.
+        block_prefix = " " * (key.start(2) + 1)
+        commands: list[str] = []
         if value[:1] in ("|", ">"):
             index += 1
             while index < len(lines):
                 block_line = lines[index]
-                if block_line.strip() and not block_line.startswith(indent + " "):
+                if block_line.strip() and not block_line.startswith(block_prefix):
                     break
                 if block_line.strip():
                     commands.append(block_line.strip())
@@ -3652,7 +4394,103 @@ def _run_commands(text: str) -> list[str]:
             if value.strip():
                 commands.append(value.strip())
             index += 1
-    return commands
+        groups.append(commands)
+    return groups
+
+
+def _run_commands(text: str) -> list[str]:
+    """Return the command lines of every ``run:`` value in *text*."""
+    return [command for group in _run_commands_by_step(text) for command in group]
+
+
+def _join_continuations(commands: list[str]) -> list[str]:
+    """Join shell continuation lines into one command each.
+
+    A line ending in a backslash continues on the next line, so
+    ``env A=1 \\`` plus ``B=2 cmd`` is one ``env A=1 B=2 cmd``
+    command. Comments are already removed by the extraction, so a
+    comment between a line and its continuation cannot split it.
+    """
+    joined: list[str] = []
+    pending = ""
+    for command in commands:
+        pending = f"{pending} {command}" if pending else command
+        if pending.endswith("\\"):
+            pending = pending[:-1].rstrip()
+            continue
+        joined.append(pending)
+        pending = ""
+    if pending:
+        joined.append(pending)
+    return joined
+
+
+def _runs_under_env_i(command: str) -> bool:
+    """Return whether *command* runs under ``env -i`` before ``pre-commit``."""
+    head = command.split("pre-commit", 1)[0]
+    return head.startswith("env -i") or " env -i " in f" {head}"
+
+
+def _run_commands_joined(text: str) -> list[str]:
+    """Return the ``run:`` commands of *text*, continuations joined.
+
+    Joining happens inside each step's group, so a backslash at the
+    end of one step's last line cannot merge it with the next step's
+    first command.
+    """
+    return [
+        command
+        for group in _run_commands_by_step(text)
+        for command in _join_continuations(group)
+    ]
+
+
+def _job_commands(text: str, job_id: str) -> list[str]:
+    """Return the joined ``run:`` commands of one job."""
+    return _run_commands_joined(_split_job(text, job_id)[0])
+
+
+def _direct_runs_outside_job(text: str, job_id: str) -> list[str]:
+    """Return joined commands outside job *job_id* that run ``pre-commit`` directly.
+
+    Continuations are joined before the detection, so a direct run
+    split across lines (``pre-commit \\`` then ``run -a``) cannot
+    evade the contract.
+    """
+    _, remaining = _split_job(text, job_id)
+    return [
+        command
+        for command in _run_commands_joined(remaining)
+        if _has_direct_pre_commit_run(command)
+    ]
+
+
+def _direct_runs_in_job(text: str, job_id: str) -> list[str]:
+    """Return every joined command in job *job_id* that runs ``pre-commit`` directly.
+
+    Every step form counts, including ``- run:`` sequence items with
+    no name, so a direct run cannot hide from the count.
+    """
+    job, _ = _split_job(text, job_id)
+    return [
+        command
+        for command in _run_commands_joined(job)
+        if _has_direct_pre_commit_run(command)
+    ]
+
+
+def _direct_run_invocations(commands: list[str]) -> list[str]:
+    """Return every direct ``pre-commit run`` invocation in *commands*.
+
+    One command line can hold several invocations — for example
+    ``pre-commit run -a; pre-commit run -a`` — and each match counts,
+    so the rehearsal contract counts invocations, not lines.
+    """
+    return [
+        match
+        for command in commands
+        for match in _DIRECT_PRE_COMMIT_RUN.findall(command)
+    ]
 
 
 class DirectPreCommitRunMatcherTests(unittest.TestCase):
@@ -3710,6 +4548,14 @@ class RunCommandsExtractionTests(unittest.TestCase):
         snippet = "      - name: Run pre-commit gc\n        run: echo skipped\n"
         self.assertEqual(["echo skipped"], _run_commands(snippet))
 
+    def test_quoted_and_spaced_run_keys_are_extracted(self) -> None:
+        # YAML accepts "run":, 'run':, and run : spellings of the key;
+        # none of them may hide a command from the contract guards.
+        for key in ('"run":', "'run':", "run :", '"run" :'):
+            with self.subTest(key=key):
+                snippet = f"        {key} pre-commit gc\n"
+                self.assertEqual(["pre-commit gc"], _run_commands(snippet))
+
     def test_quoted_hash_does_not_hide_a_direct_run(self) -> None:
         # A `#` inside quotes is shell data, not a comment. The
         # extracted command must stay whole so the matcher still
@@ -3733,26 +4579,564 @@ class RunCommandsExtractionTests(unittest.TestCase):
         self.assertTrue(_has_direct_pre_commit_run(commands[0]))
 
 
+class RunCommandsByStepTests(unittest.TestCase):
+    def test_groups_each_run_key_into_its_own_list(self) -> None:
+        snippet = (
+            "        run: python3 scripts/lint.py --all-files\n"
+            "        run: |\n"
+            "          echo one\n"
+            "          echo two\n"
+            "        run: pre-commit gc\n"
+        )
+        self.assertEqual(
+            [
+                ["python3 scripts/lint.py --all-files"],
+                ["echo one", "echo two"],
+                ["pre-commit gc"],
+            ],
+            _run_commands_by_step(snippet),
+        )
+
+    def test_sequence_item_run_steps_are_extracted(self) -> None:
+        # GitHub allows a step as a sequence item with no name:
+        # `- run: <command>` inline, and a `- run: |` block. Each is
+        # its own group, and the direct-run matcher finds the command.
+        snippet = (
+            "      - run: pre-commit run --all-files\n"
+            "      - run: |\n"
+            "          env -i pre-commit run --all-files\n"
+            "      - name: Named step\n"
+            "        run: pre-commit gc\n"
+        )
+        self.assertEqual(
+            [
+                ["pre-commit run --all-files"],
+                ["env -i pre-commit run --all-files"],
+                ["pre-commit gc"],
+            ],
+            _run_commands_by_step(snippet),
+        )
+        for command in _run_commands(snippet):
+            with self.subTest(command=command):
+                if command != "pre-commit gc":
+                    self.assertTrue(_has_direct_pre_commit_run(command))
+
+    def test_unnamed_block_stops_at_sibling_keys(self) -> None:
+        # A `- run: |` block ends at a sibling field at the run key's
+        # indentation; the sibling value must not become a command,
+        # even when its text names `pre-commit run`.
+        snippet = (
+            "      - run: |\n"
+            "          echo only this\n"
+            "        name: Explain pre-commit run\n"
+            "      - name: Next step\n"
+            "        run: pre-commit gc\n"
+        )
+        self.assertEqual(
+            [
+                ["echo only this"],
+                ["pre-commit gc"],
+            ],
+            _run_commands_by_step(snippet),
+        )
+        # The name: value never reaches the commands, so the
+        # outside-job direct-run check does not reject this workflow.
+        commands = _run_commands(snippet)
+        self.assertNotIn("name: Explain pre-commit run", commands)
+        self.assertEqual(
+            [], [command for command in commands if _has_direct_pre_commit_run(command)]
+        )
+
+    def test_join_continuations_merges_backslash_lines(self) -> None:
+        self.assertEqual(
+            ["env A=1 B=2 pre-commit run --all-files", "echo next"],
+            _join_continuations(
+                [
+                    "env A=1 \\",
+                    "B=2 pre-commit run --all-files",
+                    "echo next",
+                ]
+            ),
+        )
+
+    def test_join_continuations_keeps_a_trailing_continuation(self) -> None:
+        # A block that ends on a continuation still yields its command
+        # instead of dropping it.
+        self.assertEqual(
+            ["env -i"],
+            _join_continuations(["env -i \\"]),
+        )
+
+    def test_runs_under_env_i_matches_only_before_pre_commit(self) -> None:
+        self.assertTrue(_runs_under_env_i("env -i PATH=x pre-commit run"))
+        self.assertTrue(_runs_under_env_i("setup && env -i pre-commit run"))
+        self.assertFalse(_runs_under_env_i("env PATH=x pre-commit run"))
+        self.assertFalse(_runs_under_env_i("echo pre-commit run env -i"))
+
+
+class SplitJobTests(unittest.TestCase):
+    def test_separates_the_named_job_from_the_rest(self) -> None:
+        text = (
+            "on:\n"
+            "  push:\n"
+            "jobs:\n"
+            "  pre-commit:\n"
+            "    steps:\n"
+            "      - run: python3 scripts/lint.py --all-files\n"
+            "  gate-rehearsal:\n"
+            "    steps:\n"
+            "      - run: pre-commit run --all-files\n"
+            "  ci-success:\n"
+            "    steps:\n"
+            "      - run: echo done\n"
+        )
+        job, rest = _split_job(text, "gate-rehearsal")
+        self.assertIn("pre-commit run --all-files", job)
+        self.assertNotIn("gate-rehearsal", rest)
+        self.assertIn("python3 scripts/lint.py --all-files", rest)
+        self.assertIn("echo done", rest)
+
+    def test_absent_job_returns_nothing_removed(self) -> None:
+        text = "jobs:\n  pre-commit:\n    steps:\n      - run: echo x\n"
+        job, rest = _split_job(text, "gate-rehearsal")
+        self.assertEqual("", job)
+        self.assertEqual(text.rstrip("\n"), rest)
+
+
 class CiWorkflowContractTests(unittest.TestCase):
     """The CI pre-commit job uses the wrapper as its lint entrypoint.
 
     Every assertion inspects the executed ``run:`` command lines, not
     the raw file text, so comments and step names cannot satisfy it.
+    The ``gate-rehearsal`` job (ADR-0005 Decision item 3) is the one
+    permitted place for a direct ``pre-commit run`` invocation — it
+    proves the gate configuration on the exact version Fullsend runs —
+    so its commands are excluded from the wrapper-entrypoint contract
+    and pinned by their own, stricter tests.
     """
+
+    _GATE_REHEARSAL_JOB = "gate-rehearsal"
+    _PRE_COMMIT_JOB = "pre-commit"
+    _CI_SUCCESS_JOB = "ci-success"
+    _FULLSEND_PIN_COMMAND = (
+        "python3 scripts/lint.py --print-fullsend-pre-commit-version"
+    )
+
+    # Guards the rehearsal step must carry (ADR-0005 Decision item 3):
+    # VCS denial, no default-branch ref, no Go/Node/uvx toolchain, an
+    # empty PRE_COMMIT_HOME, and a skip predicate on every log.
+    _REHEARSAL_COMMAND_TOKENS = (
+        "GIT_ALLOW_PROTOCOL=file",
+        "GIT_TERMINAL_PROMPT=0",
+        "git ls-remote",
+        "refs/heads/main",
+        "refs/remotes/origin/main",
+        "go",
+        "gofmt",
+        "node",
+        "npm",
+        "uvx",
+        "PRE_COMMIT_HOME",
+        "ls -A",
+        "Skipped",
+    )
+
+    # The base exports the pre-commit job must wire (ADR-0005
+    # Base-aware validation). The select step's id is free; the
+    # source of each export is not. The last two take exact_base
+    # with a merge_base fallback.
+    _BASE_EXPORT_PATTERNS = (
+        r"GITHUB_BASE_SHA: \$\{\{ steps\.\w+\.outputs\.merge_base \}\}",
+        r"PROTOBOT_VALIDATOR_BASE: \$\{\{ steps\.\w+\.outputs\.exact_base \}\}",
+        (
+            r"BASELINE_RATCHET_BASE_REF: \$\{\{ steps\.\w+\.outputs\.exact_base"
+            r" \|\| steps\.\w+\.outputs\.merge_base \}\}"
+        ),
+        (
+            r"PRE_COMMIT_FROM_REF: \$\{\{ steps\.\w+\.outputs\.exact_base"
+            r" \|\| steps\.\w+\.outputs\.merge_base \}\}"
+        ),
+    )
 
     def setUp(self) -> None:
         workflow_path = checker.REPO_ROOT / ".github" / "workflows" / "ci-workflow.yaml"
-        self.commands = _run_commands(workflow_path.read_text(encoding="utf-8"))
+        self.text = workflow_path.read_text(encoding="utf-8")
+        rehearsal, remaining = _split_job(self.text, self._GATE_REHEARSAL_JOB)
+        self.rehearsal_text = rehearsal
+        # Joined commands: a direct run split across continuation
+        # lines must not evade any contract assertion.
+        self.rehearsal_commands = _run_commands_joined(rehearsal)
+        self.commands = _run_commands_joined(remaining)
+
+    def _rehearsal_direct_run_commands(self) -> list[str]:
+        """Return the joined commands of the rehearsal's direct-run step."""
+        groups = [
+            _join_continuations(group)
+            for group in _run_commands_by_step(self.rehearsal_text)
+        ]
+        direct_groups = [
+            group
+            for group in groups
+            if any(_has_direct_pre_commit_run(command) for command in group)
+        ]
+        # Exactly one step in gate-rehearsal invokes pre-commit run
+        # directly, as the Fullsend gate does.
+        self.assertEqual(1, len(direct_groups))
+        return direct_groups[0]
 
     def test_no_direct_pre_commit_run_invocation(self) -> None:
-        for command in self.commands:
+        self.assertEqual(
+            [], _direct_runs_outside_job(self.text, self._GATE_REHEARSAL_JOB)
+        )
+
+    def test_line_continued_direct_run_outside_gate_rehearsal_fails(self) -> None:
+        # Regression test: a direct run split across continuation
+        # lines used to evade the per-line check. The contract check
+        # joins continuations, so the sneaky step is reported.
+        workflow = (
+            "jobs:\n"
+            "  pre-commit:\n"
+            "    steps:\n"
+            "      - name: Sneaky step\n"
+            "        run: |\n"
+            "          pre-commit \\\n"
+            "          run -a\n"
+            "  gate-rehearsal:\n"
+            "    steps:\n"
+            "      - run: pre-commit run --all-files\n"
+        )
+        self.assertEqual(
+            ["pre-commit run -a"],
+            _direct_runs_outside_job(workflow, self._GATE_REHEARSAL_JOB),
+        )
+
+    def test_gate_rehearsal_direct_run_step_runs_twice(self) -> None:
+        # The one direct-run step holds exactly two runs: one in the
+        # job environment, one under env -i to catch hooks that read
+        # environment variables. The count covers every step form,
+        # including `- run:` items with no name, and counts every
+        # invocation, not just the lines that hold one.
+        direct_runs = _direct_runs_in_job(self.text, self._GATE_REHEARSAL_JOB)
+        self.assertEqual(2, len(_direct_run_invocations(direct_runs)))
+        under_env_i = [command for command in direct_runs if _runs_under_env_i(command)]
+        self.assertEqual(1, len(under_env_i))
+        # The other direct run must not run under env -i.
+        self.assertEqual(1, len(direct_runs) - len(under_env_i))
+        # pre-commit prints a passing hook's output only with --verbose,
+        # so the skip predicate can see an `OK (skipped=N)` unittest
+        # summary; --color=never keeps the saved log free of ANSI
+        # escapes. A future edit must not drop either flag.
+        for command in direct_runs:
             with self.subTest(command=command):
-                self.assertFalse(_has_direct_pre_commit_run(command))
+                self.assertIn("--verbose", command)
+                self.assertIn("--color=never", command)
+
+    def test_a_third_direct_run_step_is_counted(self) -> None:
+        # Regression test: GitHub also allows `- run:` steps with no
+        # name. Before the parser accepted that form, a third direct
+        # run added that way was not counted and the "exactly two"
+        # contract still passed.
+        workflow = (
+            "jobs:\n"
+            "  gate-rehearsal:\n"
+            "    steps:\n"
+            "      - name: Rehearse the gate\n"
+            "        run: |\n"
+            "          env PATH=x pre-commit run --all-files\n"
+            "          env -i PATH=x pre-commit run --all-files\n"
+            "      - run: pre-commit run --all-files\n"
+        )
+        self.assertEqual(
+            3,
+            len(
+                _direct_run_invocations(
+                    _direct_runs_in_job(workflow, self._GATE_REHEARSAL_JOB)
+                )
+            ),
+        )
+
+    def test_two_invocations_on_one_line_are_counted_separately(self) -> None:
+        # Regression test: one line can hold several direct
+        # invocations. Before the count used every match, the line
+        # counted once and this workflow passed the "exactly two"
+        # contract with three invocations.
+        workflow = (
+            "jobs:\n"
+            "  gate-rehearsal:\n"
+            "    steps:\n"
+            "      - name: Rehearse the gate\n"
+            "        run: |\n"
+            "          pre-commit run -a; pre-commit run -a\n"
+            "          env -i pre-commit run -a\n"
+        )
+        direct_runs = _direct_runs_in_job(workflow, self._GATE_REHEARSAL_JOB)
+        # Two command lines hold the invocations...
+        self.assertEqual(2, len(direct_runs))
+        # ...but three invocations run, so the contract rejects it.
+        self.assertEqual(3, len(_direct_run_invocations(direct_runs)))
+
+    def test_gate_rehearsal_direct_run_step_guards_each_run(self) -> None:
+        # Each direct run is bracketed: strict shell settings at the
+        # top, the environment probes and an empty-home check before
+        # it, and the skip predicate after it.
+        commands = self._rehearsal_direct_run_commands()
+        self.assertEqual("set -euo pipefail", commands[0])
+        verify = [
+            index
+            for index, command in enumerate(commands)
+            if command == "verify_gate_environment"
+        ]
+        empty_home = [
+            index
+            for index, command in enumerate(commands)
+            if command == 'require_empty_home "$home"'
+        ]
+        runs = [
+            index
+            for index, command in enumerate(commands)
+            if _has_direct_pre_commit_run(command)
+        ]
+        skip_checks = [
+            index
+            for index, command in enumerate(commands)
+            if command.startswith('fail_on_skip "')
+        ]
+        self.assertEqual(2, len(verify))
+        self.assertEqual(2, len(empty_home))
+        self.assertEqual(2, len(runs))
+        self.assertEqual(2, len(skip_checks))
+        for verify_at, home_at, run_at, skip_at in zip(
+            verify, empty_home, runs, skip_checks
+        ):
+            with self.subTest(run_index=run_at):
+                self.assertLess(verify_at, run_at)
+                self.assertLess(home_at, run_at)
+                self.assertLess(run_at, skip_at)
+                for token in (
+                    "HOME=",
+                    "LANG=C.UTF-8",
+                    "GIT_ALLOW_PROTOCOL=file",
+                    "GIT_TERMINAL_PROMPT=0",
+                ):
+                    self.assertIn(token, commands[run_at])
+
+    def test_gate_rehearsal_command_text_includes_the_required_guards(self) -> None:
+        step_text = "\n".join(self._rehearsal_direct_run_commands())
+        for token in self._REHEARSAL_COMMAND_TOKENS:
+            with self.subTest(token=token):
+                self.assertIn(token, step_text)
+
+    def test_gate_rehearsal_does_not_read_the_ci_configuration(self) -> None:
+        # Merge skew: the rehearsal must pass when
+        # .github/pre-commit-ci.yaml is absent, so it never names it.
+        self.assertNotIn(".github/pre-commit-ci.yaml", self.rehearsal_text)
+
+    def test_gate_rehearsal_runs_on_a_matrix_of_both_images(self) -> None:
+        # ADR-0005 Decision item 3: the same rehearsal runs on
+        # ubuntu-24.04 (the Fullsend runner image) and ubuntu-latest.
+        # The job uses ${{ matrix.os }}, so the images are asserted
+        # under the matrix section, not in a runs-on line.
+        self.assertIn("matrix:", self.rehearsal_text)
+        matrix_start = self.rehearsal_text.index("matrix:")
+        for image in ("ubuntu-24.04", "ubuntu-latest"):
+            with self.subTest(image=image):
+                self.assertIn(image, self.rehearsal_text)
+                self.assertGreater(self.rehearsal_text.index(image), matrix_start)
+
+    def test_gate_rehearsal_installs_the_fullsend_pre_commit_version(self) -> None:
+        # The Fullsend pin, not the wrapper pin: the rehearsal proves
+        # the gate on the version the sandbox runs. scripts/lint.py
+        # owns both pins; the rehearsal reads the Fullsend pin through
+        # --print-fullsend-pre-commit-version.
+        self.assertTrue(
+            any(
+                self._FULLSEND_PIN_COMMAND in command
+                for command in self.rehearsal_commands
+            )
+        )
+
+    def test_gate_rehearsal_probes_the_pre_commit_hooks_repository(self) -> None:
+        # ADR-0005 amendment: the ls-remote probe names
+        # pre-commit/pre-commit-hooks, the repository the gate once
+        # cloned. The deny rule establishes the condition; the probe
+        # only confirms that the deny rule is active.
+        commands = self._rehearsal_direct_run_commands()
+        self.assertTrue(
+            any(
+                "git ls-remote" in command
+                and "https://github.com/pre-commit/pre-commit-hooks" in command
+                for command in commands
+            ),
+            "the rehearsal must probe git ls-remote against "
+            "https://github.com/pre-commit/pre-commit-hooks",
+        )
+
+    def test_gate_rehearsal_positive_controls_prove_local_git_and_pypi(self) -> None:
+        # ADR-0005 amendment: denial covers network transports only,
+        # so each run carries positive controls. A file:// clone
+        # proves local Git operates; a --no-deps pip download of
+        # iniconfig proves PyPI access operates.
+        commands = self._rehearsal_direct_run_commands()
+        self.assertTrue(
+            any(
+                all(token in command for token in ("git clone", "file://"))
+                for command in commands
+            ),
+            "the rehearsal must clone a file:// repository as a positive control",
+        )
+        self.assertTrue(
+            any(
+                all(
+                    token in command
+                    for token in ("pip download", "--no-deps", "iniconfig")
+                )
+                for command in commands
+            ),
+            "the rehearsal must download iniconfig from PyPI as a positive control",
+        )
+
+    def test_gate_rehearsal_skip_check_records_and_limits_allowed_skips(self) -> None:
+        # ADR-0005 amendment: the rehearsal records each skipped hook
+        # with its skip reason, then fails unless every skipped hook
+        # is check-toml or check-xml reporting no files to check. The
+        # exception list is closed: a new hook needs a tracked
+        # matching file or an amendment. The reason is asserted as
+        # "no files to check" because pre-commit prints it inside the
+        # "(...)Skipped" marker: a literal-marker grep and a parsed
+        # reason check both name it, so either form satisfies the
+        # contract.
+        commands = self._rehearsal_direct_run_commands()
+        self.assertTrue(
+            any("grep" in command and "Skipped" in command for command in commands),
+            "the skip check must grep the run log to record each skipped hook",
+        )
+        step_text = "\n".join(commands)
+        for token in ("check-toml", "check-xml", "no files to check"):
+            with self.subTest(token=token):
+                self.assertIn(token, step_text)
+
+    def test_pre_commit_job_sets_up_go_before_installing_pre_commit(self) -> None:
+        # ADR-0005 Decision item 5: scripts/lint.py runs the Go hooks
+        # through the CI configuration, so the pre-commit job needs
+        # the Go toolchain before pre-commit itself is installed.
+        job_text = _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        self.assertIn("actions/setup-go@", job_text)
+        self.assertIn("go-version-file: validator/go.mod", job_text)
+        self.assertLess(
+            job_text.index("actions/setup-go@"),
+            job_text.index("Install pre-commit"),
+        )
+
+    def test_pre_commit_job_checkout_fetches_the_full_history(self) -> None:
+        # ADR-0005 cutover step 8: the job resolves a comparison
+        # base, so the checkout must hold enough history to contain
+        # the base commit.
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        self.assertIn("fetch-depth: 0", job_text)
+        self.assertLess(
+            job_text.index("actions/checkout@"),
+            job_text.index("fetch-depth: 0"),
+        )
+
+    def test_pre_commit_job_installs_pyyaml_and_jsonschema_before_lint(self) -> None:
+        # ADR-0005 cutover step 7: the CI configuration's
+        # language: system hooks import PyYAML and jsonschema without
+        # declaring the dependency, so the job installs both pins for
+        # python3 (venv or equivalent) before scripts/lint.py runs.
+        commands = _job_commands(self.text, self._PRE_COMMIT_JOB)
+        lint_at = next(
+            index
+            for index, command in enumerate(commands)
+            if command == "python3 scripts/lint.py --all-files --online-if-ci"
+        )
+        for pin in ("pyyaml==6.0.3", "jsonschema==4.25.1"):
+            with self.subTest(pin=pin):
+                install_at = [
+                    index for index, command in enumerate(commands) if pin in command
+                ]
+                self.assertTrue(install_at, f"no command installs {pin}")
+                self.assertLess(min(install_at), lint_at)
+
+    def test_pre_commit_job_exports_github_token_to_the_lint_step(self) -> None:
+        # ADR-0005 Accepted risk: GH_TOKEN lets zizmor run its online
+        # audits at merge time; without the token 5 audits skip even
+        # in online mode. A job-level env block and the lint step's
+        # own env both satisfy the export.
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        self.assertIn("GH_TOKEN: ${{ github.token }}", job_text)
+
+    def test_pre_commit_job_selects_the_comparison_base(self) -> None:
+        # ADR-0005 cutover step 9: the job binds the four event
+        # inputs to scripts/select_comparison_base.py, which fails
+        # closed when the event requires a base git cannot provide,
+        # before the lint step consumes the exports.
+        commands = _job_commands(self.text, self._PRE_COMMIT_JOB)
+        self.assertIn("python3 scripts/select_comparison_base.py", commands)
+        self.assertLess(
+            commands.index("python3 scripts/select_comparison_base.py"),
+            commands.index("python3 scripts/lint.py --all-files --online-if-ci"),
+        )
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        for binding in (
+            "DEFAULT_BRANCH:",
+            "PULL_REQUEST_BASE_SHA:",
+            "MERGE_GROUP_BASE_SHA:",
+            "PUSH_BEFORE_SHA:",
+        ):
+            with self.subTest(binding=binding):
+                self.assertIn(binding, job_text)
+
+    def test_pre_commit_job_exports_the_comparison_base(self) -> None:
+        # ADR-0005 Base-aware validation: GITHUB_BASE_SHA comes from
+        # merge_base, PROTOBOT_VALIDATOR_BASE from exact_base, and
+        # BASELINE_RATCHET_BASE_REF and PRE_COMMIT_FROM_REF from
+        # exact_base with a merge_base fallback.
+        job_text = _without_yaml_comments(
+            _split_job(self.text, self._PRE_COMMIT_JOB)[0]
+        )
+        for pattern in self._BASE_EXPORT_PATTERNS:
+            with self.subTest(pattern=pattern):
+                self.assertRegex(job_text, pattern)
+
+    def test_ci_success_needs_gate_rehearsal(self) -> None:
+        job_text = _split_job(self.text, self._CI_SUCCESS_JOB)[0]
+        self.assertIn("- gate-rehearsal", job_text)
+        self.assertLess(
+            job_text.index("needs:"),
+            job_text.index("- gate-rehearsal"),
+        )
 
     def test_run_step_invokes_the_wrapper(self) -> None:
+        # Scoped to the pre-commit job: a wrapper command in another
+        # job must not satisfy this contract.
         self.assertIn(
             "python3 scripts/lint.py --all-files --online-if-ci",
-            self.commands,
+            _job_commands(self.text, self._PRE_COMMIT_JOB),
+        )
+
+    def test_wrapper_command_in_another_job_does_not_satisfy_the_contract(self) -> None:
+        # Only the pre-commit job is checked, so the wrapper command
+        # in a different job cannot satisfy the contract above.
+        workflow = (
+            "jobs:\n"
+            "  other:\n"
+            "    steps:\n"
+            "      - name: Run the wrapper\n"
+            "        run: python3 scripts/lint.py --all-files --online-if-ci\n"
+            "  pre-commit:\n"
+            "    steps:\n"
+            "      - name: Not the wrapper\n"
+            "        run: echo no wrapper here\n"
+        )
+        self.assertNotIn(
+            "python3 scripts/lint.py --all-files --online-if-ci",
+            _job_commands(workflow, self._PRE_COMMIT_JOB),
         )
 
     def test_install_step_pins_the_wrapper_version(self) -> None:

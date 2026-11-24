@@ -9,12 +9,27 @@
 
 # yamllint disable rule:line-length
 
+# Gate configuration per ADR-0005
+# (docs/decisions/0005-commit-hook-framework.md).
+#
+# Gate invariant: `pre-commit run --all-files` against this file
+# must pass with a fresh PRE_COMMIT_HOME when VCS access is denied
+# and PyPI (pypi.org/files.pythonhosted.org) is reachable.
+#
+# The gate contains only `repo: local` hooks: `language: python`
+# hooks pin their dependencies via `additional_dependencies`, and
+# `language: system` hooks use only the Python standard library.
+# Hooks that need a VCS clone, the Go toolchain, a default-branch
+# ref, or network access are CI-only; they live in
+# .github/pre-commit-ci.yaml.
+
 # Note on validator/vendor/:
 # validator/vendor/ holds go mod vendor's copy of validator's module
 # dependencies (gopkg.in/yaml.v3 as of this writing) so the always-run
-# spec-validator hook (see its entry below) can build offline without a
-# populated GOMODCACHE. CI's "Check formatting" step
-# (.github/workflows/ci-workflow.yaml:244) runs `gofmt -l validator`,
+# spec-validator hook (now in .github/pre-commit-ci.yaml) can build
+# without network module lookups or a populated GOMODCACHE. CI's
+# "Check formatting" step for the validator module
+# (.github/workflows/ci-workflow.yaml) runs `gofmt -l validator`,
 # which recurses into vendor/. Run `gofmt -w validator/vendor/gopkg.in/yaml.v3`
 # after `go mod vendor` to keep vendored sources formatted. Formatting
 # fixers below exclude validator/vendor/ individually, keeping secret
@@ -28,42 +43,13 @@
 #   )$
 
 repos:
-  - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: c01a1853c19b175aee6a09f24e2ad9b748c485ad  # frozen: v0.24.1
-    hooks:
-      - id: markdownlint-cli2
-        args: ["--config", ".github/markdownlint-cli2.yaml"]
-        exclude: |
-          (?x)^(
-                .github/pull_request_template\.md |
-                .agents/skills/ |
-                validator/vendor/.*
-            )$
-
-  - repo: https://github.com/hadolint/hadolint
-    rev: 2eece55955ced00200be9729e9728cb7dacca505  # frozen: v2.15.1
-    hooks:
-      # Lint Dockerfiles
-      - id: hadolint
-
-  - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 71222830124d3dcacafde100efbd8e833c2cbb1f  # frozen: 44.237.0
-    hooks:
-      - id: renovate-config-validator
-
-  # Offline local checks so sandboxed agents catch formatting, vet,
-  # and skillsaw baseline-ceiling ratchet errors without network hook
-  # repositories.
+  # Local gate checks so sandboxed agents catch formatting and
+  # hygiene errors without network hook repositories.
   #
-  # The hooks below pin a PyPI package via `additional_dependencies`
-  # instead of cloning a hook repository from GitHub/GitLab, because the
-  # sandboxed coding-agent profile allows pypi.org/files.pythonhosted.org
-  # but not git/github.com clones (see issue #550). `language: python`
-  # makes pre-commit build a per-hook virtualenv and `pip install` the
-  # pinned package; no image change or network to a VCS host is needed.
-  # First use in a new environment still requires pypi.org and
-  # files.pythonhosted.org for `pip install`, so an offline sandbox must
-  # warm PRE_COMMIT_HOME with `scripts/pre_commit_cache.py` first.
+  # The `language: python` hooks below pin their PyPI packages via
+  # `additional_dependencies` because the sandboxed coding-agent
+  # profile can reach pypi.org/files.pythonhosted.org but cannot
+  # clone from a VCS host (see issue #550).
   - repo: local
     hooks:
       # General file and hygiene checks.
@@ -103,6 +89,11 @@ repos:
         language: python
         additional_dependencies: ["pre-commit-hooks==6.0.0"]
         types: [symlink]
+      # check-toml and check-xml stay in the gate: no cause in the
+      # ADR-0005 placement rule applies. The repository tracks no
+      # .toml or .xml files, so both report
+      # "(no files to check)Skipped"; the rehearsal's closed
+      # exception list allows exactly that skip for these two hooks.
       - id: check-toml
         name: check-toml
         description: Ensure toml files are valid
@@ -219,7 +210,7 @@ repos:
           (?x)^(
                 .fullsend/config\.yaml |
                 \.skillsaw-baseline\.json |
-                \.pre-commit-config\.yaml |
+                \.github/pre-commit-ci\.yaml |
                 \.protobot/change-sets/.*
             )$
       # YAML normalization quotes scalar values before line filters run.
@@ -246,28 +237,6 @@ repos:
         language: python
         additional_dependencies: ["json5==0.17.3", "check-json5==3.4.0"]
         types_or: [json, json5]
-      - id: zizmor
-        name: zizmor
-        description: "Find security issues in GitHub Actions CI/CD setups"
-        language: python
-        additional_dependencies: ["zizmor==1.32.0"]
-        types: [yaml]
-        files: (^|/)(\.github/(workflows/[^/]+|dependabot)\.ya?ml|action\.ya?ml|\.pre-commit-(config|hooks)\.ya?ml)$
-        require_serial: true
-        entry: zizmor
-        args: ["--config", ".zizmor.yml"]
-      - id: gofmt
-        name: gofmt
-        entry: python3 scripts/check_gofmt.py
-        language: system
-        files: \.go$
-        exclude: ^validator/vendor/
-      - id: go-vet
-        name: go-vet
-        entry: python3 scripts/check_govet.py
-        language: system
-        files: \.go$
-        exclude: ^validator/vendor/
       - id: check-portable-null-device
         name: check-portable-null-device
         entry: python3 scripts/check_portable_null_device.py
@@ -279,15 +248,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_portable_null_device|test_check_portable_null_device)\.py$
-      - id: eval-corpus-schema
-        name: eval-corpus-schema
-        entry: python3 eval/corpus/validate.py
-        language: system
-        pass_filenames: false
-        files: ^(eval/corpus/.+|docs/architecture/evaluation-corpus\.md)$
       - id: harness-integrity
         name: harness-integrity
-        entry: python3 scripts/check_harness_integrity.py --online-if-ci
+        entry: python3 scripts/check_harness_integrity.py
         language: system
         pass_filenames: false
         files: ^\.fullsend/harness/[^/]+\.ya?ml$
@@ -297,17 +260,8 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_harness_integrity|test_check_harness_integrity)\.py$
-      - id: baseline-ratchet
-        name: baseline-ratchet
-        entry: python scripts/check_baseline_ratchet.py
-        language: python
-        # The checker imports PyYAML to verify the AGENTS.md warn limit.
-        additional_dependencies:
-          - pyyaml==6.0.3
-        pass_filenames: false
-        # Pre-commit omits deleted files from the selection. The checker
-        # rejects deleting the baseline while tracked ceiling files remain.
-        always_run: true
+      # baseline-ratchet is CI-only (see .github/pre-commit-ci.yaml):
+      # it needs a default-branch ref to compare ceilings against.
       - id: test-baseline-ratchet
         name: test-baseline-ratchet
         entry: python scripts/test_check_baseline_ratchet.py
@@ -323,31 +277,6 @@ repos:
         language: system
         pass_filenames: false
         files: ^(scripts/(lint|test_lint)\.py|\.github/workflows/ci-workflow\.yaml)$
-      - id: test-pre-commit-cache
-        name: test-pre-commit-cache
-        entry: python3 scripts/test_pre_commit_cache.py
-        language: system
-        pass_filenames: false
-        files: ^(scripts/(pre_commit_cache|test_pre_commit_cache)\.py|\.fullsend/harness/[^/]+\.ya?ml)$
-      - id: adr-amendments
-        name: adr-amendments
-        entry: python3 scripts/check_adr_amendments.py
-        language: system
-        pass_filenames: false
-        # Pre-commit's staged-file list excludes deletions
-        # (--diff-filter=ACMRTUXB), so a deletion-only commit can
-        # match no file. always_run: true makes pre-commit run the
-        # hook anyway; files: stays as scope documentation and is
-        # harmless because pass_filenames: false means no filenames
-        # are passed either way.
-        always_run: true
-        files: ^docs/decisions/.*\.md$
-      - id: test-adr-amendments
-        name: test-adr-amendments
-        entry: python3 scripts/test_check_adr_amendments.py
-        language: system
-        pass_filenames: false
-        files: ^scripts/(check_adr_amendments|test_check_adr_amendments)\.py$
       - id: validator-spec-parity
         name: validator-spec-parity
         entry: python3 scripts/check_validator_spec_parity.py
@@ -372,27 +301,3 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/(check_validator_fixtures|test_check_validator_fixtures)\.py$
-      - id: spec-validator
-        name: spec-validator
-        entry: python3 scripts/check_spec_validator.py
-        language: system
-        pass_filenames: false
-        # Pre-commit's staged-file list excludes deletions, and the
-        # validator rejects deleted requirement records, so a
-        # deletion-only commit must still run the hook. always_run: true
-        # makes pre-commit run it anyway; files: stays as scope
-        # documentation.
-        always_run: true
-        files: ^(spec/.+|tests/.+\.feature|validator/.+|scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py)$
-      - id: test-spec-validator
-        name: test-spec-validator
-        entry: python3 scripts/test_check_spec_validator.py
-        language: system
-        pass_filenames: false
-        files: ^scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py$
-      - id: test-select-comparison-base
-        name: test-select-comparison-base
-        entry: python3 scripts/test_select_comparison_base.py
-        language: system
-        pass_filenames: false
-        files: ^(scripts/(select_comparison_base|test_select_comparison_base)\.py|\.github/workflows/ci-workflow\.yaml)$

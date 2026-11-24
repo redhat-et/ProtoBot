@@ -732,6 +732,41 @@ It extends Decision item 1 and Consequences:
   `docs/architecture/related-work.md:111` to `IdeaBot ADR-0005/0006`. This
   distinguishes IdeaBot architecture records from ProtoBot ADR-0005.
 
+**[Amended November 2026, #582]**
+
+The cutover rehearsal proved two hook placements that the #585 placement table
+does not name:
+
+- `test-adr-amendments` moves to CI under Cause 3. It tests
+  `scripts/check_adr_amendments.py`, which resolves and fetches a
+  default-branch ref from `origin`. In the gate, with VCS denied and the
+  default-branch refs removed, it fails with
+  `ERROR: cannot resolve default-branch baseline ref to check against`.
+  A named job in `ci-success` (the `pre-commit` job) keeps the equivalent
+  check.
+- `test-check-gate-invariant` runs in CI under Cause 5. It imports PyYAML, a
+  module outside the Python standard library, without declaring it. It tests
+  `scripts/check_gate_invariant.py`, which enforces this decision.
+
+The gate configuration keeps 30 local hooks: 20 `language: python`, 1
+`language: pygrep`, and 9 `language: system`. This supersedes the 31-hook count
+in the #585 placement rule, because `test-adr-amendments` moves to CI.
+
+`check-toml` and `check-xml` remain in the gate configuration under the #585
+closed skip exception. The rehearsal records each skipped hook and allows only
+their `(no files to check)Skipped` result.
+
+The following placement table records these two hooks:
+
+| Hook | Placement | Cause |
+| --- | --- | --- |
+| `test-adr-amendments` | CI | Cause 3: Needs a default-branch ref |
+| `test-check-gate-invariant` | CI | Cause 5: Imports a module outside the Python standard library and does not declare the dependency |
+
+This amendment references `.pre-commit-config.yaml`,
+`.github/pre-commit-ci.yaml`, `scripts/check_gate_invariant.py`, and
+`.github/workflows/ci-workflow.yaml`.
+
 ## Related Documents
 
 - [ADR-0001: One-File-Per-Record YAML Storage Format](0001-requirements-storage-format.md)

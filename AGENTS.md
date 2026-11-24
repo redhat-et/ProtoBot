@@ -1,13 +1,14 @@
 # AGENTS
 
-- Pre-commit tests must pass before committing. Offline, use
-  `python scripts/lint.py` for `pre-commit run`; pre-install tools and
-  populate the hook cache with `pre-commit install-hooks`.
-  Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
-  (specific files), `--check-parity` (validate config and offline hook cache),
-  `--online-if-ci` (allow network when CI=true).
-  Go changes must pass `gofmt` and `go vet` across affected Go modules
-  before committing.
+- All gate checks must pass before committing. Run
+  `pre-commit run --files FILE [FILE ...]` against the gate
+  configuration (`.pre-commit-config.yaml`, the default); it needs no
+  VCS access. CI runs [scripts/lint.py](scripts/lint.py) over both
+  configurations with
+  `--all-files`, `--files`, or `--check-parity`; `--online-if-ci`
+  allows network when CI=true. Go checks, cloned hooks,
+  `adr-amendments`, `baseline-ratchet`, and the validator run at merge
+  time in CI.
 - Pull requests target the `redhat-et/protobot` upstream repository.
 - Agent skills live in `.agents/skills/`; `.claude/skills` symlinks
   there. Do not add them under `.claude/` directly.

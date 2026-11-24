@@ -30,6 +30,18 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+          # Full history so the comparison base resolves locally.
+          fetch-depth: 0
+
+      - name: Set up Go
+        # The pre-commit job now runs the Go hooks through scripts/lint.py
+        # (.github/pre-commit-ci.yaml), so it needs the Go toolchain from
+        # ADR-0005 Decision item 5.
+        # https://github.com/actions/setup-go
+        # zizmor: ignore[cache-poisoning]
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: validator/go.mod
 
       - name: Install uv
         # https://github.com/astral-sh/setup-uv
@@ -44,6 +56,15 @@ jobs:
           version="$(python3 scripts/lint.py --print-pre-commit-version)"
           uv tool install "pre-commit==${version}"
 
+      - name: Install Python check dependencies
+        # The language: system hooks in .github/pre-commit-ci.yaml run
+        # python3 from PATH, and some import pyyaml or jsonschema. The
+        # runner python3 has neither, so the lint run below puts this
+        # venv first on PATH (ADR-0005, Cutover order step 7).
+        run: |
+          python3 -m venv "$RUNNER_TEMP/check-venv"
+          "$RUNNER_TEMP/check-venv/bin/pip" install "pyyaml==6.0.3" "jsonschema==4.25.1"
+
       - name: Enable cache for pre-commit hooks
         # https://github.com/actions/cache
         # zizmor: ignore[cache-poisoning]
@@ -55,11 +76,36 @@ jobs:
           restore-keys: |
             pre-commit|
 
+      # Base-aware validation (ADR-0005): the CI hooks that check
+      # approved text and baselines compare against an event-specific
+      # base, never silently against HEAD. The validator job runs the
+      # same selection.
+      - name: Select the comparison base
+        id: base
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 scripts/select_comparison_base.py
+
       - name: Run pre-commit checks
         # Same entrypoint as local runs: --all-files keeps the previous
         # `pre-commit run -a` scope; --online-if-ci keeps zizmor's online
-        # audits because GitHub Actions sets CI=true.
-        run: python3 scripts/lint.py --all-files --online-if-ci
+        # audits because GitHub Actions sets CI=true. GH_TOKEN lets
+        # zizmor run those online audits; a missing token makes 5
+        # audits skip even in online mode (ADR-0005, Accepted risk).
+        env:
+          GITHUB_BASE_SHA: ${{ steps.base.outputs.merge_base }}
+          PROTOBOT_VALIDATOR_BASE: ${{ steps.base.outputs.exact_base }}
+          BASELINE_RATCHET_BASE_REF: ${{ steps.base.outputs.exact_base || steps.base.outputs.merge_base }}
+          PRE_COMMIT_FROM_REF: ${{ steps.base.outputs.exact_base || steps.base.outputs.merge_base }}
+          GH_TOKEN: ${{ github.token }}
+        # The venv bin comes first on PATH so the language: system hooks
+        # run python3 with pyyaml and jsonschema installed.
+        run: |
+          export PATH="$RUNNER_TEMP/check-venv/bin:$PATH"
+          python3 scripts/lint.py --all-files --online-if-ci
 
       - name: Run pre-commit gc
         # scripts/lint.py sets PRE_COMMIT_HOME only for its own process,
@@ -414,6 +460,230 @@ jobs:
         run: CGO_ENABLED=0 go build -trimpath -buildvcs=false ./...
         working-directory: wms
 
+  # ADR-0005 Decision item 3: prove the gate invariant on the exact
+  # pre-commit version the Fullsend sandbox runs. The matrix covers
+  # both images item 3 names: ubuntu-24.04, the Fullsend runner_image,
+  # and ubuntu-latest, with the same probes. The job reads only the
+  # checked-out tree and never reads .github/pre-commit-ci.yaml, so a
+  # branch that predates the cutover still passes.
+  gate-rehearsal:
+    name: Gate rehearsal (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        # https://github.com/actions/checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install the pre-commit version Fullsend ships
+        # scripts/lint.py owns both pins: --print-fullsend-pre-commit-version
+        # names the version the Fullsend sandbox ships and the runner
+        # post-script installs; --print-pre-commit-version names the
+        # separate CI and developer pin.
+        run: |
+          version="$(python3 scripts/lint.py --print-fullsend-pre-commit-version)"
+          python3 -m venv "$RUNNER_TEMP/gate-venv"
+          "$RUNNER_TEMP/gate-venv/bin/pip" install "pre-commit==${version}"
+
+      - name: Check the gate invariant
+        # The venv has PyYAML because pre-commit depends on it. Every
+        # gate checker must have a companion test hook, so the gate
+        # run below exercises its negative fixture and expected
+        # diagnostic.
+        run: |
+          "$RUNNER_TEMP/gate-venv/bin/python3" scripts/check_gate_invariant.py
+
+      # Exactly one step invokes `pre-commit run` directly, as the
+      # Fullsend gate does; every other lint entrypoint stays
+      # scripts/lint.py.
+      - name: Rehearse the gate
+        run: |
+          set -euo pipefail
+
+          venv="$RUNNER_TEMP/gate-venv"
+          bin="$RUNNER_TEMP/gate-bin"
+          home="$RUNNER_TEMP/gate-home"
+          gate_user_home="$RUNNER_TEMP/gate-user-home"
+          log_job_env="$RUNNER_TEMP/gate-run-job-env.log"
+          log_env_i="$RUNNER_TEMP/gate-run-env-i.log"
+
+          # Deny VCS access for the whole step: only the file protocol
+          # stays allowed, and git must never prompt for credentials.
+          # PyPI stays reachable: the gate `language: python` hooks
+          # install their declared dependencies from PyPI, so no pip
+          # index, proxy, or offline variable is set here.
+          export GIT_ALLOW_PROTOCOL=file
+          export GIT_TERMINAL_PROMPT=0
+
+          # A minimal PATH with only git, the venv python3, and the
+          # venv pre-commit, so go, gofmt, node, npm, and uvx do not
+          # resolve.
+          mkdir -p "$bin"
+          ln -s "$(command -v git)" "$bin/git"
+          ln -s "$venv/bin/python3" "$bin/python3"
+          ln -s "$venv/bin/pre-commit" "$bin/pre-commit"
+
+          # pip and pre-commit resolve user paths from HOME; an unset
+          # HOME is not a stable gate condition. Both runs get this
+          # dedicated user home and the C.UTF-8 locale explicitly.
+          mkdir -p "$gate_user_home"
+
+          # Positive-control seed repository (ADR-0005, Rehearsal): one
+          # local commit that the clone control below copies over the
+          # file protocol.
+          seed="$RUNNER_TEMP/gate-seed"
+          rm -rf "$seed"
+          git init -q -b main "$seed"
+          git -C "$seed" config user.email "gate-rehearsal@example.com"
+          git -C "$seed" config user.name "Gate rehearsal"
+          git -C "$seed" config commit.gpgsign false
+          printf 'seed\n' >"$seed/seed.txt"
+          git -C "$seed" add seed.txt
+          git -C "$seed" commit -q -m "seed commit"
+
+          # Remove the default-branch refs once, before the first
+          # probes, so the probes can confirm their absence. A ref
+          # that is absent is already in the wanted state. These
+          # deletions are the only change to the repository tree.
+          git checkout --detach
+          for ref in refs/heads/main refs/remotes/origin/main; do
+            if git show-ref --verify --quiet "$ref"; then
+              git update-ref -d "$ref"
+            fi
+          done
+
+          verify_gate_environment() {
+            if git ls-remote https://github.com/pre-commit/pre-commit-hooks \
+              >/dev/null 2>&1; then
+              echo "::error::git ls-remote against github.com succeeded; VCS access is not denied"
+              exit 1
+            fi
+            if git rev-parse --verify refs/heads/main >/dev/null 2>&1; then
+              echo "::error::refs/heads/main resolves; a default-branch ref is visible"
+              exit 1
+            fi
+            if git rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1; then
+              echo "::error::refs/remotes/origin/main resolves; a default-branch ref is visible"
+              exit 1
+            fi
+            for tool in go gofmt node npm uvx; do
+              if (PATH="$bin"; command -v "$tool" >/dev/null 2>&1); then
+                echo "::error::${tool} resolves on the minimal PATH; the gate must not need it"
+                exit 1
+              fi
+            done
+          }
+
+          # Positive controls (ADR-0005, Rehearsal): the deny rule must
+          # block network transports only, and PyPI must stay reachable
+          # because the gate `language: python` hooks install their
+          # declared dependencies from it. Both controls run under the
+          # restricted PATH, exactly as the direct runs do.
+          verify_positive_controls() {
+            local tmp
+            tmp="$(mktemp -d "$RUNNER_TEMP/gate-control.XXXXXX")"
+            if (PATH="$bin" GIT_ALLOW_PROTOCOL=file \
+              git clone "file://$seed" "$tmp/clone"); then
+              echo "Positive control: git clone over the file protocol succeeded"
+            else
+              echo "::error::Positive control failed: git clone over the file protocol did not succeed"
+              exit 1
+            fi
+            if (PATH="$bin" "$venv/bin/python3" -m pip download --no-deps \
+              --dest "$tmp/pypi" iniconfig); then
+              echo "Positive control: pip download from PyPI succeeded"
+            else
+              echo "::error::Positive control failed: pip download from PyPI did not succeed"
+              exit 1
+            fi
+            rm -rf "$tmp"
+          }
+
+          require_empty_home() {
+            local home_dir="$1"
+            if [ -z "$(ls -A "$home_dir")" ]; then
+              return 0
+            fi
+            echo "::error::PRE_COMMIT_HOME is not empty before the run: $home_dir"
+            exit 1
+          }
+
+          # A skipped hook prints one line: <hook>....(<reason>)Skipped.
+          # pre-commit exits 0 when hooks skip, so the exit code is not
+          # evidence. The exception list is closed (ADR-0005,
+          # Rehearsal): only check-toml and check-xml may skip, and
+          # only because no tracked file matches them. Every other
+          # skipped hook, and every skipped test, fails the rehearsal.
+          fail_on_skip() {
+            local log="$1"
+            local line hook reason
+            # A skipped test still fails: unittest prints "OK
+            # (skipped=N)" and pytest prints "N skipped".
+            if grep -Eq 'skipped=|skipped ' "$log"; then
+              echo "::error::A test was skipped; see $log"
+              grep -E 'skipped=|skipped ' "$log" || true
+              exit 1
+            fi
+            while IFS= read -r line; do
+              hook=""
+              reason=""
+              # The hook id is the label before the dots; the skip
+              # reason is the text in parentheses before Skipped.
+              if [[ "$line" =~ ^([^.]+)\.+\((.*)\)Skipped$ ]]; then
+                hook="${BASH_REMATCH[1]}"
+                reason="${BASH_REMATCH[2]}"
+              fi
+              if [ -z "$hook" ]; then
+                echo "::error::A hook was skipped in a form the rehearsal cannot parse: $line"
+                exit 1
+              fi
+              echo "Skipped hook: ${hook} (${reason})"
+              if [ "$hook" != "check-toml" ] && [ "$hook" != "check-xml" ]; then
+                echo "::error::Hook ${hook} was skipped; only check-toml and check-xml may skip; see $log"
+                exit 1
+              fi
+              if [ "$reason" != "no files to check" ]; then
+                echo "::error::Hook ${hook} was skipped for another reason: ${reason}; see $log"
+                exit 1
+              fi
+            done < <(grep 'Skipped$' "$log" || true)
+          }
+
+          # pre-commit prints a passing hook's output only with
+          # --verbose, so an `OK (skipped=N)` unittest summary reaches
+          # fail_on_skip; --color=never keeps the saved log free of
+          # ANSI escapes.
+          # ── Direct run 1: the job environment ─────────────────────
+          rm -rf "$home"
+          mkdir -p "$home"
+          verify_gate_environment
+          verify_positive_controls
+          require_empty_home "$home"
+          env PATH="$bin" PRE_COMMIT_HOME="$home" HOME="$gate_user_home" \
+            LANG=C.UTF-8 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
+            pre-commit run --all-files --verbose --color=never 2>&1 | tee "$log_job_env"
+          fail_on_skip "$log_job_env"
+
+          # ── Direct run 2: env -i, to catch hooks that read
+          # environment variables ───────────────────────────────────
+          rm -rf "$home"
+          mkdir -p "$home"
+          verify_gate_environment
+          verify_positive_controls
+          require_empty_home "$home"
+          env -i PATH="$bin" PRE_COMMIT_HOME="$home" HOME="$gate_user_home" \
+            LANG=C.UTF-8 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
+            pre-commit run --all-files --verbose --color=never 2>&1 | tee "$log_env_i"
+          fail_on_skip "$log_env_i"
+
   # This job provides a single status check for merge gates.
   ci-success:
     name: CI Workflow - Success
@@ -425,6 +695,7 @@ jobs:
       - validator
       - scm
       - wms
+      - gate-rehearsal
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs

@@ -1,0 +1,141 @@
+---
+# CI hook configuration from ADR-0005
+# (docs/decisions/0005-commit-hook-framework.md). Every hook in this
+# file needs a VCS clone, the Go toolchain, a default-branch ref,
+# network access when CI or GH_TOKEN is set, or an import outside
+# the Python standard library, so the sandbox gate cannot run it.
+# CI runs this file through scripts/lint.py. A hook returns to
+# .pre-commit-config.yaml only when gate-rehearsal passes it.
+
+# yamllint disable rule:line-length
+
+repos:
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: c01a1853c19b175aee6a09f24e2ad9b748c485ad  # frozen: v0.24.1
+    hooks:
+      - id: markdownlint-cli2
+        args: ["--config", ".github/markdownlint-cli2.yaml"]
+        exclude: |
+          (?x)^(
+                .github/pull_request_template\.md |
+                .agents/skills/ |
+                validator/vendor/.*
+            )$
+
+  - repo: https://github.com/hadolint/hadolint
+    rev: 2eece55955ced00200be9729e9728cb7dacca505  # frozen: v2.15.1
+    hooks:
+      # Lint Dockerfiles
+      - id: hadolint
+
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 71222830124d3dcacafde100efbd8e833c2cbb1f  # frozen: 44.237.0
+    hooks:
+      - id: renovate-config-validator
+
+  # Local hooks: each needs the Go toolchain, a default-branch
+  # ref, network access, or an import outside the Python standard
+  # library. test-adr-amendments moved here from the gate because
+  # the checker it tests resolves a default-branch ref.
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: python3 scripts/check_gofmt.py
+        language: system
+        files: \.go$
+        exclude: ^validator/vendor/
+      - id: go-vet
+        name: go-vet
+        entry: python3 scripts/check_govet.py
+        language: system
+        files: \.go$
+        exclude: ^validator/vendor/
+      - id: spec-validator
+        name: spec-validator
+        entry: python3 scripts/check_spec_validator.py
+        language: system
+        pass_filenames: false
+        # Pre-commit's staged-file list excludes deletions, and the
+        # validator rejects deleted requirement records, so a
+        # deletion-only commit must still run the hook. always_run: true
+        # makes pre-commit run it anyway; files: stays as scope
+        # documentation.
+        always_run: true
+        files: ^(spec/.+|tests/.+\.feature|validator/.+|scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py)$
+      - id: test-spec-validator
+        name: test-spec-validator
+        entry: python3 scripts/test_check_spec_validator.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_spec_validator|test_check_spec_validator|go_dependency_errors)\.py$
+      - id: adr-amendments
+        name: adr-amendments
+        entry: python3 scripts/check_adr_amendments.py
+        language: system
+        pass_filenames: false
+        # Pre-commit's staged-file list excludes deletions
+        # (--diff-filter=ACMRTUXB), so a deletion-only commit can
+        # match no file. always_run: true makes pre-commit run the
+        # hook anyway; files: stays as scope documentation and is
+        # harmless because pass_filenames: false means no filenames
+        # are passed either way.
+        always_run: true
+        files: ^docs/decisions/.*\.md$
+      - id: test-adr-amendments
+        name: test-adr-amendments
+        entry: python3 scripts/test_check_adr_amendments.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/(check_adr_amendments|test_check_adr_amendments)\.py$
+      - id: baseline-ratchet
+        name: baseline-ratchet
+        entry: python scripts/check_baseline_ratchet.py
+        language: python
+        # The checker imports PyYAML to verify the AGENTS.md warn limit.
+        additional_dependencies:
+          - pyyaml==6.0.3
+        pass_filenames: false
+        # Pre-commit omits deleted files from the selection. The checker
+        # rejects deleting the baseline while tracked ceiling files remain.
+        always_run: true
+      - id: harness-integrity
+        name: harness-integrity
+        entry: python3 scripts/check_harness_integrity.py --online-if-ci
+        language: system
+        pass_filenames: false
+        files: ^\.fullsend/harness/[^/]+\.ya?ml$
+      - id: zizmor
+        name: zizmor
+        description: "Find security issues in GitHub Actions CI/CD setups"
+        language: python
+        additional_dependencies: ["zizmor==1.32.0"]
+        types: [yaml]
+        files: (^|/)(\.github/(workflows/[^/]+|dependabot|pre-commit-ci)\.ya?ml|action\.ya?ml|\.pre-commit-(config|hooks)\.ya?ml)$
+        require_serial: true
+        entry: zizmor
+        args: ["--config", ".zizmor.yml"]
+      - id: eval-corpus-schema
+        name: eval-corpus-schema
+        entry: python3 eval/corpus/validate.py
+        language: system
+        pass_filenames: false
+        files: ^(eval/corpus/.+|docs/architecture/evaluation-corpus\.md)$
+      - id: test-pre-commit-cache
+        name: test-pre-commit-cache
+        entry: python3 scripts/test_pre_commit_cache.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(pre_commit_cache|test_pre_commit_cache)\.py|\.fullsend/harness/[^/]+\.ya?ml)$
+      - id: test-select-comparison-base
+        name: test-select-comparison-base
+        entry: python3 scripts/test_select_comparison_base.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(select_comparison_base|test_select_comparison_base)\.py|\.github/workflows/ci-workflow\.yaml)$
+      - id: test-check-gate-invariant
+        name: test-check-gate-invariant
+        entry: python3 scripts/test_check_gate_invariant.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(check_gate_invariant|test_check_gate_invariant)\.py|\.pre-commit-config\.yaml)$

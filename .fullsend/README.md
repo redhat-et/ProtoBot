@@ -8,9 +8,10 @@ in the Fullsend repository.
 
 ## Offline pre-commit cache bootstrap
 
-Agent sandboxes have no network egress, so `scripts/lint.py` needs a
-pre-seeded `PRE_COMMIT_HOME`. The `code` and `fix` harnesses seed it with
-a `pre_script` wrapper around `scripts/pre_commit_cache.py`
+Agent sandboxes deny VCS access and reach PyPI. The sandbox gate command is
+the direct `pre-commit run --files` invocation. The bootstrap archive
+covers the gate configuration's hooks. The `code` and `fix` harnesses seed
+the cache with a `pre_script` wrapper around `scripts/pre_commit_cache.py`
 (`scripts/pre-code-cache.sh` and `scripts/pre-fix-cache.sh`). The wrapper
 first runs the pinned upstream pre-script unchanged, so its validation
 and exit-78 skip semantics survive, and then warms the hook cache on the
@@ -25,6 +26,12 @@ The wrapper writes the warm cache to
 tarball into the sandbox at `/tmp/protobot-pre-commit-cache.tar.gz`, and
 `scripts/lint.py` restores it into `PRE_COMMIT_HOME` on the first offline
 run, deleting it after the restored cache passes its pre-flight.
+
+The wrapper `scripts/lint.py` now preflights and runs both the gate
+configuration and the CI configuration. The bootstrap archive is built
+from the gate configuration only. Therefore, an offline wrapper run
+also needs the CI configuration's cloned hook revisions, which the
+archive does not hold.
 
 ## Path contract
 
@@ -74,8 +81,8 @@ agent process exists, with `sandbox.UploadFile` installing it through
 instead of merging into it.
 
 Only the `code` and `fix` harnesses seed the cache. They are the agents
-that commit and run `scripts/lint.py`. The `review`, `triage`, `retro`,
-and `prioritize` harnesses do not seed it.
+that commit and run `pre-commit run --files`. The `review`, `triage`,
+`retro`, and `prioritize` harnesses do not seed it.
 
 ## Updating the pins
 
@@ -114,5 +121,7 @@ the script does that itself.
 
 The warm phase is fail-soft: on any failure the wrapper prints a GitHub
 Actions `::warning::` line and exits 0, so the agent run is never blocked.
-`scripts/lint.py` then reports its usual missing-revision error, which
-names the manual `pre-commit install-hooks` command.
+The bootstrap archive does not hold the CI configuration's cloned hook
+revisions. If `scripts/lint.py` runs offline without required cached
+revisions, it reports its missing-revision error. That error message names
+`pre-commit install-hooks --config <configuration path>`.
