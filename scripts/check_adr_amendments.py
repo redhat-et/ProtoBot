@@ -265,29 +265,39 @@ def _html_comment_mask(lines: list[str]) -> list[bool]:
     return mask
 
 
-_PRE_OPEN = re.compile(r"^[ ]{0,3}<pre\b", re.IGNORECASE)
+_PRE_OPEN = re.compile(r"<pre\b", re.IGNORECASE)
 _PRE_CLOSE = re.compile(r"</pre\b", re.IGNORECASE)
+_INLINE_CODE_SPAN = re.compile(r"(`+).*?\1")
 
 
 def _pre_block_mask(lines: list[str]) -> list[bool]:
     """Return a per-line mask that is True while *lines* is inside a <pre> block.
 
     A line is masked when it starts inside a block or ends inside one.
-    Following CommonMark's HTML block start condition, an opening tag
-    only begins a block when it is the first thing on the line (after
-    up to three leading spaces); an inline code span such as
-    `` `<pre>` `` elsewhere in the line does not open a block. Once
-    open, the block closes at the first line containing a matching
-    close tag anywhere on the line, matched case-insensitively.
+    Open and close tags are tracked across lines, case-insensitively,
+    and several blocks on one line are handled. Tags appearing inside
+    inline code spans (such as `` `<pre>` ``) are ignored and do not
+    open or close a block.
     """
     mask: list[bool] = []
     in_pre = False
     for line in lines:
         starts_inside = in_pre
-        if not in_pre and _PRE_OPEN.match(line):
-            in_pre = True
-        if in_pre and _PRE_CLOSE.search(line):
-            in_pre = False
+        cleaned = _INLINE_CODE_SPAN.sub("", line)
+        idx = 0
+        while idx < len(cleaned):
+            if in_pre:
+                close = _PRE_CLOSE.search(cleaned, idx)
+                if close is None:
+                    break
+                in_pre = False
+                idx = close.end()
+            else:
+                open_at = _PRE_OPEN.search(cleaned, idx)
+                if open_at is None:
+                    break
+                in_pre = True
+                idx = open_at.end()
         mask.append(starts_inside or in_pre)
     return mask
 
