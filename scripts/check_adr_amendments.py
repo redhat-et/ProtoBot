@@ -267,6 +267,7 @@ def _html_comment_mask(lines: list[str]) -> list[bool]:
 
 _PRE_OPEN = re.compile(r"<pre\b", re.IGNORECASE)
 _PRE_CLOSE = re.compile(r"</pre\b", re.IGNORECASE)
+_INLINE_CODE_SPAN = re.compile(r"(`+).*?\1")
 
 
 def _pre_block_mask(lines: list[str]) -> list[bool]:
@@ -274,22 +275,25 @@ def _pre_block_mask(lines: list[str]) -> list[bool]:
 
     A line is masked when it starts inside a block or ends inside one.
     Open and close tags are tracked across lines, case-insensitively,
-    and several blocks on one line are handled.
+    and several blocks on one line are handled. Tags appearing inside
+    inline code spans (such as `` `<pre>` ``) are ignored and do not
+    open or close a block.
     """
     mask: list[bool] = []
     in_pre = False
     for line in lines:
         starts_inside = in_pre
+        cleaned = _INLINE_CODE_SPAN.sub("", line)
         idx = 0
-        while idx < len(line):
+        while idx < len(cleaned):
             if in_pre:
-                close = _PRE_CLOSE.search(line, idx)
+                close = _PRE_CLOSE.search(cleaned, idx)
                 if close is None:
                     break
                 in_pre = False
                 idx = close.end()
             else:
-                open_at = _PRE_OPEN.search(line, idx)
+                open_at = _PRE_OPEN.search(cleaned, idx)
                 if open_at is None:
                     break
                 in_pre = True
