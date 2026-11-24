@@ -293,10 +293,23 @@ def _configured_local_dependencies(
 def _default_python_language_version() -> str:
     """Return the ``language_version`` pre-commit selects for Python.
 
-    Mirrors ``pre_commit.languages.python.get_default_version`` for the
-    interpreter running this wrapper. The returned name is also the
-    suffix pre-commit uses for the hook environment directory.
+    The wrapper must agree with the environment name pre-commit
+    actually uses, so it asks ``pre_commit.languages.python.
+    get_default_version`` directly when that module is importable —
+    the wrapper's own probing cannot observe every input pre-commit
+    considers (for example the running interpreter's environment).
+    The independent mirror below — the same selection order
+    pre-commit applies, probing PATH and then the running
+    interpreter's own name — runs only where ``pre_commit`` cannot be
+    imported. The returned name is also the suffix pre-commit uses
+    for the hook environment directory.
     """
+    try:
+        from pre_commit.languages.python import get_default_version
+    except ImportError:
+        pass
+    else:
+        return get_default_version()
     major = str(sys.version_info[0])
     minor = f"{major}.{sys.version_info[1]}"
     implementation = (
