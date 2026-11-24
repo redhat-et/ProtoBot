@@ -732,6 +732,33 @@ It extends Decision item 1 and Consequences:
   `docs/architecture/related-work.md:111` to `IdeaBot ADR-0005/0006`. This
   distinguishes IdeaBot architecture records from ProtoBot ADR-0005.
 
+## Amendment (November 2026, #560)
+
+**[Amended November 2026, #560]**
+
+On 2026-11-24, commit `23da589` replaced duplicated per-module CI jobs with a
+shared composite action. The commit also added the `drafting-table` CI job.
+
+The composite action at `.github/actions/check-go-module/action.yaml` runs
+standard Go checks. It sets up Go, downloads module dependencies, checks
+`gofmt` formatting, runs `golangci-lint`, runs `go vet ./...`, and runs
+`go test -v ./...` with `GOWORK: "off"`.
+
+The `go`, `scm`, `wms`, and `validator` jobs now call this composite action.
+The `ci-success` job lists `drafting-table` in its `needs` list.
+
+This amendment explicitly supersedes the statement in Decision item 5 that
+"Today's CI checks exclude `drafting-table`." This change closes the follow-up
+work that this record assigned to issue #560.
+
+One shared action definition removes per-job configuration drift. That drift
+caused repeated review cycles on PR #542. The new `drafting-table` job closes
+the silent test coverage gap for that module. Commit `4e276f2` cleared
+pre-existing `golangci-lint` findings in `drafting-table` so the new job
+passes.
+
+No architecture document changes accompany this amendment.
+
 ## Related Documents
 
 - [ADR-0001: One-File-Per-Record YAML Storage Format](0001-requirements-storage-format.md)
