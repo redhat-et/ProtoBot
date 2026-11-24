@@ -1,20 +1,16 @@
 # AGENTS
 
-- All pre-commit tests must pass before committing changes. In sandboxed
-  environments without network access, use `python scripts/lint.py` as a
-  wrapper around `pre-commit run`.
+- Pre-commit tests must pass before committing. Offline, use
+  `python scripts/lint.py` for `pre-commit run`; pre-install tools and
+  populate the hook cache with `pre-commit install-hooks`.
   Key flags: `--all-files` (tracked files), `--files FILE [FILE ...]`
-  (specific files), `--check-parity` (validate config and offline hook
-  cache), `--online-if-ci` (allow network when CI=true).
-  For offline runs, pre-install tools and pre-populate the hook cache
-  (bootstrap with `pre-commit install-hooks`).
+  (specific files), `--check-parity` (validate config and offline hook cache),
+  `--online-if-ci` (allow network when CI=true).
   Go changes must pass `gofmt` and `go vet` across affected Go modules
   before committing.
-- The upstream repository is `redhat-et/protobot`. Ensure pull requests
-  target this repository.
-- Agent skills live in `.agents/skills/`. `.claude/skills` symlinks
-  there so Claude Code finds them; do not add skills
-  under `.claude/` directly.
+- Pull requests target the `redhat-et/protobot` upstream repository.
+- Agent skills live in `.agents/skills/`; `.claude/skills` symlinks
+  there. Do not add them under `.claude/` directly.
 
 ## Workflow files and CI boundaries
 
@@ -36,24 +32,25 @@ Agents must follow these rules:
 
 ## Context budget and prompt efficiency
 
-`AGENTS.md` enters every dispatched agent's prompt, capped by
-`context-budget`'s `agents-md` warn limit in `.skillsaw.yaml` and
-ratcheted by
-[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
+`AGENTS.md` enters every dispatched agent's prompt. The `context-budget`
+rule's `agents-md` warn limit in `.skillsaw.yaml` triggers the finding;
+[`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py)
+rejects a `.skillsaw-baseline.json` ceiling increase.
 
 1. **Respect the prompt context budget.** Never raise or delete a
-   `.skillsaw-baseline.json` ceiling row while the file that the ceiling
-   tracks still exists. After a genuine prose shrink, lower the
-   `agents-md` warn limit in
-   `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
-   downward (`.skillsaw.yaml:19-20`).
+   `.skillsaw-baseline.json` ceiling row for an existing file. After a
+   genuine prose shrink, lower the `agents-md` warn limit, then run
+   `skillsaw baseline` to ratchet the ceiling
+   down.
 2. **Consolidate or extract when adding prose.** Offset new rules or
    explanations by consolidating prose or extracting detail into an
    on-demand `.agents/skills/` skill.
 3. **Review agents must recognize budget consolidation.** Treat prose
    consolidation offsetting a new `AGENTS.md` addition as budget compliance,
-   not scope creep, provided no governance requirement, defined keyword,
-   or diagnostic name is omitted.
+   not scope creep, if it omits no governance requirement, defined
+   keyword, or diagnostic name and introduces no undeclared alias or
+   terminology drift. Consolidation does not exempt entries from
+   sibling-entry or intra-entry terminology rules.
 
 ## Rules for creating or modifying sibling entries
 
@@ -62,15 +59,16 @@ governed collection defines the sibling set. A **module README** is
 the top-level `README.md` of a directory with a `go.mod`.
 
 When creating or modifying a numbered rule in `AGENTS.md`, specification
-document under `docs/`, skill file under
-`.agents/skills/`, module README, or an entry in a future governed
-scope, agents must follow these rules.
+document under `docs/`, skill file under `.agents/skills/`, module
+README, or an entry in a future governed scope, agents must follow these
+rules. Review agents must enforce these rules reflexively on PRs that
+create, modify, or consolidate entries within `AGENTS.md` itself.
 
 1. **Read all sibling entries first.** Read every other entry in the
    list or governed collection before drafting or revising one.
 
 2. **Reuse established terminology.** Match sibling entries' terms for
-   the same concepts. An undeclared alias for a term already used in the
+   the same concepts. An undeclared alias for a term used in the
    same list or governed collection is a defect.
 
 3. **Review agents must check sibling-entry terminology.** When reviewing
@@ -80,7 +78,9 @@ scope, agents must follow these rules.
    drift between neighboring paragraphs and between a CLI flag and its
    description. Findings should include terminology drift within the
    same list or governed collection, not only specification-hierarchy
-   keyword checks.
+   keyword checks. When `AGENTS.md` itself is modified, verify that prose
+   consolidations do not introduce undeclared aliases for established
+   terms or omit grammatical referents in requirement clauses.
 
 4. **Match intra-entry restatement terminology.** When an entry
    restates a requirement's cases in a separate enforcement or
@@ -98,8 +98,8 @@ and `docs/` specification documents describing the module).
 
 ## Specification document hierarchy
 
-Every `docs/` Markdown file is a governed hierarchy member; the
-`docs/` prefix, not the list, defines membership.
+Every `docs/` Markdown file is a governed hierarchy member; the prefix,
+not the list, defines membership.
 
 - `docs/vision.md` — registered Vision artifact (purpose, users,
   outcomes).
@@ -124,8 +124,8 @@ Every `docs/` Markdown file is a governed hierarchy member; the
 - [`docs/architecture/agent-harness/`][agent-harness-doc] — Agent
   Harness Adapter Contract (`adapter-contract.md`) and bindings
   (`opencode.md`, `claude-code.md`, `codex.md`).
-- `docs/architecture/related-work.md` — internal and external
-  projects informing the design.
+- [`docs/architecture/related-work.md`][related-work-doc] —
+  internal and external projects informing the design.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
   versioned evaluation fixture schema and result contract.
 - `docs/architecture/open-questions.md` — unresolved design questions
@@ -137,6 +137,7 @@ Every `docs/` Markdown file is a governed hierarchy member; the
 [agent-harness-doc]: docs/architecture/agent-harness/
 [ears-and-review-doc]: .agents/skills/eliciting-requirements/references/ears-and-review.md
 [drafting-table-wms-doc]: docs/architecture/drafting-table-wms.md
+[related-work-doc]: docs/architecture/related-work.md
 [evaluation-corpus-doc]: docs/architecture/evaluation-corpus.md
 [jobsite-sandbox-doc]: docs/architecture/jobsite-sandbox.md
 
@@ -146,14 +147,14 @@ When creating or modifying documents under `docs/`, agents
 must follow these rules:
 
 1. **Account for all components, interfaces, and constraints.**
-   New or revised specification documents must account for every
-   component, interface, and constraint enumerated in
+   Specification documents must account for every
+   component, interface, and constraint in
    `docs/architecture/components.md` and
-   `docs/architecture/overview.md`, and must address, not
-   silently omit, those relevant to the document's scope.
+   `docs/architecture/overview.md`, and address, not silently
+   omit, those relevant to their scope.
 
 2. **Verify deployment topology, security posture, and
-   persistent state coverage.** Cross-check against
+   persistent state coverage.** Cross-check
    `docs/architecture/overview.md` and `docs/architecture.md`:
    deployment topology (single-player, multi-player, web),
    security posture (credential isolation, sandbox
@@ -166,7 +167,7 @@ must follow these rules:
    interfaces, and constraints from `components.md` and
    `overview.md`. Findings should include coverage gaps, not
    only formatting and cross-reference matching. Do not raise
-   a hierarchy-membership finding for an unlisted `docs/` file.
+   hierarchy-membership findings for unlisted `docs/` files.
    Checks must go beyond link freshness and heading alignment:
    register new capabilities where `components.md` enumerates
    them, avoid conflicting with principles in `overview.md`
@@ -187,8 +188,8 @@ must follow these rules:
    (`docs/vision.md`, `docs/architecture.md`, and any other artifact
    registered in `.protobot/project.yaml`) and
    `.protobot/project.yaml` must never be edited by hand.
-   When a PR creates or modifies a registered specification artifact,
-   or Rule 4 identifies staleness in such an artifact, apply the update
+   When a PR creates or modifies a registered specification artifact, or
+   when Rule 4 identifies staleness in such an artifact, apply the update
    exclusively via
    `ears-manager artifact put` within an active change set. Run
    formatters and linters before `ears-manager artifact put`; verify
@@ -196,26 +197,27 @@ must follow these rules:
 
 6. **Review agents must check registered specification artifact and
    project configuration updates.** When a PR creates or modifies a
-   registered specification artifact, Rule 4 identifies staleness in
-   such an artifact, or a PR modifies
+   registered specification artifact, when Rule 4 identifies staleness
+   in such an artifact, or when a PR modifies
    [.protobot/project.yaml](.protobot/project.yaml), inspect the
-   affected registered specification artifact or project configuration
-   for hand edits under Rule 5. Run
-   `ears-manager check --base-ref <merge-base>` on a checkout or
-   worktree of the recorded PR head (the default-branch merge base; a
-   base-branch check is not evidence), and require it to pass without
+   affected registered specification artifact or project configuration for
+   hand edits under Rule 5.
+   On the PR head, run
+   `ears-manager check --base-ref` with the full SHA from
+   `git merge-base <default-branch-ref> HEAD`; a base-branch check is not
+   evidence. Require it to pass without
    `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. The check requires each registered artifact
-   path or canonical-content delta to match an `artifact_id` in an
+   `artifact.unregistered`. The check matches each registered artifact
+   path or canonical-content delta to an `artifact_id` in an
    `artifact_operations[]` entry in a proposed change set, and
-   rejects unregistration of an artifact-registry entry present on the
-   comparison base (the merge base in CI and review). It confirms
-   manifest association only, not that
+   rejects unregistering an artifact-registry entry present on the
+   comparison base (the default-branch tree, or the commit named by
+   `--base-ref`). It confirms manifest association only, not that
    `ears-manager artifact put` was invoked; metadata-only changes to an
-   artifact-registry entry do not require an artifact operation.
-   Reviewers must flag identifiable hand edits, not claim CLI
-   provenance from an operation record. Findings should include each
-   listed diagnostic and any identified hand edit in the inspected
+   artifact-registry entry (`kind`, `owner`, `validator`) require no
+   artifact operation. Reviewers must flag identifiable hand edits, not
+   claim CLI provenance from an operation record. Findings should include
+   each listed diagnostic and any hand edit in the inspected
    registered specification artifact or
    [.protobot/project.yaml](.protobot/project.yaml);
    when Rule 4 identifies staleness in a registered specification
@@ -242,56 +244,47 @@ When creating or modifying skill files under `.agents/skills/`,
 agents must follow these rules:
 
 1. **Follow the formatting conventions observed in sibling files.**
-   Match backtick-quoting of refs, command syntax style, and
-   structural patterns used by sibling skills. Quote git refs as
-   `` `upstream/main` `` rather than unquoted. Inconsistent
-   formatting with sibling skills is a defect.
+   Match sibling skills' backtick-quoting of refs, command syntax, and
+   structural patterns. Quote git refs as `` `upstream/main` `` rather
+   than unquoted; inconsistent sibling formatting is a defect.
 
 2. **Match structural conventions, not behavioral fields.**
-   Formatting conventions should match siblings, but behavioral
-   fields like dispatch parameters must be determined by the
-   skill's own requirements. Copying behavioral configuration
-   can produce incorrect dispatch or workflow behavior.
+   Behavioral fields like dispatch parameters must follow the skill's own
+   requirements, not copied sibling configuration, which can cause
+   incorrect dispatch or workflow behavior.
 
 3. **Link a GitHub issue or justify why none is needed.**
-   When reversing or correcting a business rule, link an
-   issue describing incorrect prior behavior and impact, or
-   justify in the PR description (body) with that substance
-   and why no issue was filed; comment acknowledgments do
-   not qualify. Omitting both or a vacuous justification is
-   a defect. Diffs reversing or correcting a gating
-   condition or gated action (e.g., status moves) are in
-   scope; other edits are not. Scope is determined by the
-   diff, not author characterization
-   (default in-scope if uncertain).
+   When reversing or correcting a business rule, link an issue describing
+   incorrect prior behavior and impact, or justify why none was filed
+   in the PR description with that substance; comment acknowledgments do
+   not qualify. Omitting both or a vacuous justification is a defect.
+   Gating-condition or gated-action diffs (e.g., status moves) are in
+   scope; other edits are not. Scope is determined by the diff, not author
+   characterization (default in-scope if uncertain).
 
 4. **Review agents must check for a linked issue or
-   justification.** When reviewing a PR that creates or
-   modifies a skill file, verify that reversing or
-   correcting a business rule links an issue describing
-   incorrect prior behavior and impact, or a PR-description
-   justification with that substance and why no issue was
-   filed. Reject comments, vacuous justifications, and
-   non-substantive issues (default in-scope if uncertain).
-   Findings should include missing or inadequate issues and
-   justifications, not only formatting and
-   specification-hierarchy checks.
+   justification.** When reviewing a PR that creates or modifies a skill
+   file, verify that the PR meets Rule 3's issue-or-justification
+   requirement. Reject comments, vacuous justifications, and
+   non-substantive issues (default in-scope if uncertain). Findings should
+   include missing or inadequate issues and justifications, not only
+   formatting and specification-hierarchy checks.
 
 ### Aligning skills with the specification hierarchy
 
 A skill implementing or describing a ProtoBot or Specification
-Toolkit capability must remain consistent with every governed
-Markdown document under `docs/`. When creating, modifying, or
-reviewing such a skill, agents must:
+Toolkit capability must be consistent with every governed `docs/`
+Markdown document. When creating, modifying, or reviewing one, agents
+must:
 
 1. **Register new Toolkit capabilities.** Add the capability to
-   `components.md`, and distinguish it from repository process
+   `components.md` and distinguish it from repository process
    skills.
 
 2. **Keep Toolkit frontmatter harness-agnostic.** Use `name`
    and `description` only, as required by the
    [Agent Harness Adapter Contract][agent-harness-doc]. Do not
-   add harness-specific fields or placeholders such as
+   add harness-specific fields or placeholders like
    `user-invocable`, `allowed-tools`, or `$ARGUMENTS`.
 
 3. **Use ProtoBot's defined vocabulary.** State-driven EARS
@@ -314,7 +307,7 @@ reviewing such a skill, agents must:
 5. **Review agents must check skill-to-spec alignment.** When
    reviewing a PR that creates or modifies a skill file, verify
    the skill against the specification hierarchy, not only
-   against sibling skills. Findings should include
+   sibling skills. Findings should include
    capability-registration gaps, harness-specific frontmatter
-   that violates Toolkit skill rules, and terminology that
-   conflicts with `overview.md` or `components.md`.
+   that violates Toolkit skill rules, and terminology
+   conflicting with `overview.md` or `components.md`.
