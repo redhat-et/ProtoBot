@@ -14,11 +14,12 @@
 # dependencies (gopkg.in/yaml.v3 as of this writing) so the always-run
 # spec-validator hook (see its entry below) can build offline without a
 # populated GOMODCACHE. CI's "Check formatting" step
-# (.github/workflows/ci-workflow.yaml:244) runs `gofmt -l validator`,
-# which recurses into vendor/. Run `gofmt -w validator/vendor/gopkg.in/yaml.v3`
-# after `go mod vendor` to keep vendored sources formatted. Formatting
-# fixers below exclude validator/vendor/ individually, keeping secret
-# scans and size checks unfiltered.
+# (.github/actions/check-go-module/action.yaml:63) runs `gofmt -l .`
+# from inside each module directory, which recurses into vendor/. Run
+# `gofmt -w validator/vendor/gopkg.in/yaml.v3` after `go mod vendor`
+# to keep vendored sources formatted. Formatting fixers below exclude
+# validator/vendor/ individually, keeping secret scans and size checks
+# unfiltered.
 
 # Completely exclude certain files from checks
 # exclude: |

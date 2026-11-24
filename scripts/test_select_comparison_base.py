@@ -266,14 +266,25 @@ class WorkflowBindingTests(unittest.TestCase):
     WORKFLOW = (
         Path(__file__).resolve().parent.parent / ".github/workflows/ci-workflow.yaml"
     )
+    ACTION = (
+        Path(__file__).resolve().parent.parent
+        / ".github/actions/check-go-module/action.yaml"
+    )
 
     def setUp(self) -> None:
         self.workflow = yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
         self.job = self.workflow["jobs"]["validator"]
         self.steps = self.job["steps"]
+        self.action = yaml.safe_load(self.ACTION.read_text(encoding="utf-8"))
+        self.action_steps = self.action["runs"]["steps"]
 
     def _step(self, name: str) -> dict:
         matches = [step for step in self.steps if step.get("name") == name]
+        self.assertEqual(1, len(matches), f"expected one {name!r} step")
+        return matches[0]
+
+    def _action_step(self, name: str) -> dict:
+        matches = [step for step in self.action_steps if step.get("name") == name]
         self.assertEqual(1, len(matches), f"expected one {name!r} step")
         return matches[0]
 
@@ -302,42 +313,51 @@ class WorkflowBindingTests(unittest.TestCase):
             "${{ steps.base.outputs.exact_base }}", env["PROTOBOT_VALIDATOR_BASE"]
         )
 
-    def test_job_sets_up_go_for_the_validator_module(self) -> None:
-        step = self._step("Set up Go")
-        self.assertEqual("validator/go.mod", step["with"]["go-version-file"])
-        self.assertEqual("validator/go.sum", step["with"]["cache-dependency-path"])
+    def test_job_runs_the_shared_module_checks(self) -> None:
+        step = self._step("Run shared Go module checks")
+        self.assertEqual("./.github/actions/check-go-module", step["uses"])
+        self.assertEqual("validator", step["with"]["module-path"])
 
-    def test_job_checks_the_validator_module(self) -> None:
-        self.assertIn("gofmt -l validator", self._step("Check formatting")["run"])
-        lint = self._step("Run golangci-lint")
-        self.assertEqual("validator", lint["with"]["working-directory"])
+    def test_action_checks_formatting(self) -> None:
+        step = self._action_step("Check formatting")
+        self.assertIn("gofmt -l", step["run"])
+        self.assertEqual("${{ inputs.module-path }}", step["working-directory"])
+
+    def test_action_lints_the_module(self) -> None:
+        lint = self._action_step("Run golangci-lint")
+        self.assertEqual("${{ inputs.module-path }}", lint["with"]["working-directory"])
+
+    def test_action_runs_go_commands_with_gowork_off(self) -> None:
         for name, command in (
+            ("Download module dependencies", "go mod download"),
             ("Run vet", "go vet ./..."),
-            ("Run validator module tests", "go test ./..."),
+            ("Run tests", "go test -v ./..."),
         ):
             with self.subTest(step=name):
-                step = self._step(name)
+                step = self._action_step(name)
                 self.assertEqual(command, step["run"].strip())
-                self.assertEqual("validator", step["working-directory"])
-        download = self._step("Download validator module dependencies")
-        self.assertEqual("go mod download", download["run"].strip())
-        self.assertEqual("validator", download["working-directory"])
-        self.assertEqual("off", download["env"]["GOWORK"])
-        self.assertEqual(
-            "off", self._step("Run validator module tests")["env"]["GOWORK"]
-        )
+                self.assertEqual("off", step["env"]["GOWORK"])
+                self.assertEqual("${{ inputs.module-path }}", step["working-directory"])
 
     def test_steps_run_in_dependency_order(self) -> None:
         order = [
-            "Download validator module dependencies",
-            "Check formatting",
-            "Run golangci-lint",
-            "Run vet",
-            "Run validator module tests",
+            "Run shared Go module checks",
             "Select the comparison base",
             "Run the V2 specification validator",
         ]
         names = [step.get("name") for step in self.steps]
+        positions = [names.index(name) for name in order]
+        self.assertEqual(sorted(positions), positions)
+
+    def test_action_module_steps_run_in_order(self) -> None:
+        order = [
+            "Download module dependencies",
+            "Check formatting",
+            "Run golangci-lint",
+            "Run vet",
+            "Run tests",
+        ]
+        names = [step.get("name") for step in self.action_steps]
         positions = [names.index(name) for name in order]
         self.assertEqual(sorted(positions), positions)
 

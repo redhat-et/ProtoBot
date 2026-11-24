@@ -1,0 +1,97 @@
+---
+# yamllint disable rule:line-length
+name: Check Go module
+description: >-
+  Run the shared Go module checks: set up Go, download dependencies,
+  check gofmt formatting, run golangci-lint, go vet, and go test.
+
+inputs:
+  module-path:
+    description: Module directory relative to the repository root, for example wms.
+    required: true
+  go-version-file:
+    description: Go version file to set up. Defaults to <module-path>/go.mod.
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve module cache inputs
+      id: module
+      shell: bash
+      env:
+        # Pass the input through the environment. An inline template in
+        # the run script would be a script-injection risk.
+        MODULE_PATH: ${{ inputs.module-path }}
+      run: |
+        # wms has no go.sum because it has no external dependencies, and
+        # actions/setup-go logs a warning and skips caching without one.
+        # Publish an empty value for such modules so the next step can
+        # turn the cache off for them only.
+        if [ -f "$MODULE_PATH/go.sum" ]; then
+          printf 'go-sum=%s/go.sum\n' "$MODULE_PATH" >> "$GITHUB_OUTPUT"
+        else
+          printf 'go-sum=\n' >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Set up Go
+      # https://github.com/actions/setup-go
+      # zizmor: ignore[cache-poisoning]
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      with:
+        go-version-file: ${{ inputs.go-version-file || format('{0}/go.mod', inputs.module-path) }}
+        # setup-go reads cache-dependency-path only when cache is true,
+        # so the empty value for a module without go.sum is never used.
+        cache: ${{ steps.module.outputs.go-sum != '' }}
+        cache-dependency-path: ${{ steps.module.outputs.go-sum }}
+
+    - name: Download module dependencies
+      # scripts/check_spec_validator.py builds the validator with module
+      # downloads disabled, so calling jobs need a warm module cache.
+      # GOWORK=off isolates the module from the workspace, matching the
+      # local pre-commit hooks.
+      shell: bash
+      working-directory: ${{ inputs.module-path }}
+      run: go mod download
+      env:
+        GOWORK: "off"
+
+    - name: Check formatting
+      shell: bash
+      working-directory: ${{ inputs.module-path }}
+      run: |
+        files="$(gofmt -l .)" || exit $?
+        if [ -n "$files" ]; then
+          echo "These files need gofmt:"
+          echo "$files"
+          exit 1
+        fi
+
+    - name: Run golangci-lint
+      # https://github.com/golangci/golangci-lint-action
+      # The linter resolves the module's own .golangci.yml, so this step
+      # keeps GOWORK unset.
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
+      with:
+        version: v2.15.0
+        args: --timeout=5m
+        skip-cache: true
+        working-directory: ${{ inputs.module-path }}
+
+    - name: Run vet
+      # GOWORK=off isolates the module from the workspace, matching the
+      # local pre-commit hooks.
+      shell: bash
+      working-directory: ${{ inputs.module-path }}
+      run: go vet ./...
+      env:
+        GOWORK: "off"
+
+    - name: Run tests
+      # GOWORK=off isolates the module from the workspace, matching the
+      # local pre-commit hooks.
+      shell: bash
+      working-directory: ${{ inputs.module-path }}
+      run: go test -v ./...
+      env:
+        GOWORK: "off"
