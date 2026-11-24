@@ -23,8 +23,8 @@ Agents must follow these rules:
 1. **Workflow file restrictions.** Fullsend agents running via
    GitHub workflows must not create or modify files under
    `.github/workflows/`. Local coding agents may create or modify
-   them, except as restricted by Rule 2, when required and
-   user-authorized.
+   them, except as restricted by Rule 2, when the change requires
+   it and the user authorizes it.
 
 2. **Defer CI integration for new modules.** When introducing a new
    Go module, package, or tool, implement code, local test suites,
@@ -42,8 +42,9 @@ ratcheted by
 [`scripts/check_baseline_ratchet.py`](scripts/check_baseline_ratchet.py).
 
 1. **Respect the prompt context budget.** Never raise or delete a
-   `.skillsaw-baseline.json` ceiling row while its file exists. After a
-   genuine prose shrink, lower the `agents-md` warn limit in
+   `.skillsaw-baseline.json` ceiling row while the file that the ceiling
+   tracks still exists. After a genuine prose shrink, lower the
+   `agents-md` warn limit in
    `.skillsaw.yaml`, then run `skillsaw baseline` to ratchet the ceiling
    downward (`.skillsaw.yaml:19-20`).
 2. **Consolidate or extract when adding prose.** Offset new rules or
@@ -52,8 +53,7 @@ ratcheted by
 3. **Review agents must recognize budget consolidation.** Treat prose
    consolidation offsetting a new `AGENTS.md` addition as budget compliance,
    not scope creep, provided no governance requirement, defined keyword,
-   or diagnostic name is omitted, and no undeclared alias or terminology
-   drift is introduced.
+   or diagnostic name is omitted.
 
 ## Rules for creating or modifying sibling entries
 
@@ -80,9 +80,7 @@ scope, agents must follow these rules.
    drift between neighboring paragraphs and between a CLI flag and its
    description. Findings should include terminology drift within the
    same list or governed collection, not only specification-hierarchy
-   keyword checks. When `AGENTS.md` itself is modified, verify that prose
-   consolidations do not introduce undeclared aliases for established
-   terms or omit grammatical referents in requirement clauses.
+   keyword checks.
 
 4. **Match intra-entry restatement terminology.** When an entry
    restates a requirement's cases in a separate enforcement or
@@ -122,16 +120,16 @@ Every `docs/` Markdown file is a governed hierarchy member; the
 - `docs/architecture/user-interaction-flow.md` — phase details,
   sequence diagrams, testing strategy.
 - `docs/architecture/drafting-table-ux.md` — stable interaction
-  contract for first local Drafting Table.
+  contract for the first local Drafting Table.
 - [`docs/architecture/agent-harness/`][agent-harness-doc] — Agent
   Harness Adapter Contract (`adapter-contract.md`) and bindings
   (`opencode.md`, `claude-code.md`, `codex.md`).
 - `docs/architecture/related-work.md` — internal and external
-  design influences.
+  projects informing the design.
 - [`docs/architecture/evaluation-corpus.md`][evaluation-corpus-doc] —
   versioned evaluation fixture schema and result contract.
-- [`docs/architecture/open-questions.md`](docs/architecture/open-questions.md) —
-  unresolved questions.
+- `docs/architecture/open-questions.md` — unresolved design questions
+  across all areas.
 - `docs/decisions/` — architecture decision records.
 
 [git-integration-doc]: docs/architecture/git-integration.md
@@ -200,8 +198,9 @@ must follow these rules:
    project configuration updates.** When a PR creates or modifies a
    registered specification artifact, Rule 4 identifies staleness in
    such an artifact, or a PR modifies
-   [.protobot/project.yaml](.protobot/project.yaml), inspect that
-   artifact or project configuration for hand edits under Rule 5. Run
+   [.protobot/project.yaml](.protobot/project.yaml), inspect the
+   affected registered specification artifact or project configuration
+   for hand edits under Rule 5. Run
    `ears-manager check --base-ref <merge-base>` on a checkout or
    worktree of the recorded PR head (the default-branch merge base; a
    base-branch check is not evidence), and require it to pass without
@@ -216,8 +215,9 @@ must follow these rules:
    artifact-registry entry do not require an artifact operation.
    Reviewers must flag identifiable hand edits, not claim CLI
    provenance from an operation record. Findings should include each
-   listed diagnostic and any hand edit in the inspected registered
-   specification artifact or [.protobot/project.yaml](.protobot/project.yaml);
+   listed diagnostic and any identified hand edit in the inspected
+   registered specification artifact or
+   [.protobot/project.yaml](.protobot/project.yaml);
    when Rule 4 identifies staleness in a registered specification
    artifact, a staleness finding must prescribe `ears-manager artifact put`,
    not a hand edit.
@@ -230,7 +230,9 @@ must follow these rules:
    (`**[Amended Month Year]**`) with the change, its rationale, and
    references to updated architecture documents; review agents must
    verify no in-place rewrite or replacement and each amendment
-   appends the dated amendment block.
+   appends the dated amendment block (`**[Amended Month Year]**`) with
+   the change, its rationale, and references to updated architecture
+   documents.
 
 ## Agent skills
 
