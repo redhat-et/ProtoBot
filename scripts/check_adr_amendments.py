@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
-"""Fail if accepted ADR historical text is rewritten in place.
+"""Fail if accepted or superseded ADR historical text is rewritten in place.
 
 Used as the ``adr-amendments`` local pre-commit hook (and via
-``scripts/lint.py``). Accepted architecture decision records under
-``docs/decisions/`` are immutable historical records: git diffs may
-insert dated amendment blocks, but must not delete or modify lines
-from the baseline copy of an accepted ADR.
+``scripts/lint.py``). Accepted and superseded architecture decision records
+under ``docs/decisions/`` are immutable historical records: they are never
+deleted or renamed, and git diffs may insert dated amendment blocks, but
+must not delete or modify lines from the baseline copy. The sole exception
+is the authorized accepted-to-superseded status-line transition (see
+``historical_mutations`` and ``_authorized_transition``), which requires a
+dated ``Superseded by ADR-NNNN`` status line plus an appended dated
+amendment block.
+
+The check fails closed: a baseline with an ambiguous (non-canonical)
+status header fails the run, a path that traverses a symbolic link is
+rejected, and a failing git enumeration command is an error instead of
+a silent skip.
 
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
@@ -21,17 +30,62 @@ import re
 import stat
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _DECISIONS_DIR = Path("docs") / "decisions"
+_MONTH_NAMES = (
+    "January|February|March|April|May|June|July|August|September|"
+    "October|November|December"
+)
+# Prefix match: used for header detection (is_accepted, is_superseded)
+# and for scanning baseline files. Any line starting with the prefix is
+# treated as accepted/superseded (and therefore protected), failing closed
+# even if trailing text or an unrecognized status-line format is present.
 _ACCEPTED_STATUS = re.compile(
-    r"^> Status:\s*\*\*Accepted\*\*",
+    r"^> Status:[ \t]*\*\*Accepted\*\*",
     re.MULTILINE,
 )
+_SUPERSEDED_STATUS = re.compile(
+    r"^> Status:[ \t]*\*\*Superseded by ADR-\d+\*\*",
+    re.MULTILINE,
+)
+# Strict (date required): the only status line an authorized transition may
+# write. Trailing text after the date is never allowed.
+_SUPERSEDED_STATUS_DATED = re.compile(
+    rf"^> Status:[ \t]*\*\*Superseded by ADR-\d+\*\* — (?:{_MONTH_NAMES}) \d{{4}}$",
+    re.MULTILINE,
+)
+# Any ``> Status:`` field, regardless of the value it declares. Used
+# for the extra-status-line allowance: a supersession must not add a
+# second status field, even one that declares a draft.
+_STATUS_FIELD = re.compile(
+    r"^[ \t]*>[ \t]*status:[ \t]*",
+    re.IGNORECASE | re.MULTILINE,
+)
+# Ambiguous (fail-closed) match: any line that states a status with
+# 1-3 `*` or `_` emphasis characters (or none) and any letter case.
+# Used for whole-file protection and for the unexpected-status check;
+# a status-like line that is not canonical makes the run fail.
+_AMBIGUOUS_STATUS = re.compile(
+    r"^[ \t]*>[ \t]*status:[ \t]*(?:[*_]{1,3})?(?:accepted|superseded\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_AMENDMENT_MARKER = re.compile(
+    rf"^\*\*\[Amended (?:{_MONTH_NAMES}) \d{{4}}\]\*\*$",
+    re.MULTILINE,
+)
+# CommonMark fence opening: three or more backticks or tildes after up
+# to three leading spaces.
+_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _HEADER_LINE_LIMIT = 30
 _MAX_REPORTED_LINES = 10
+
+# A reported mutation: baseline line number, HEAD line range start and
+# end (1-based; equal for a single line), and the baseline line text.
+_Mutation = tuple[int | None, int | None, int | None, str]
 
 
 def is_adr_markdown(rel_path: Path) -> bool:
@@ -50,27 +104,440 @@ def is_accepted(text: str) -> bool:
     return _ACCEPTED_STATUS.search(header) is not None
 
 
+def is_superseded(text: str) -> bool:
+    """Return True when *text* declares ADR status Superseded in its header."""
+    header = "\n".join(text.splitlines()[:_HEADER_LINE_LIMIT])
+    return _SUPERSEDED_STATUS.search(header) is not None
+
+
+def _is_status_field(line: str) -> bool:
+    """Return True when *line* states an ADR status field, whatever the value."""
+    return _STATUS_FIELD.match(line) is not None
+
+
+def _is_status_line(line: str) -> bool:
+    """Return True when *line* states an ADR status in any emphasis form."""
+    return _AMBIGUOUS_STATUS.match(line) is not None
+
+
+def _is_canonical_status(line: str) -> bool:
+    """Return True when *line* uses the canonical Accepted or Superseded format."""
+    return bool(_ACCEPTED_STATUS.match(line) or _SUPERSEDED_STATUS.match(line))
+
+
+def is_protected(text: str) -> bool:
+    """Return True when *text* is an Accepted or Superseded ADR.
+
+    Protection from in-place rewriting, deletion, and renaming continues
+    after an ADR is superseded; only the dated status-line transition
+    performed by an authorized supersession is permitted (see
+    ``historical_mutations``). The canonical header predicates
+    ``is_accepted`` and ``is_superseded`` are the first check, so they
+    stay the one source of truth for header status. Header protection
+    is fence-unaware: a status-like line in the header protects the
+    file even inside a fenced code block, so a baseline cannot drop the
+    immutability guarantee by fencing its status line. A canonical
+    Accepted or Superseded status line anywhere in the file also
+    protects it, regardless of fences (fail-closed over-protection: a
+    fenced status example in the body protects the file). Below the
+    header, any other status-like line outside a fenced code block also
+    protects the file. ``check`` reports status-like lines that are not
+    canonical as errors.
+    """
+    if is_accepted(text) or is_superseded(text):
+        return True
+    lines = text.splitlines()
+    if any(_is_status_line(line) for line in lines[:_HEADER_LINE_LIMIT]):
+        return True
+    if _ACCEPTED_STATUS.search(text) or _SUPERSEDED_STATUS.search(text):
+        return True
+    fenced = _fenced_code_mask(lines)
+    return any(
+        not fenced[idx] and _is_status_line(line) for idx, line in enumerate(lines)
+    )
+
+
+def _ambiguous_status_lines(lines: list[str]) -> list[str]:
+    """Return status-like lines that do not use the canonical status format."""
+    fenced = _fenced_code_mask(lines)
+    return [
+        line
+        for idx, line in enumerate(lines)
+        if not fenced[idx] and _is_status_line(line) and not _is_canonical_status(line)
+    ]
+
+
+def _fence_opener(line: str) -> tuple[str, int] | None:
+    """Return ``(character, length)`` when *line* opens a fenced code block.
+
+    A backtick fence info string may not contain backticks
+    (CommonMark), so such a line does not open a fence.
+    """
+    matched = _FENCE_OPEN.match(line)
+    if matched is None:
+        return None
+    run = matched.group(1)
+    if run[0] == "`" and "`" in line[matched.end() :]:
+        return None
+    return run[0], len(run)
+
+
+def _closes_fence(line: str, fence_char: str, fence_len: int) -> bool:
+    """Return True when *line* closes the fence opened by *fence_char*/*fence_len*.
+
+    A closing fence uses the same character as the opening fence, is at
+    least as long, and carries no trailing info text (CommonMark). Only
+    spaces and tabs count as no info text; other whitespace, such as a
+    non-breaking space, is info text.
+    """
+    matched = _FENCE_OPEN.match(line)
+    if matched is None or matched.group(1)[0] != fence_char:
+        return False
+    if len(matched.group(1)) < fence_len:
+        return False
+    return line[matched.end() :].strip(" \t") == ""
+
+
+def _fenced_code_mask(lines: list[str]) -> list[bool]:
+    """Return a per-line mask that is True while *lines* is inside a fence.
+
+    A fence delimiter line itself is marked True: text may not be hidden in
+    the delimiter line, and a marker immediately following the delimiter is
+    still inside the fenced block. Fence delimiters follow CommonMark: an
+    opening fence is three or more backticks or tildes after up to three
+    leading spaces, and only a same-character run of at least the opening
+    length with no trailing info text closes it.
+    """
+    mask: list[bool] = []
+    fence: tuple[str, int] | None = None
+    for line in lines:
+        if fence is None:
+            opened = _fence_opener(line)
+            if opened is not None:
+                fence = opened
+                mask.append(True)
+            else:
+                mask.append(False)
+        else:
+            mask.append(True)
+            if _closes_fence(line, fence[0], fence[1]):
+                fence = None
+    return mask
+
+
+def _html_comment_mask(lines: list[str]) -> list[bool]:
+    """Return a per-line mask that is True while *lines* is inside an HTML comment.
+
+    A line is masked when it starts inside a comment or ends inside
+    one, so a marker wrapped in ``<!--`` ... ``-->`` never counts as
+    visible amendment text. Comment open and close markers are tracked
+    across lines, and several comments on one line are handled.
+    """
+    mask: list[bool] = []
+    in_comment = False
+    for line in lines:
+        starts_inside = in_comment
+        idx = 0
+        while idx < len(line):
+            if in_comment:
+                close = line.find("-->", idx)
+                if close < 0:
+                    break
+                in_comment = False
+                idx = close + 3
+            else:
+                open_at = line.find("<!--", idx)
+                if open_at < 0:
+                    break
+                in_comment = True
+                idx = open_at + 4
+        mask.append(starts_inside or in_comment)
+    return mask
+
+
+def _hidden_line_mask(lines: list[str]) -> list[bool]:
+    """Return a per-line mask for lines hidden from the rendered document.
+
+    A line inside a fenced code block or an HTML comment is hidden.
+    """
+    fenced = _fenced_code_mask(lines)
+    commented = _html_comment_mask(lines)
+    return [in_fence or in_comment for in_fence, in_comment in zip(fenced, commented)]
+
+
+def _accepted_status_index(lines: list[str]) -> int | None:
+    """Return the index of the sole line matching Accepted status in the header, or None.
+
+    Lines inside a fenced code block or an HTML comment do not count,
+    so a status hidden from the rendered document cannot authorize a
+    transition.
+    """
+    header_lines = lines[:_HEADER_LINE_LIMIT]
+    hidden = _hidden_line_mask(header_lines)
+    matches = [
+        idx
+        for idx, line in enumerate(header_lines)
+        if not hidden[idx] and _ACCEPTED_STATUS.match(line)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _dated_superseded_status_index(lines: list[str]) -> int | None:
+    """Return the index of the sole dated Superseded status line in the header, or None.
+
+    Lines inside a fenced code block or an HTML comment do not count,
+    so a status hidden from the rendered document cannot authorize a
+    transition.
+    """
+    header_lines = lines[:_HEADER_LINE_LIMIT]
+    hidden = _hidden_line_mask(header_lines)
+    matches = [
+        idx
+        for idx, line in enumerate(header_lines)
+        if not hidden[idx] and _SUPERSEDED_STATUS_DATED.fullmatch(line)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _has_appended_amendment_block(
+    baseline_lines: list[str],
+    new_lines: list[str],
+    opcodes: list[tuple[str, int, int, int, int]],
+) -> bool:
+    """Return True when a dated amendment marker is inserted after the last
+    *baseline_lines* line and outside any fenced code block or HTML
+    comment in *new_lines*. The marker line must match
+    ``**[Amended Month Year]**`` exactly, so a marker wrapped in a
+    single-line comment already fails.
+    """
+    fenced = _fenced_code_mask(new_lines)
+    commented = _html_comment_mask(new_lines)
+    tail_start = len(baseline_lines)
+    for tag, i1, _i2, j1, j2 in opcodes:
+        if tag != "insert" or i1 != tail_start:
+            continue
+        for idx in range(j1, j2):
+            if (
+                _AMENDMENT_MARKER.fullmatch(new_lines[idx])
+                and not fenced[idx]
+                and not commented[idx]
+            ):
+                return True
+    return False
+
+
+def _authorized_transition(
+    old_lines: list[str],
+    new_lines: list[str],
+) -> tuple[int, int] | None:
+    """Return ``(old_index, new_index)`` for an authorized status transition.
+
+    An accepted-to-superseded transition is authorized when:
+
+    1. *old_lines* has exactly one line matching the Accepted status.
+    2. *new_lines* has exactly one line matching the dated Superseded status.
+    3. Substituting the new status line for the old one in *old_lines*
+       (a "synthetic baseline") and diffing it against *new_lines* produces
+       only insertions. Any other historical line rewritten or deleted
+       invalidates the transition, however the real diff happens to group
+       opcodes (e.g. an amendment block diffed adjacent to the status line).
+    4. One of those insertions is a dated amendment marker appended after
+       the synthetic baseline's last line and outside a fenced code block.
+
+    This is the single implementation of the supersession authorization
+    rule; both the per-line mutation check and the extra-status-line check
+    in ``historical_mutations`` consult it rather than re-deriving it.
+    """
+    old_status_idx = _accepted_status_index(old_lines)
+    if old_status_idx is None:
+        return None
+    new_status_idx = _dated_superseded_status_index(new_lines)
+    if new_status_idx is None:
+        return None
+
+    synthetic_old = list(old_lines)
+    synthetic_old[old_status_idx] = new_lines[new_status_idx]
+
+    opcodes = difflib.SequenceMatcher(
+        a=synthetic_old,
+        b=new_lines,
+        autojunk=False,
+    ).get_opcodes()
+    if any(tag in {"replace", "delete"} for tag, *_rest in opcodes):
+        return None
+    if not _has_appended_amendment_block(synthetic_old, new_lines, opcodes):
+        return None
+    return old_status_idx, new_status_idx
+
+
+def _replace_or_delete_mutations(
+    old_lines: list[str],
+    opcodes: list[tuple[str, int, int, int, int]],
+    authorized: tuple[int, int] | None,
+) -> list[_Mutation]:
+    """Return mutations for replace and delete opcodes.
+
+    An authorized transition exempts the one replaced status line. A
+    replace opcode always reports the whole HEAD block, because the
+    pairing of old and new lines is ambiguous.
+    """
+    mutations: list[_Mutation] = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag not in {"replace", "delete"}:
+            continue
+        for k in range(i2 - i1):
+            old_idx = i1 + k
+            if authorized is not None and old_idx == authorized[0]:
+                continue
+            if tag == "delete":
+                mutations.append((old_idx + 1, None, None, old_lines[old_idx]))
+            else:
+                mutations.append((old_idx + 1, j1 + 1, j2, old_lines[old_idx]))
+    return mutations
+
+
+def _unexpected_status_mutations(
+    old_lines: list[str],
+    new_lines: list[str],
+    old_fenced: list[bool],
+    new_fenced: list[bool],
+    authorized: tuple[int, int] | None,
+) -> list[_Mutation]:
+    """Return status fields in *new_lines* with no baseline allowance.
+
+    The allowance is a multiset of the baseline status-field texts; any
+    ``> Status:`` line counts, whatever value it declares, so a
+    supersession cannot add a second status field that declares a
+    draft. An authorized transition consumes the old Accepted status
+    line and grants the new dated Superseded status line. Every
+    remaining status field in *new_lines* outside a fence is an extra
+    status line; it is reported with no baseline line.
+    """
+    allowance = Counter(
+        line
+        for idx, line in enumerate(old_lines)
+        if not old_fenced[idx] and _is_status_field(line)
+    )
+    if authorized is not None:
+        old_idx, new_idx = authorized
+        allowance[old_lines[old_idx]] -= 1
+        allowance[new_lines[new_idx]] += 1
+    mutations: list[_Mutation] = []
+    for idx, line in enumerate(new_lines):
+        if new_fenced[idx] or not _is_status_field(line):
+            continue
+        if allowance.get(line, 0) > 0:
+            allowance[line] -= 1
+        else:
+            mutations.append((None, idx + 1, idx + 1, line))
+    return mutations
+
+
+def _map_old_index(
+    opcodes: list[tuple[str, int, int, int, int]],
+    old_idx: int,
+) -> int | None:
+    """Return the working-tree index that *old_idx* maps to, or None.
+
+    Only an equal opcode maps baseline index ``i`` to ``j1 + (i - i1)``.
+    Replace and delete opcodes give no mapping, because the replace
+    path already reports those lines; a second report would only waste
+    reported-line slots.
+    """
+    for tag, i1, i2, j1, _j2 in opcodes:
+        if i1 <= old_idx < i2:
+            if tag == "equal":
+                return j1 + (old_idx - i1)
+            return None
+    return None
+
+
+def _fenced_status_mutations(
+    old_lines: list[str],
+    opcodes: list[tuple[str, int, int, int, int]],
+    old_fenced: list[bool],
+    new_fenced: list[bool],
+    authorized: tuple[int, int] | None,
+) -> list[_Mutation]:
+    """Return baseline status fields that the diff moved inside a fence.
+
+    An insertion can fence a baseline status field and push it below
+    the header window, so a later pull request could delete the record.
+    Every baseline status field outside a fence, except the authorized
+    transition's old status line, must stay outside a fence in the
+    working tree. Only equal-opcode mappings are checked: a status
+    field moved by a replace opcode is already reported by the replace
+    path.
+    """
+    mutations: list[_Mutation] = []
+    for idx, line in enumerate(old_lines):
+        if old_fenced[idx] or not _is_status_field(line):
+            continue
+        if authorized is not None and idx == authorized[0]:
+            continue
+        head_idx = _map_old_index(opcodes, idx)
+        if head_idx is not None and new_fenced[head_idx]:
+            mutations.append((idx + 1, head_idx + 1, head_idx + 1, line))
+    return mutations
+
+
+def _mutation_opcodes(
+    old_lines: list[str],
+    new_lines: list[str],
+    authorized: tuple[int, int] | None,
+) -> list[tuple[str, int, int, int, int]]:
+    """Return the opcodes that pair baseline lines with working-tree lines.
+
+    When a transition is authorized, the baseline status line is first
+    replaced with the new status line (the synthetic baseline), so the
+    diff aligns against the real lines instead of a quotation in an
+    appended amendment block. The raw opcodes are kept when
+    authorization fails, so unauthorized edits still get diagnostics.
+    """
+    if authorized is None:
+        return difflib.SequenceMatcher(
+            a=old_lines, b=new_lines, autojunk=False
+        ).get_opcodes()
+    synthetic_old = list(old_lines)
+    old_idx, new_idx = authorized
+    synthetic_old[old_idx] = new_lines[new_idx]
+    return difflib.SequenceMatcher(
+        a=synthetic_old, b=new_lines, autojunk=False
+    ).get_opcodes()
+
+
 def historical_mutations(
     old_lines: list[str],
     new_lines: list[str],
-) -> list[tuple[int, str]]:
-    """Return ``(HEAD line number, text)`` for deleted or replaced lines.
+) -> list[_Mutation]:
+    """Return ``(baseline line, HEAD line start, HEAD line end, text)`` mutations.
 
-    Insertions are allowed so dated amendment blocks can be added.
-    Any delete or replace opcode means accepted decision text was
-    rewritten or replaced in place.
+    Insertions are allowed so dated amendment blocks can be added. Any
+    delete or replace opcode means accepted or superseded decision text
+    was rewritten or replaced in place, except for the single authorized
+    accepted-to-superseded status transition (see
+    ``_authorized_transition``). A status field in *new_lines* that no
+    baseline status field and no authorized transition accounts for is
+    also reported, with a baseline line of ``None``. A baseline status
+    field that the diff moves inside a fenced code block is reported
+    with its baseline and HEAD lines.
+
+    Line numbers may be ``None``: a deleted line has no HEAD line, and
+    an extra status line has no baseline line.
     """
-    matcher = difflib.SequenceMatcher(
-        a=old_lines,
-        b=new_lines,
-        autojunk=False,
+    authorized = _authorized_transition(old_lines, new_lines)
+    opcodes = _mutation_opcodes(old_lines, new_lines, authorized)
+    old_fenced = _fenced_code_mask(old_lines)
+    new_fenced = _fenced_code_mask(new_lines)
+    return (
+        _replace_or_delete_mutations(old_lines, opcodes, authorized)
+        + _unexpected_status_mutations(
+            old_lines, new_lines, old_fenced, new_fenced, authorized
+        )
+        + _fenced_status_mutations(
+            old_lines, opcodes, old_fenced, new_fenced, authorized
+        )
     )
-    mutations: list[tuple[int, str]] = []
-    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
-        if tag in {"replace", "delete"}:
-            for idx in range(i1, i2):
-                mutations.append((idx + 1, old_lines[idx]))
-    return mutations
 
 
 def _git(
@@ -82,14 +549,23 @@ def _git(
     run_env = dict(os.environ)
     if env:
         run_env.update(env)
-    return subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        cwd=str(repo_root),
-        check=False,
-        env=run_env,
-    )
+    try:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(repo_root),
+            check=False,
+            env=run_env,
+        )
+    except UnicodeDecodeError as exc:
+        return subprocess.CompletedProcess(
+            args=["git", *args],
+            returncode=1,
+            stdout="",
+            stderr=f"git decode error: {exc}",
+        )
 
 
 def _relative_to_repo(path: Path, repo_root: Path) -> Path | None:
@@ -332,7 +808,12 @@ def _git_show_blob(
     repo_root: Path,
     ref_and_path: str,
 ) -> tuple[str | None, str | None]:
-    """Return ``(text, error)`` for git blob ``ref:path``."""
+    """Return ``(text, error)`` for git blob ``ref:path``.
+
+    ``_git`` converts a decode error into a failed ``CompletedProcess``,
+    so decode errors flow through the same return-code error path as
+    other git failures.
+    """
     try:
         exists = _git(repo_root, "cat-file", "-e", ref_and_path)
     except FileNotFoundError:
@@ -376,24 +857,67 @@ def get_historical_text(
     return None, None
 
 
-def enumerate_adrs(repo_root: Path, baseline_ref: str) -> set[str]:
-    """Enumerate all ADR paths to check from baseline, working tree, and diff."""
+def _git_nul(repo_root: Path, *args: str) -> tuple[list[str], str | None]:
+    """Run a git command that prints NUL-delimited output.
+
+    The output is captured as bytes and decoded with ``surrogateescape``,
+    so a carriage return or any other byte in a pathname survives
+    universal-newline translation. Returns ``(parts, error)``: *parts*
+    is the NUL-split output; *error* is a formatted git failure, with
+    stderr decoded for the message.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            cwd=str(repo_root),
+            check=False,
+        )
+    except FileNotFoundError:
+        return [], "git not found on PATH"
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode("utf-8", "surrogateescape")
+        detail = stderr.strip() or f"exit code {proc.returncode}"
+        return [], f"git {args[0]} failed: {detail}"
+    stdout = proc.stdout.decode("utf-8", "surrogateescape")
+    return stdout.split("\0"), None
+
+
+def _add_adr_paths(paths: set[str], parts: list[str]) -> None:
+    """Add every ADR Markdown path in NUL-split *parts* to *paths*.
+
+    ``-z`` output is unquoted, and a path may begin or end with a
+    space, so paths are tested for truthiness only and are never
+    stripped.
+    """
+    for field in parts:
+        if field and is_adr_markdown(Path(field)):
+            paths.add(field)
+
+
+def enumerate_adrs(repo_root: Path, baseline_ref: str) -> tuple[set[str], str | None]:
+    """Enumerate all ADR paths to check from baseline, working tree, and diff.
+
+    Git output is NUL-delimited (``-z``) and byte-exact, so paths with
+    non-ASCII characters or a carriage return arrive intact. Returns
+    ``(paths, error)``. *error* is set when a git command fails, so the
+    caller fails closed instead of silently checking nothing.
+    """
     paths: set[str] = set()
 
-    ls_proc = _git(
+    ls_parts, ls_error = _git_nul(
         repo_root,
         "ls-tree",
         "-r",
+        "-z",
         "--name-only",
         baseline_ref,
         "--",
         str(_DECISIONS_DIR),
     )
-    if ls_proc.returncode == 0:
-        for line in ls_proc.stdout.splitlines():
-            line = line.strip()
-            if line and is_adr_markdown(Path(line)):
-                paths.add(line)
+    if ls_error is not None:
+        return paths, ls_error
+    _add_adr_paths(paths, ls_parts)
 
     dec_dir = repo_root / _DECISIONS_DIR
     if dec_dir.is_dir():
@@ -402,44 +926,100 @@ def enumerate_adrs(repo_root: Path, baseline_ref: str) -> set[str]:
             if rel is not None and is_adr_markdown(rel):
                 paths.add(rel.as_posix())
 
-    diff_proc = _git(
+    diff_parts, diff_error = _git_nul(
         repo_root,
         "diff",
         "--name-only",
+        "-z",
         "--diff-filter=ACDMR",
         baseline_ref,
         "--",
         str(_DECISIONS_DIR),
     )
-    if diff_proc.returncode == 0:
-        for line in diff_proc.stdout.splitlines():
-            line = line.strip()
-            if line and is_adr_markdown(Path(line)):
-                paths.add(line)
+    if diff_error is not None:
+        return paths, diff_error
+    _add_adr_paths(paths, diff_parts)
 
-    return paths
+    return paths, None
 
 
-def get_renames(repo_root: Path, baseline_ref: str) -> dict[str, str]:
-    """Return a mapping of ``{old_rel_posix: new_rel_posix}`` for detected renames."""
+def get_renames(
+    repo_root: Path,
+    baseline_ref: str,
+) -> tuple[dict[str, str], str | None]:
+    """Return ``(renames, error)`` for detected renames.
+
+    Git output is NUL-delimited (``-z``) and byte-exact, so paths with
+    non-ASCII characters or a carriage return arrive intact. Records
+    are ``status\\0old\\0new\\0`` for a rename or copy status and
+    ``status\\0path\\0`` otherwise. *renames* maps
+    ``{old_rel_posix: new_rel_posix}``. *error* is set when the git
+    diff fails, so the caller fails closed instead of silently skipping
+    rename detection. Fields are never stripped: a path may begin or
+    end with a space.
+    """
     renames: dict[str, str] = {}
-    proc = _git(
+    fields, error = _git_nul(
         repo_root,
         "diff",
         "-M",
         "--name-status",
+        "-z",
         "--diff-filter=R",
         baseline_ref,
         "--",
         str(_DECISIONS_DIR),
     )
-    if proc.returncode == 0:
-        for line in proc.stdout.splitlines():
-            parts = line.strip().split("\t")
-            if len(parts) >= 3 and parts[0].startswith("R"):
-                old_path, new_path = parts[1], parts[2]
-                renames[old_path] = new_path
-    return renames
+    if error is not None:
+        return renames, error
+    idx = 0
+    while idx + 1 < len(fields):
+        status = fields[idx]
+        if status.startswith(("R", "C")):
+            if idx + 2 < len(fields):
+                renames[fields[idx + 1]] = fields[idx + 2]
+            idx += 3
+        elif status:
+            idx += 2
+        else:
+            idx += 1
+    return renames, None
+
+
+def _resolves_inside(path: Path, repo_root: Path) -> bool:
+    """Return True when *path* resolves to a location under *repo_root*.
+
+    ``_relative_to_repo`` normalizes the path lexically, so a symlink
+    plus ``..`` can hide a location outside the repository. This check
+    resolves the full path.
+    """
+    try:
+        return path.resolve().is_relative_to(repo_root.resolve())
+    except OSError:
+        return False
+
+
+def _has_symlinked_component(repo_root: Path, rel: Path) -> bool:
+    """Return True when a *rel* path component below *repo_root* is a symlink.
+
+    Every component, including intermediate directories such as
+    ``docs/decisions``, is inspected with ``os.lstat`` so a symlinked
+    directory cannot hide a rename or an in-place rewrite. An absent
+    component is safe to continue past, because a deletion is reported
+    later. Any other inspection error fails closed.
+    """
+    current = repo_root
+    for part in rel.parts:
+        current = current / part
+        try:
+            st = os.lstat(current)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
+        if stat.S_ISLNK(st.st_mode):
+            return True
+    return False
 
 
 def _display_line(text: str, limit: int = 80) -> str:
@@ -449,11 +1029,36 @@ def _display_line(text: str, limit: int = 80) -> str:
     return text[: limit - 3] + "..."
 
 
-def _report_mutations(rel_posix: str, mutations: list[tuple[int, str]]) -> None:
-    """Print a diagnostic for rewritten or deleted historical lines."""
-    print(f"{rel_posix}: accepted decision text was rewritten or replaced in place")
-    for line_no, line in mutations[:_MAX_REPORTED_LINES]:
-        print(f"  HEAD line {line_no}: {_display_line(line)}")
+def _report_mutations(
+    rel_posix: str,
+    mutations: list[_Mutation],
+) -> None:
+    """Print a diagnostic for rewritten, deleted, or unauthorized historical text."""
+    print(
+        f"{rel_posix}: accepted or superseded decision text was rewritten "
+        "or replaced in place"
+    )
+    for baseline_line, head_start, head_end, line in mutations[:_MAX_REPORTED_LINES]:
+        if baseline_line is None:
+            print(
+                f"  HEAD line {head_start} (no corresponding baseline line): "
+                f"{_display_line(line)}"
+            )
+        elif head_start is None:
+            print(
+                f"  baseline line {baseline_line} (deleted, no corresponding "
+                f"HEAD line): {_display_line(line)}"
+            )
+        elif head_start == head_end:
+            print(
+                f"  baseline line {baseline_line} / HEAD line {head_start}: "
+                f"{_display_line(line)}"
+            )
+        else:
+            print(
+                f"  baseline line {baseline_line} / HEAD lines "
+                f"{head_start}-{head_end}: {_display_line(line)}"
+            )
     remaining = len(mutations) - _MAX_REPORTED_LINES
     if remaining > 0:
         print(f"  … ({remaining} more line(s))")
@@ -474,20 +1079,27 @@ def check(
         )
         return 1
 
-    renames = get_renames(repo_root, resolved_baseline)
+    renames, renames_error = get_renames(repo_root, resolved_baseline)
+    if renames_error is not None:
+        print(f"ERROR: {renames_error}", file=sys.stderr)
+        failed = True
     handled_renames: set[str] = set()
 
     if files:
         raw_paths = list(files)
     else:
-        raw_paths = sorted(enumerate_adrs(repo_root, resolved_baseline))
+        enumerated, enumerate_error = enumerate_adrs(repo_root, resolved_baseline)
+        if enumerate_error is not None:
+            print(f"ERROR: {enumerate_error}", file=sys.stderr)
+            failed = True
+        raw_paths = sorted(enumerated)
 
     for raw in raw_paths:
         path = Path(raw)
         if not path.is_absolute():
             path = repo_root / path
         rel = _relative_to_repo(path, repo_root)
-        if rel is None:
+        if rel is None or not _resolves_inside(path, repo_root):
             print(
                 f"ERROR: path is outside the repository: {raw}",
                 file=sys.stderr,
@@ -498,6 +1110,14 @@ def check(
             continue
         rel_posix = rel.as_posix()
         if rel_posix in handled_renames:
+            continue
+        if _has_symlinked_component(repo_root, rel):
+            print(
+                f"{rel_posix}: path traverses a symbolic link "
+                "or cannot be inspected safely",
+                file=sys.stderr,
+            )
+            failed = True
             continue
 
         hist_text, git_error = get_historical_text(
@@ -511,8 +1131,11 @@ def check(
             continue
         if hist_text is None:
             continue
-        if not is_accepted(hist_text):
+        if not is_protected(hist_text):
             continue
+        for line in _ambiguous_status_lines(hist_text.splitlines()):
+            print(f"{rel_posix}: ambiguous status header: {line}", file=sys.stderr)
+            failed = True
 
         try:
             st = os.lstat(path)
@@ -530,12 +1153,20 @@ def check(
             new_path_posix = renames.get(rel_posix)
             if new_path_posix:
                 print(
-                    f"{rel_posix}: accepted architecture decision record "
-                    f"was deleted (renamed to {new_path_posix})"
+                    f"{rel_posix}: accepted or superseded architecture decision "
+                    f"record was deleted (renamed to {new_path_posix})"
                 )
                 failed = True
                 handled_renames.add(new_path_posix)
                 new_path = repo_root / new_path_posix
+                if _has_symlinked_component(repo_root, Path(new_path_posix)):
+                    print(
+                        f"{new_path_posix}: path traverses a symbolic link "
+                        "or cannot be inspected safely",
+                        file=sys.stderr,
+                    )
+                    failed = True
+                    continue
                 try:
                     nst = os.lstat(new_path)
                 except OSError:
@@ -543,7 +1174,7 @@ def check(
                 if nst and stat.S_ISREG(nst.st_mode):
                     try:
                         new_text = new_path.read_text(encoding="utf-8")
-                    except OSError as exc:
+                    except (OSError, UnicodeDecodeError) as exc:
                         print(
                             f"ERROR: {new_path_posix}: cannot read working tree ({type(exc).__name__})",
                             file=sys.stderr,
@@ -556,7 +1187,10 @@ def check(
                         if mutations:
                             _report_mutations(new_path_posix, mutations)
             else:
-                print(f"{rel_posix}: accepted architecture decision record was deleted")
+                print(
+                    f"{rel_posix}: accepted or superseded architecture decision "
+                    "record was deleted"
+                )
                 failed = True
             continue
 
@@ -570,7 +1204,7 @@ def check(
 
         try:
             new_text = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             print(
                 f"ERROR: {rel_posix}: cannot read working tree ({type(exc).__name__})",
                 file=sys.stderr,

@@ -130,3 +130,18 @@ weeks. Several deliverables depend on unresolved design details from
 - [ADR-0002: EARS Specification Record Schema](0002-ears-specification-record-schema.md)
 - [ADR-0003: EARS Manager Storage Layout and Schema Version Keys](0003-ears-manager-storage-layout.md)
 - [GitHub Issue #346: Propose clean-slate ProtoBot V2 design](https://github.com/redhat-et/ProtoBot/issues/346)
+
+**[Amended November 2026]**
+ADR-0003 has been superseded by this decision ahead of removal PR R1
+(see [ADR-0003: EARS Manager Storage Layout and Schema Version
+Keys](0003-ears-manager-storage-layout.md)). The sentence in Decision
+stating that V1 specifications and accepted ADRs remain the current
+contracts until the removal pull request that supersedes each one
+merges now applies except for ADR-0003, which this decision supersedes.
+The ADR-0003 row in the Artifact supersession table denotes the
+`.protobot/` store layout that R1 removes;
+`docs/decisions/0003-ears-manager-storage-layout.md` stays in place and
+is never deleted or renamed. The remainder of the migration schedule
+and artifact mappings remain unchanged.
+See the [ProtoBot V2 design proposal](../architecture/ProtoBotV2.md)
+for the replacement architecture.

@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated_by": "skillsaw 0.23.0",
-  "generated_at": "2026-11-24T14:34:42.452549+00:00",
+  "generated_at": "2026-11-24T15:42:46.876998+00:00",
   "violations": [
     {
       "fingerprint": "d0aa041aff2100fd",
@@ -72,7 +72,7 @@
       "rule_id": "content-section-length",
       "file_path": "AGENTS.md",
       "line": 143,
-      "message": "Section 'Rules for creating or modifying specification documents' is ~1223 tokens (max recommended: 500)",
+      "message": "Section 'Rules for creating or modifying specification documents' is ~1221 tokens (max recommended: 500)",
       "severity": "info"
     },
     {
@@ -367,9 +367,9 @@
       "fingerprint": "9ac2052ca695ae1d",
       "rule_id": "context-budget",
       "file_path": "AGENTS.md",
-      "message": "Estimated 3,967 tokens exceeds agents-md warn limit of 3,900",
+      "message": "Estimated 3,966 tokens exceeds agents-md warn limit of 3,900",
       "severity": "warning",
-      "value": 3967,
+      "value": 3966,
       "baseline_mode": "ceiling"
     }
   ]
