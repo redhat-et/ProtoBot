@@ -24,8 +24,9 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   belongs in the review verdict, with the local check used to identify the
   actual diagnostic.
 - Before detailed specification analysis, refresh the recorded PR base and run
-  the validator on a checkout or worktree of the recorded PR head
-  ([#547](https://github.com/redhat-et/ProtoBot/issues/547)). Run
+  the validator on a clean checkout or a fresh worktree of the recorded PR
+  head, with no uncommitted changes, so the result describes the recorded PR
+  head ([#547](https://github.com/redhat-et/ProtoBot/issues/547)). Run
   `git fetch <remote> <base-branch>` first, because `gh pr view` does not
   update local refs, then run
   `PROTOBOT_VALIDATOR_BASE="$(git merge-base FETCH_HEAD HEAD)" python3 scripts/check_spec_validator.py`.
