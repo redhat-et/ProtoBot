@@ -252,7 +252,7 @@ func validBranchSlug(slug string) bool {
 	previousHyphen := false
 	for _, char := range slug {
 		hyphen := char == '-'
-		if !hyphen && !(char >= 'a' && char <= 'z') && !(char >= '0' && char <= '9') {
+		if !hyphen && (char < 'a' || char > 'z') && (char < '0' || char > '9') {
 			return false
 		}
 		if hyphen && previousHyphen {

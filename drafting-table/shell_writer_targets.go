@@ -627,7 +627,13 @@ func copySourceMapsContents(writer, source string, sourceIsDirectory bool) bool 
 	if writer == "rsync" && sourceIsDirectory && hasTrailingSeparator(source) {
 		return true
 	}
-	trimmed := strings.TrimRight(source, "/"+string(filepath.Separator))
+	// filepath.Separator is "/" on Unix, so the cutset must not repeat it;
+	// a duplicate would trip SA1024 and never trim a backslash on Unix.
+	separatorCutset := "/"
+	if filepath.Separator != '/' {
+		separatorCutset += string(filepath.Separator)
+	}
+	trimmed := strings.TrimRight(source, separatorCutset)
 	return trimmed == "." || strings.HasSuffix(trimmed, string(filepath.Separator)+".") || strings.HasSuffix(trimmed, "/.")
 }
 
