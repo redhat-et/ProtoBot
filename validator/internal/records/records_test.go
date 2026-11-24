@@ -33,6 +33,7 @@ func TestValidateRequirementID(t *testing.T) {
 		"REQ-A--00001",
 		"REQ-CORE--00001",
 		"REQ-A---00001",
+		"REQ---00001",
 		"REQ-A-B--00001",
 		"REQ-API-0000A",
 		"REQ-API-00001.yaml",

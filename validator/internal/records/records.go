@@ -67,8 +67,9 @@ type InterfaceRecord struct {
 // requirementIDPattern is REQ-<SCOPE>-<NNNNN>: an uppercase scope tag
 // of alphanumeric segments separated by single hyphens, and a
 // five-digit sequence. Consecutive or trailing hyphens in the scope
-// are rejected. The same rule is in ADR-0002 and the V2 requirement
-// record.
+// are rejected. ADR-0002 and the V2 requirement record define the
+// REQ-<SCOPE>-<NNNNN> format; this pattern additionally enforces the
+// single-hyphen scope segmentation rule.
 var requirementIDPattern = regexp.MustCompile(`^REQ-[A-Z][A-Z0-9]*(-[A-Z0-9]+)*-[0-9]{5}$`)
 
 // ValidateRequirementID returns an error if id does not match REQ-<SCOPE>-<NNNNN>.
