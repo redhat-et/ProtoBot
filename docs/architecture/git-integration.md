@@ -822,6 +822,10 @@ project; it does not change any rule in this document.
 
 ## Ungoverned-edit detection
 
+The layers and checks in this section describe V1 verification tooling that
+removal PR R1 (issue #406) retired with `ears-manager` and `.protobot/`. This
+document keeps them as design history until removal PR R6 retires it.
+
 No component is meant to write a registered specification file
 directly. For the Drafting Table, the guard refuses covered file-writing
 tools and shell calls it checks; a call without a guard decision may still
@@ -1035,6 +1039,10 @@ For this contract, that means three things:
 
 ## Failure behavior
 
+Most diagnostics and safe retries below name V1 verification tooling that
+removal PR R1 (issue #406) retired. This document keeps them as design
+history until removal PR R6 retires it.
+
 Every failure leaves the working tree and the repository
 unchanged: no partial commit, no half-created branch, no pushed
 branch without its commit. Each row states the deterministic
@@ -1048,7 +1056,7 @@ detects with a stable code
 | `project.yaml` is not at the working-tree root | Project resolution | Names both the file location and the working-tree root | Move the session to the correct checkout; the Drafting Table never relocates the file |
 | Store schema version newer than the tool | `ears-manager` reads `schema_versions` | Names the store, the file version, and the supported version | Use the supported version; after v1 adoption, perform any upgrade through a reviewed migration change set |
 | Registered artifact or structured-store digest mismatch | Pre-stage comparison | Names the safe configuration field and mismatch class | Discard the direct edit, or re-apply it through `ears-manager` |
-| Registered artifact path or canonical content differs from the comparison base artifact (on the default branch, or at the commit named by `--base-ref`) without a matching proposed operation | `ears-manager check` | `artifact.operation_missing`, naming the artifact-registry entry | That hand-edit prohibition and its reviewer check were retired in removal PR R1 (issue #406). If the delta is already approved on the canonical remote but the local default branch is behind, reconcile it through SCM `repo_state` and rerun `check`; otherwise record the artifact delta through `ears-manager artifact put` in a proposed change set and rerun `check`. When checking against a fork point, pass `--base-ref FULL-SHA`. The check does not prove command provenance |
+| Registered artifact path or canonical content differs from the comparison base artifact (on the default branch, or at the commit named by `--base-ref`) without a matching proposed operation | `ears-manager check` | `artifact.operation_missing`, naming the artifact-registry entry | No recovery path: the hand-edit prohibition, the reviewer check, and the comparison-base artifact delta check were retired in removal PR R1 (issue #406) |
 | Artifact registered on the comparison base (the default branch, or the commit named by `--base-ref`) is absent from the current registry | `ears-manager check` | `artifact.unregistered`, naming the artifact-registry entry | Restore the registration through the governed `ears-manager` interface; registered artifacts cannot be unregistered |
 | Registered path or store directory not classified `shared` in the projection manifest | `ears-manager check`, and every `ears-manager` write that validates the full project, including `change-set create` | Names the path, the required class `shared`, and the current class when an entry covers the path | Through a reviewed policy edit of `projection.yaml`, restore the missing `shared` entry, or change the covering entry to `shared`. The Source Control Manager keeps that edit out of any change-set commit, so the person commits it apart and merges it through its own review; `ears-manager` commands then succeed. `ears-manager` does not restore or change another path's entry, because that entry would read as a policy edit mixed into the change set |
 | Branch `cs/<nnnnn>-<slug>` already exists | Branch creation | Names the branch and whether it is local, remote, or both | Resume that change set, or create the change set under a new ID |
