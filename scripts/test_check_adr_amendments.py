@@ -1530,7 +1530,29 @@ class GitRepoCheckTests(unittest.TestCase):
         with contextlib.redirect_stderr(stderr):
             rc, _output = self._check(baseline_ref="nonexistent-ref")
         self.assertEqual(1, rc)
-        self.assertIn("cannot resolve default-branch baseline", stderr.getvalue())
+        self.assertIn("cannot resolve explicit baseline ref", stderr.getvalue())
+
+    def test_explicit_baseline_ref_with_revision_operator(self) -> None:
+        """Allow revision expressions like HEAD^ in the explicit baseline ref."""
+        _git(self.root, "checkout", "-b", "feature")
+        path = self.root / self.adr_rel
+        path.write_text(
+            _ACCEPTED_ADR + "\n**[Amended November 2026]**\nValid amendment.\n",
+            encoding="utf-8",
+        )
+        _git(self.root, "commit", "--no-gpg-sign", "-am", "valid amendment")
+        rc, output = self._check(baseline_ref="HEAD^")
+        self.assertEqual(0, rc, output)
+
+    def test_unsafe_explicit_baseline_ref_fails_closed(self) -> None:
+        """An explicit baseline ref with option injection or path smuggling fails closed."""
+        for unsafe in ("-h", "--upload-pack=touch /tmp/x", "main:.git/config"):
+            with self.subTest(ref=unsafe):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    rc, _output = self._check(baseline_ref=unsafe)
+                self.assertEqual(1, rc)
+                self.assertIn("cannot resolve explicit baseline ref", stderr.getvalue())
 
     def test_git_show_blob_missing_path_returns_none(self) -> None:
         """A path not in the tree returns (None, None)."""

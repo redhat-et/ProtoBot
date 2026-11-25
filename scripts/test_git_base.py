@@ -105,10 +105,6 @@ class GitPrimitiveTests(unittest.TestCase):
         """Return None when the candidate ref does not exist."""
         self.assertIsNone(git_base.git_merge_base(self.root, "no-such-branch"))
 
-    def test_get_merge_base_is_alias_for_git_merge_base(self) -> None:
-        """Preserve get_merge_base as a compatibility alias for git_merge_base."""
-        self.assertIs(git_base.get_merge_base, git_base.git_merge_base)
-
     def test_is_shallow_repository_false_for_full_clone(self) -> None:
         """A normal local repository is not shallow."""
         self.assertFalse(git_base.is_shallow_repository(self.root))
@@ -293,9 +289,61 @@ class ResolveComparisonBaseTests(unittest.TestCase):
             "GITHUB_BASE_SHA": "-h",
             "GITHUB_BASE_REF": "--upload-pack=true",
         }
+        with patch.object(git_base, "_run_git", wraps=git_base._run_git) as run_git:
+            base, is_head = git_base.resolve_comparison_base(self.root, env=env)
+        self.assertIsNone(base)
+        self.assertFalse(is_head)
+        for call in run_git.call_args_list:
+            self.assertNotIn("-h", call.args)
+            self.assertNotIn("--upload-pack=true", call.args)
+
+    def test_unsafe_env_base_skipped_when_later_candidate_resolves(self) -> None:
+        """An unsafe env candidate is skipped, allowing a subsequent candidate to resolve."""
+        self._git("branch", "main")
+        env = {
+            "PRE_COMMIT_FROM_REF": "--upload-pack=true",
+            "GITHUB_BASE_SHA": "-h",
+        }
+        base, is_head = git_base.resolve_comparison_base(self.root, env=env)
+        self.assertEqual(self.head, base)
+        self.assertTrue(is_head)
+
+    def test_merge_base_failure_for_unrelated_histories(self) -> None:
+        """Fail closed when candidate ref exists but shares no common ancestor."""
+        self._git("checkout", "-q", "--orphan", "unrelated")
+        (self.root / "orphan.txt").write_text("orphan")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "orphan-root")
+        self.assertIsNone(git_base.git_merge_base(self.root, "trunk"))
+        base, is_head = git_base.resolve_comparison_base(
+            self.root, default_candidates=("trunk",)
+        )
+        self.assertIsNone(base)
+        self.assertFalse(is_head)
+
+    def test_unsafe_explicit_ref_with_safe_env_fallback_fails_closed(self) -> None:
+        """An unsafe explicit ref fails closed without trying env fallbacks."""
+        env = {"GITHUB_BASE_SHA": self.head}
+        base, is_head = git_base.resolve_comparison_base(
+            self.root, env=env, explicit_ref="-h"
+        )
+        self.assertIsNone(base)
+        self.assertFalse(is_head)
+
+    def test_push_before_all_zero_sha_is_skipped(self) -> None:
+        """An all-zero PUSH_BEFORE_SHA for a new branch push is skipped."""
+        all_zeros = "0" * 40
+        env = {
+            "GITHUB_EVENT_NAME": "push",
+            "PUSH_BEFORE_SHA": all_zeros,
+        }
         base, is_head = git_base.resolve_comparison_base(self.root, env=env)
         self.assertIsNone(base)
         self.assertFalse(is_head)
+        self._git("branch", "main")
+        base, is_head = git_base.resolve_comparison_base(self.root, env=env)
+        self.assertEqual(self.head, base)
+        self.assertTrue(is_head)
 
 
 if __name__ == "__main__":

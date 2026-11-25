@@ -401,4 +401,4 @@ repos:
         entry: python3 scripts/test_git_base.py
         language: system
         pass_filenames: false
-        files: ^scripts/(git_base|test_git_base|check_adr_amendments|check_spec_validator|check_baseline_ratchet)\.py$
+        files: ^scripts/(git_base|test_git_base|check_adr_amendments|test_check_adr_amendments|check_spec_validator|test_check_spec_validator|check_baseline_ratchet|test_check_baseline_ratchet)\.py$

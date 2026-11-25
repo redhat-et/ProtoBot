@@ -13,7 +13,8 @@ base: the merge base of ``HEAD`` with the first of ``GITHUB_BASE_SHA``,
 ``HEAD`` itself, the base-relative checks (text immutability, deletion,
 replacement) cannot fire, and a note says so on stderr.
 Set ``PROTOBOT_VALIDATOR_BASE`` to compare against another revision; a
-value starting with ``-`` is rejected.
+value starting with ``-`` (option injection) or containing ``:`` (path
+smuggling) is rejected.
 Validator diagnostics are printed unchanged and fail the hook.
 
 Limitations: the validator reads the working tree, not the index. A
@@ -55,6 +56,24 @@ FALLBACK_NOTE = (
 )
 
 
+def _resolve_override_commit(repo_root: Path, ref: str) -> str | None:
+    """Resolve an explicit override revision expression to a commit SHA."""
+    if not ref or ref.startswith("-") or ":" in ref:
+        return None
+    result = git_base._run_git(
+        repo_root,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        f"{ref}^{{commit}}",
+    )
+    if result is None or result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
 def resolve_base(
     repo_root: Path = REPO_ROOT,
     env: dict[str, str] | None = None,
@@ -62,7 +81,8 @@ def resolve_base(
     """Return ``(base_revision, base_is_head)`` for the validator run.
 
     ``PROTOBOT_VALIDATOR_BASE`` wins when set, and is passed through
-    unresolved so the validator itself reports an invalid override. An
+    unresolved so the validator itself reports an invalid override (values
+    starting with ``-`` or containing ``:`` are rejected). An
     unresolvable or unresolved override is not retried against
     ``git_base.resolve_comparison_base`` because an explicit override
     should never be silently replaced by an automatically discovered
@@ -77,7 +97,7 @@ def resolve_base(
     override = environ.get(BASE_ENV, "").strip()
     if override:
         head = git_base.git_commit_sha(repo_root, "HEAD")
-        resolved = git_base.git_commit_sha(repo_root, override)
+        resolved = _resolve_override_commit(repo_root, override)
         return override, resolved is not None and resolved == head
     base, is_head = git_base.resolve_comparison_base(
         repo_root,
@@ -130,8 +150,11 @@ def check(repo_root: Path = REPO_ROOT, env: dict[str, str] | None = None) -> int
     """Build the validator and run it on *repo_root*. Returns an exit code."""
     environ = os.environ if env is None else env
     override = environ.get(BASE_ENV, "").strip()
-    if override and not git_base.is_safe_git_ref(override):
-        print(f"{BASE_ENV} must not start with '-': {override!r}", file=sys.stderr)
+    if override and (override.startswith("-") or ":" in override):
+        print(
+            f"{BASE_ENV} must not start with '-' or contain ':': {override!r}",
+            file=sys.stderr,
+        )
         return 1
     base, base_is_head = resolve_base(repo_root, env)
     if base == "HEAD" and base_is_head and not override:

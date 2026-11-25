@@ -22,7 +22,7 @@ Public surface:
     revision.
 ``git_ref_exists`` / ``git_commit_sha``
     Check whether a ref resolves to a commit, or resolve it to a SHA.
-``git_merge_base`` / ``get_merge_base``
+``git_merge_base``
     Compute ``git merge-base <ref> <head_ref>``.
 ``is_shallow_repository``
     Report whether the checkout is a shallow clone, so a caller can
@@ -135,9 +135,6 @@ def git_merge_base(repo_root: Path, ref: str, head_ref: str = "HEAD") -> str | N
         return None
     sha = result.stdout.strip()
     return sha or None
-
-
-get_merge_base = git_merge_base
 
 
 def is_shallow_repository(repo_root: Path) -> bool:

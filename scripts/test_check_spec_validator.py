@@ -137,14 +137,19 @@ class CheckEndToEndTests(unittest.TestCase):
         _git(self.repo, "commit", "-q", "-am", "reword")
         rc, _ = _run_check(self.repo, {checker.BASE_ENV: "HEAD"})
         self.assertEqual(0, rc)
+        rc, _ = _run_check(self.repo, {checker.BASE_ENV: "HEAD^{commit}"})
+        self.assertEqual(0, rc)
         rc, err = _run_check(self.repo, {checker.BASE_ENV: "HEAD~1"})
+        self.assertEqual(1, rc)
+        self.assertIn("requirement.text_immutable", err)
+        rc, err = _run_check(self.repo, {checker.BASE_ENV: "HEAD^"})
         self.assertEqual(1, rc)
         self.assertIn("requirement.text_immutable", err)
 
     def test_option_like_override_is_rejected(self) -> None:
-        """Reject an override such as ``-h`` instead of passing it to the validator."""
+        """Reject an override such as ``-h`` or path smuggling instead of passing it."""
         self.req.write_text(_NO_SHALL)
-        for value in ("-h", "--help"):
+        for value in ("-h", "--help", "main:.git/config"):
             rc, err = _run_check(self.repo, {checker.BASE_ENV: value})
             self.assertEqual(1, rc, value)
             self.assertIn("must not start with", err)
@@ -290,6 +295,24 @@ class ResolveBaseTests(unittest.TestCase):
         self.assertEqual(
             ("HEAD", True),
             checker.resolve_base(self.repo, {checker.BASE_ENV: "HEAD"}),
+        )
+        self.assertEqual(
+            ("HEAD^{commit}", True),
+            checker.resolve_base(self.repo, {checker.BASE_ENV: "HEAD^{commit}"}),
+        )
+
+    def test_override_revision_operators_resolve(self) -> None:
+        """Resolve revision operators like HEAD^ to determine base_is_head."""
+        (self.repo / "b.txt").write_text("b")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-q", "-m", "two")
+        self.assertEqual(
+            ("HEAD^", False),
+            checker.resolve_base(self.repo, {checker.BASE_ENV: "HEAD^"}),
+        )
+        self.assertEqual(
+            ("HEAD^{commit}", True),
+            checker.resolve_base(self.repo, {checker.BASE_ENV: "HEAD^{commit}"}),
         )
 
     def test_github_base_ref_is_honoured(self) -> None:

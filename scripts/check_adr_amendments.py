@@ -19,11 +19,11 @@ a silent skip.
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
 ``HEAD`` for local uncommitted checks when the file is not on the baseline.
-An explicit ref, ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, or
-``GITHUB_BASE_REF`` that looks like a git option (e.g. ``-h`` or
-``--upload-pack=...``) is rejected before use, via the shared
-``scripts/git_base.py`` helper also used by
-``scripts/check_spec_validator.py`` and ``scripts/check_baseline_ratchet.py``.
+An explicit ref starting with ``-`` or containing ``:`` (smuggled
+path or option injection like ``-h`` or ``--upload-pack=...``),
+or an unsafe ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, or
+``GITHUB_BASE_REF`` (validated via ``is_safe_git_ref`` from the shared
+``scripts/git_base.py`` helper), is rejected before use.
 Unsafe environment variables are skipped in favor of subsequent fallback
 tiers, while an unsafe explicit ref fails closed immediately.
 """
@@ -741,8 +741,9 @@ def resolve_baseline_ref(
     ``GITHUB_BASE_REF`` are validated with ``is_safe_git_ref`` before use.
     An unsafe candidate is skipped so resolution falls through to
     subsequent tiers or default-branch candidates, matching
-    ``scripts/git_base.py``. An unsafe *explicit_ref* fails closed
-    immediately.
+    ``scripts/git_base.py``. An explicit ref starting with ``-`` or
+    containing ``:`` fails closed immediately, while valid git revision
+    expressions like ``HEAD^`` are accepted.
 
     Returns ``None`` when no baseline ref can be resolved (fail closed).
     """
@@ -818,17 +819,18 @@ def resolve_baseline_ref(
         return None
 
     if explicit_ref:
-        if not is_safe_git_ref(explicit_ref):
+        ref = explicit_ref.strip()
+        if not ref or ref.startswith("-") or ":" in ref:
             return None
-        resolved = _resolve_commit(explicit_ref)
-        if not resolved and _fetch_target(repo_root, explicit_ref):
-            clean_ref = explicit_ref
+        resolved = _resolve_commit(ref)
+        if not resolved and _fetch_target(repo_root, ref):
+            clean_ref = ref
             for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
                 if clean_ref.startswith(prefix):
                     clean_ref = clean_ref[len(prefix) :]
                     break
             for candidate in [
-                explicit_ref,
+                ref,
                 f"origin/{clean_ref}",
                 f"refs/remotes/origin/{clean_ref}",
             ]:
@@ -1188,10 +1190,16 @@ def check(
     failed = False
     resolved_baseline = resolve_baseline_ref(repo_root, baseline_ref)
     if resolved_baseline is None:
-        print(
-            "ERROR: cannot resolve default-branch baseline ref to check against",
-            file=sys.stderr,
-        )
+        if baseline_ref:
+            print(
+                f"ERROR: cannot resolve explicit baseline ref {baseline_ref!r} to check against",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "ERROR: cannot resolve default-branch baseline ref to check against",
+                file=sys.stderr,
+            )
         return 1
 
     renames, renames_error = get_renames(repo_root, resolved_baseline)
