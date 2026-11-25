@@ -185,9 +185,9 @@ remote-tracking fallback is used, can retarget the default-branch baseline. A
 caller-supplied `--base-ref` can also select an artifact comparison base
 commit that hides an artifact delta; CI computes the value itself from
 `git merge-base` to prevent this retargeting. These escape paths are outside
-the operation-record guarantee. Rule 5 in `AGENTS.md` prohibits hand-editing
-registered specification artifacts and `.protobot/project.yaml`; Rule 6 in
-`AGENTS.md` requires reviewers to inspect them and flag hand edits.
+the operation-record guarantee. Those hand-edit prohibitions and the reviewer
+check that enforced them were retired with `ears-manager` and `.protobot/` in
+removal PR R1 (issue #406).
 File-source provenance remains a separate fail-open gap
 ([File-source arguments][fail-open]).
 The registry cannot record a digest for `project.yaml` itself, so
@@ -851,9 +851,9 @@ when that resolves, otherwise a resolved remote-tracking ref for
 `repository.canonical_remote`; `ears-manager` never fetches. Callers may pass
 `--base-ref FULL-SHA` to select an explicit artifact comparison base commit for
 the artifact-operation delta without altering approval or freshness checks.
-Rule 5 in `AGENTS.md` prohibits hand-editing registered specification
-artifacts and `.protobot/project.yaml`; Rule 6 in `AGENTS.md` requires
-reviewers to inspect them and flag hand edits. The optional harness layer and
+Those hand-edit prohibitions and the reviewer check that enforced them were
+retired with `ears-manager` and `.protobot/` in removal PR R1 (issue #406).
+The optional harness layer and
 later controls have different coverage; path ownership in CI separately
 rejects edits outside the owning component's paths. They do not cover an
 indirect `ears-manager` write that leaves a matching operation, or edits to
@@ -915,10 +915,10 @@ put` ran or prevent coordinated manual edits to artifact content, its registry
 digest, and the manifest. Nor does it prevent hand edits to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, that retarget the baseline. These two escape
-paths are outside the operation-record guarantee. Rule 5 prohibits
-hand-editing registered specification artifacts and `.protobot/project.yaml`;
-Rule 6 requires reviewers to inspect them and flag hand edits. Path ownership in
-CI remains a separate layer. File-source provenance is still not established by
+paths are outside the operation-record guarantee. Those hand-edit
+prohibitions and the reviewer check that enforced them were retired with
+`ears-manager` and `.protobot/` in removal PR R1 (issue #406). Path ownership
+in CI remains a separate layer. File-source provenance is still not established by
 these checks ([File-source arguments][fail-open]).
 
 ---
@@ -1048,7 +1048,7 @@ detects with a stable code
 | `project.yaml` is not at the working-tree root | Project resolution | Names both the file location and the working-tree root | Move the session to the correct checkout; the Drafting Table never relocates the file |
 | Store schema version newer than the tool | `ears-manager` reads `schema_versions` | Names the store, the file version, and the supported version | Use the supported version; after v1 adoption, perform any upgrade through a reviewed migration change set |
 | Registered artifact or structured-store digest mismatch | Pre-stage comparison | Names the safe configuration field and mismatch class | Discard the direct edit, or re-apply it through `ears-manager` |
-| Registered artifact path or canonical content differs from the comparison base artifact (on the default branch, or at the commit named by `--base-ref`) without a matching proposed operation | `ears-manager check` | `artifact.operation_missing`, naming the artifact-registry entry | Rule 5 prohibits hand-editing `.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag hand edits because its settings select the default-branch baseline. If the delta is already approved on the canonical remote but the local default branch is behind, reconcile it through SCM `repo_state` and rerun `check`; otherwise record the artifact delta through `ears-manager artifact put` in a proposed change set and rerun `check`. When checking against a fork point, pass `--base-ref FULL-SHA`. The check does not prove command provenance |
+| Registered artifact path or canonical content differs from the comparison base artifact (on the default branch, or at the commit named by `--base-ref`) without a matching proposed operation | `ears-manager check` | `artifact.operation_missing`, naming the artifact-registry entry | That hand-edit prohibition and its reviewer check were retired in removal PR R1 (issue #406). If the delta is already approved on the canonical remote but the local default branch is behind, reconcile it through SCM `repo_state` and rerun `check`; otherwise record the artifact delta through `ears-manager artifact put` in a proposed change set and rerun `check`. When checking against a fork point, pass `--base-ref FULL-SHA`. The check does not prove command provenance |
 | Artifact registered on the comparison base (the default branch, or the commit named by `--base-ref`) is absent from the current registry | `ears-manager check` | `artifact.unregistered`, naming the artifact-registry entry | Restore the registration through the governed `ears-manager` interface; registered artifacts cannot be unregistered |
 | Registered path or store directory not classified `shared` in the projection manifest | `ears-manager check`, and every `ears-manager` write that validates the full project, including `change-set create` | Names the path, the required class `shared`, and the current class when an entry covers the path | Through a reviewed policy edit of `projection.yaml`, restore the missing `shared` entry, or change the covering entry to `shared`. The Source Control Manager keeps that edit out of any change-set commit, so the person commits it apart and merges it through its own review; `ears-manager` commands then succeed. `ears-manager` does not restore or change another path's entry, because that entry would read as a policy edit mixed into the change set |
 | Branch `cs/<nnnnn>-<slug>` already exists | Branch creation | Names the branch and whether it is local, remote, or both | Resume that change set, or create the change set under a new ID |

@@ -462,9 +462,9 @@ reserved harness paths, the selected manifest, or Git metadata.
 Coordinated manual edits to artifact content, its registry digest, and a
 manifest containing a matching operation can pass; hand edits to
 `repository.default_branch`, or to `repository.canonical_remote` when
-the remote-tracking fallback is used, can retarget the baseline. Rule 5
-in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6
-requires reviewers to inspect it and flag hand edits. They also cannot
+the remote-tracking fallback is used, can retarget the baseline. That
+hand-edit prohibition and its reviewer check were retired with `ears-manager`
+and `.protobot/` in removal PR R1 (issue #406). They also cannot
 establish whether file-source bytes came from standard input or an
 external path.
 See the shared

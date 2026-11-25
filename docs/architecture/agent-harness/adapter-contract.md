@@ -1118,9 +1118,9 @@ resolve. A caller may pass `--base-ref FULL-SHA` to select an explicit artifact
 comparison base without changing approval or freshness. `ears-manager` never
 fetches. A hand edit to `repository.default_branch`, or to
 `repository.canonical_remote` when the remote-tracking fallback is used, can
-retarget it. That risk is outside the operation-record check. Rule 5 in
-`AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6 requires
-reviewers to inspect it and flag hand edits. Those later layers do not replace
+retarget it. That risk is outside the operation-record check. That hand-edit
+prohibition and its reviewer check were retired with `ears-manager` and
+`.protobot/` in removal PR R1 (issue #406). Those later layers do not replace
 the guard's command
 parser, option/value checks, read restrictions, or shell-syntax restrictions.
 A call that reaches an allowed shell tool without a guard decision can
@@ -1157,10 +1157,10 @@ two routes forward from [The pre-stage digest comparison][pre-stage]. These
 checks verify manifest association, not caller or writer provenance: an
 indirect `ears-manager` write with a matching operation, coordinated manual
 edits to artifact content, its registry digest, and the manifest, or project
-settings that retarget the baseline can pass. Rule 5 in `AGENTS.md` prohibits
-hand-editing registered specification artifacts and `.protobot/project.yaml`;
-Rule 6 in `AGENTS.md` requires reviewers to inspect them and flag hand edits.
-The later checks do not provide writer provenance for `.protobot/` control
+settings that retarget the baseline can pass. Those hand-edit prohibitions and
+the reviewer check that enforced them were retired with `ears-manager` and
+`.protobot/` in removal PR R1 (issue #406). The later checks do not provide
+writer provenance for `.protobot/` control
 files, reserved harness controls, the selected manifest, or Git metadata.
 Recognized opaque execution forms are refused by the guard before execution,
 while the source-file, renamed-executable, and unrecognized-writer routes in
@@ -1213,7 +1213,7 @@ enforcement:
 | --- | --- | --- | --- |
 | [OpenCode](opencode.md) | The plugin is absent or no hook is registered; native Bash permissions have no plugin-presence check | The `ears-manager *` allow rule still admits the command, including non-`-` file-source values, `--text "$GH_TOKEN"`, output redirection, input redirection, and other shell syntax that only the guard rejects; a `read` of an in-project credential file other than `.env` | Every other shell command, including `git` and `gh` (`"*": deny`); reads of `.env`, `.git/`, and `.protobot/` stores; hidden file-writing, subagent, and web tools |
 | [Claude Code](claude-code.md) | The hook times out, is killed, or its shim cannot run | No status 2 is returned, so an `ears-manager` call may proceed with a non-`-` value, such as a credential file, or with variable expansion such as `--text "$GH_TOKEN"`; a `Read` of a credential file outside the native denies, including one outside the project | Every shell command without an allow rule, including `git` and `gh` (`dontAsk`); reads of `.env`, `.git/`, and `.protobot/` stores; hidden file-writing, subagent, and web tools |
-| [Codex](codex.md) | The hook is untrusted outside the launcher, crashes, exits other than 2, or times out | The call may proceed with a non-`-` value or variable expansion; any shell command, including Git reads; an `apply_patch` or shell write in the working tree, including `.protobot/project.yaml` and registered paths. `check` catches registered artifact path/canonical-content deltas without a matching proposed operation and unregistration of an artifact registered on the comparison base, but a hand edit to `repository.default_branch`, or to `repository.canonical_remote` when the remote-tracking fallback is used, can retarget the baseline; coordinated edits with a matching operation can pass. Rule 5 in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag hand edits. The sandbox bounds writes, not reads, and does not establish the source of bytes read into governed state | Writes outside the working tree and `$TMPDIR`, writes under `.git/`, and shell network access, so Git writes and Git host calls fail; hidden web and subagent tools |
+| [Codex](codex.md) | The hook is untrusted outside the launcher, crashes, exits other than 2, or times out | The call may proceed with a non-`-` value or variable expansion; any shell command, including Git reads; an `apply_patch` or shell write in the working tree, including `.protobot/project.yaml` and registered paths. `check` catches registered artifact path/canonical-content deltas without a matching proposed operation and unregistration of an artifact registered on the comparison base, but a hand edit to `repository.default_branch`, or to `repository.canonical_remote` when the remote-tracking fallback is used, can retarget the baseline; coordinated edits with a matching operation can pass. That hand-edit prohibition and its reviewer check were retired with `ears-manager` and `.protobot/` in removal PR R1 (issue #406). The sandbox bounds writes, not reads, and does not establish the source of bytes read into governed state | Writes outside the working tree and `$TMPDIR`, writes under `.git/`, and shell network access, so Git writes and Git host calls fail; hidden web and subagent tools |
 
 The pre-stage comparison uses the artifact `digest` and structured-store
 `store_digests` in `.protobot/project.yaml`; that file cannot record a digest
@@ -1232,9 +1232,9 @@ explicit artifact comparison base without changing approval or freshness.
 `ears-manager` never fetches. A hand edit to `repository.default_branch`, or to
 `repository.canonical_remote` when the remote-tracking fallback is used, can
 retarget the comparison. This is outside
-the operation-record guarantee. Rule 5 in `AGENTS.md` prohibits hand-editing
-`.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag
-hand edits. Separately, integrity checks and CI cannot tell whether
+the operation-record guarantee. That hand-edit prohibition and its reviewer
+check were retired with `ears-manager` and `.protobot/` in removal PR R1
+(issue #406). Separately, integrity checks and CI cannot tell whether
 `--content-file` bytes came from standard input or an external file
 ([File-source arguments](#file-source-arguments)).
 
@@ -1470,8 +1470,9 @@ without changing approval or freshness. `ears-manager` never fetches.
 Coordinated edits with a matching operation, or a hand edit to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, remain outside that guarantee.
-Rule 5 in `AGENTS.md` prohibits hand-editing `.protobot/project.yaml`; Rule 6
-requires reviewers to inspect it and flag hand edits. These checks also cannot
+That hand-edit prohibition and its reviewer check were retired with
+`ears-manager` and `.protobot/` in removal PR R1 (issue #406). These checks
+also cannot
 establish file-source provenance when a hook fails open, as described under
 [File-source arguments](#file-source-arguments).
 
