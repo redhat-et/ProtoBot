@@ -31,7 +31,7 @@ func validateRequirementIDs(requirements []layout.Document[records.Requirement])
 				Path:  document.Path,
 				Field: "id",
 				Message: fmt.Sprintf(
-					"Requirement ID %q is invalid. Use REQ-<SCOPE>-<NNNNN> with an uppercase scope of hyphen-separated alphanumeric segments and a five-digit sequence.",
+					"Requirement ID %q is invalid. Use REQ-<SCOPE>-<NNNNN> with an uppercase scope starting with a letter and consisting of hyphen-separated alphanumeric segments and a five-digit sequence.",
 					id,
 				),
 			})

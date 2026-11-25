@@ -55,12 +55,12 @@ declared by more than one interface record fails with
 `reference.ambiguous` when an `applies_to.interfaces` selector names it.
 Duplicate requirement IDs fail with `requirement.duplicate_id` on the
 declaring records, not with `reference.ambiguous`. Requirement IDs must
-match `REQ-<SCOPE>-<NNNNN>`, where `<SCOPE>` is one or more uppercase
-alphanumeric segments separated by single hyphens (consecutive,
-leading, or trailing hyphens are rejected), be unique in the working
-tree, and must not be deleted or reused relative to the comparison
-base. Requirement file basenames must use that same identifier
-pattern and equal the
+match `REQ-<SCOPE>-<NNNNN>`, where `<SCOPE>` begins with an uppercase
+letter and consists of one or more uppercase alphanumeric segments
+separated by single hyphens (consecutive, leading, or trailing
+hyphens are rejected), be unique in the working tree, and must not be
+deleted or reused relative to the comparison base. Requirement file
+basenames must use that same identifier pattern and equal the
 in-record `id`. Interface file basenames must equal the declared
 `name`. An interface `name` (and its file basename) must be a well-formed
 single path segment: non-empty, free of path separators (`/` or `\`), and
