@@ -17,69 +17,28 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
   base branch, and the merge base. Every line number in the review refers to
   the head SHA.
 - Check CI status on the PR head with `gh pr checks`. A successful
-  `Specification store check` associated with that head is corroborating
-  freshness evidence, not a substitute for the local check. If the check is
-  pending or missing, wait for it or rerun it; do not report an
+  `V2 specification validator` check associated with that head is
+  corroborating freshness evidence, not a substitute for the local check. If
+  the check is pending or missing, wait for it or rerun it; do not report an
   author-actionable finding solely for that state. A completed failure
-  belongs in the review verdict, with the local check and Rule 6 inspection
-  used to identify the actual diagnostic.
-- Before detailed specification analysis, run
-  `ears-manager check --base-ref "$(git merge-base <default-branch-ref> HEAD)"`
-  on a checkout or worktree of the recorded PR head, where the merge base is
-  with the default branch ([#547](https://github.com/redhat-et/ProtoBot/issues/547)).
-  Treat `DEFAULT_MOVED` or `BASE_COMMIT_STALE` as blocking freshness findings
-  and stop detailed specification analysis. Other `ears-manager check`
-  diagnostics do not replace the Rule 6 inspection below.
+  belongs in the review verdict, with the local check used to identify the
+  actual diagnostic.
+- Before detailed specification analysis, refresh the recorded PR base and run
+  the validator on a clean checkout or a fresh worktree of the recorded PR
+  head, with no uncommitted changes, so the result describes the recorded PR
+  head ([#547](https://github.com/redhat-et/ProtoBot/issues/547)). Run
+  `git fetch <remote> <base-branch>` first, because `gh pr view` does not
+  update local refs, then run
+  `PROTOBOT_VALIDATOR_BASE="$(git merge-base FETCH_HEAD HEAD)" python3 scripts/check_spec_validator.py`.
+  An unresolved PR base or merge base is a blocking freshness finding that
+  stops detailed specification analysis. Do not accept the script's `HEAD`
+  fallback, or a passing result that skipped the base-relative checks, as a
+  freshness pass.
 - Read the full diff. Then read every file the diff cites or depends on. For
   design documents, read the sibling documents end to end. Contradictions
   live in the parts that nobody cites.
 - Check every claim against its source and every link against its target.
   Record what you checked and what you did not.
-- **Review agents must check registered specification artifact and
-  project configuration updates.** When a PR creates or modifies a
-  registered specification artifact, or when Rule 4 identifies staleness
-  in a registered specification artifact, inspect each such registered
-  specification artifact for hand edits under Rule 5 and run
-  `ears-manager check --base-ref "$(git merge-base <default-branch-ref> HEAD)"`
-  on a checkout or worktree of the recorded PR head, where the merge base is
-  with the default branch (a check on the base branch is not evidence).
-  Require it to pass without `artifact.digest_mismatch`,
-  `artifact.operation_missing`, or `artifact.unregistered`. The check
-  requires each registered artifact path or canonical-content delta to
-  have a matching `artifact_id` in an `artifact_operations[]` entry in
-  any proposed change set, and rejects unregistration of an
-  artifact-registry entry present on the comparison base. This confirms
-  manifest association only; it does not prove `ears-manager artifact put`
-  was invoked. Reviewers must flag hand edits they can identify, not
-  claim CLI provenance from an operation record. Separately, whenever a PR
-  modifies [.protobot/project.yaml](../../../.protobot/project.yaml),
-  inspect the project configuration under Rule 5 of the
-  specification-document rules in `AGENTS.md` and flag any hand edit, even
-  if no registered specification artifact is changed. In particular,
-  inspect diffs to `repository.canonical_remote`,
-  `repository.default_branch`, and `artifacts[]` metadata (`owner`,
-  `validator`, and `kind`); a hand edit to any of these fields is a
-  finding. Run
-  `ears-manager check --base-ref "$(git merge-base <default-branch-ref> HEAD)"`
-  on a checkout or worktree of the recorded PR head, where the merge base is
-  with the default branch (a check on the base branch is not evidence).
-  Require it to pass without `artifact.digest_mismatch`,
-  `artifact.operation_missing`, or `artifact.unregistered`. Metadata-only
-  changes to an artifact-registry entry do not by themselves require an
-  artifact operation, and a zero-exit check is not evidence that these
-  fields were tool-authored. Findings should include each listed diagnostic
-  when a PR creates or modifies a registered specification artifact, or
-  when Rule 4 identifies staleness in a registered specification artifact;
-  any hand edit identified while inspecting a registered specification
-  artifact when a PR creates or modifies a registered specification
-  artifact, or when Rule 4 identifies staleness in a registered
-  specification artifact; each listed diagnostic and any hand edit
-  identified in [.protobot/project.yaml](../../../.protobot/project.yaml)
-  whenever a PR modifies
-  [.protobot/project.yaml](../../../.protobot/project.yaml), even if no
-  registered specification artifact is changed; and, when Rule 4 identifies
-  staleness in a registered specification artifact, a staleness finding that
-  prescribes `ears-manager artifact put`, not a hand edit.
 - Write the review to `review-<PR number>.md` in the repository root. Do not
   commit it, do not post it, do not push.
 
@@ -88,7 +47,7 @@ review document, not comments on GitHub. Post to GitHub only when asked to.
 1. Header: PR link, head and base SHAs, author, review date, files touched.
 2. Verdict: approve or request changes, then the blocking comments as a
    list, one line each: ID and title. Failing CI checks, including
-   `Specification store check`, belong in the review verdict with the
+   `V2 specification validator`, belong in the review verdict with the
    blocking comments or as `chore`. Then any `chore`, then praise, then
    any `thought`. Nothing else.
 3. Comments, grouped in this order: blocking; non-blocking issues and
@@ -145,8 +104,9 @@ The Drafting Table agent creates and refines backlog requests
   or comments. A check that found nothing (the branch is up to date with
   `main`, the merge is clean, and no stale wording is left) goes in the "What
   was checked" section of the local document, never in the posted review or
-  its comments. Freshness diagnostics from `Specification store check` are
-  blocking, not checks that found nothing. Do not create a GitHub review when
+  its comments. An unresolved PR base or merge base, or a validator result
+  that skipped the base-relative checks, is a blocking freshness finding, not
+  a check that found nothing. Do not create a GitHub review when
   no actionable comments are selected; preserve the required local verdict
   and "What was checked" sections.
 - Duplicate each finding posted inline once in the main GitHub review body, in

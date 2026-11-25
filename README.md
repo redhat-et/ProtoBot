@@ -51,10 +51,10 @@ The core principles are:
   are prerequisites for improving an agent, tool, or workflow stage.
 
 At the system level, the Drafting Table hosts interactive specification work,
-`ears-manager` governs specification artifacts and validation, the Job Site
-runs autonomous Building and Inspecting, and a pluggable WMS Adapter tracks
-work-item lifecycle. Project content remains in Git; workflow state and
-commit-scoped conformance evidence are recorded separately.
+the V2 specification validator checks `spec/` against the approved baseline,
+the Job Site runs autonomous Building and Inspecting, and a pluggable WMS
+Adapter tracks work-item lifecycle. Project content remains in Git; workflow
+state and commit-scoped conformance evidence are recorded separately.
 
 ## Repository Layout
 
@@ -68,10 +68,6 @@ drafting-table/
   cmd/drafting-table-guard/ # shared harness guard
   guard.go, shell.go, ...   # tool policy, path checks, and shell validation
   testdata/                 # guard security vectors
-ears-manager/
-  go.mod
-  cmd/ears-manager/
-  internal/{cli,project,records,schema,specvalidation,storage}/
 source-control-manager/
   go.mod
   cmd/source-control-manager/
@@ -107,7 +103,6 @@ component development convenient without coupling other languages to Go.
 The install targets are:
 
 ```text
-go install github.com/redhat-et/protobot/ears-manager/cmd/ears-manager@latest
 go install github.com/redhat-et/protobot/source-control-manager/cmd/source-control-manager@latest
 go install github.com/redhat-et/protobot/drafting-table/cmd/drafting-table-guard@latest
 go install github.com/redhat-et/protobot/validator/cmd/validator@latest
@@ -134,82 +129,39 @@ session skill) targets OpenCode v2 (designed against OpenCode 2.0.28).
 Root `opencode.json` disables session sharing only; it does not start MCP
 servers or deny file edits. The headless replay command exercises the
 historical #77 baseline driver pinned to OpenCode 1.18.30 until #77 re-runs
-it on v2:
+it on v2. Removal R1 (#406) deleted the `ears-manager` module that driver
+builds, so the replay is not runnable until #428 reworks the Drafting Table
+wiring:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 OPENCODE_BIN=/path/to/opencode-1.18.30/bin/opencode \
   python -m unittest discover -s tests/drafting-table -p 'test_*.py' -v
 ```
 
-### First `ears-manager` release
-
-The first command slice provides `project init`, `check`, requirement
-add/list/show/update/retire, interface add/list/show, artifact get/list/put,
-proposed change-set create/list/show/update/compare, and deterministic
-`impact` analysis. `project init` adopts an existing repository by registering
-its specification artifacts and writing the `.protobot/` control namespace;
-it does not create content, branches, commits, pushes, or pull requests.
-Writes are validated against a candidate specification before an atomic file
-transaction is applied; JSON output and exit statuses are deterministic.
-
-`change-set create` cuts and checks out the change-set branch, and
-`change-set show --at FULL-SHA` and `artifact list --at FULL-SHA` read state at
-a named commit. The Source Control Manager commits, pushes, and opens the pull
-request. Immutable historical `--at` reads on the remaining read and analysis
-commands, and explicit `--against` comparisons, remain separate follow-on
-work.
-
 ## Specification store
 
-ProtoBot hosts its own specification store under `.protobot/`. Those files
-are written by `ears-manager`; do not edit them by hand.
-`docs/vision.md` and `docs/architecture.md` are registered artifacts. A
-direct edit that leaves the registry digest unchanged fails
-`ears-manager check`. The initial store includes the governed `CS-00001`
-change set, the `protobot-cli` interface, and requirement `REQ-CLI-00001`.
+Specifications are plain files in Git. Requirement records live under
+`spec/requirements/` and interface records under `spec/interfaces/`; both are
+committed and reviewed like any other source file. The repository currently
+holds the `protobot-cli` interface and requirement `REQ-CLI-00001`.
 
-Run the local check from the checked-out source, so it uses the same
-`ears-manager` version CI builds:
-
-```sh
-cd ears-manager
-go run ./cmd/ears-manager check
-```
-
-Machine-readable diagnostics use the JSON envelope, which is also what CI
-prints:
+The V2 specification validator checks the records for schema, identifier
+format and uniqueness, relationship types, reference resolution,
+`depends-on` and `supersedes` acyclicity, EARS shape, test `@req:<ID>` tag
+references, and parsed-text immutability against a comparison base. It is
+deterministic, network-free, and reads only the checkout. Run it from the
+repository root:
 
 ```sh
-cd ears-manager
-go run ./cmd/ears-manager --output json check
+python3 scripts/check_spec_validator.py
 ```
 
-On pull requests, CI checks out the PR head and fetches the default branch so
-`check` can tell approved from proposed change sets and verify that
-already-approved change-set manifests remain unchanged. It passes their merge
-base to `ears-manager --output json check --base-ref <merge-base>`, which
-compares artifact deltas against that merge base while evaluating change-set
-approval and freshness against the default branch. A non-zero exit fails the
-merge gate. The `ears-manager` validation diagnostics use the
-same codes, exit statuses, and JSON shape locally and in CI; the separate
-manifest guard reports changed paths in the Actions log. For matching
-approved/proposed classification, keep the local default-branch ref current;
-`ears-manager` does not fetch it automatically. On a validation failure,
-create or resume a change set with `ears-manager change-set create`, update
-registered files with `ears-manager artifact put`, and edit structured
-records through their `ears-manager` commands. Run formatters before
-`artifact put` so its digest covers the final file contents. When refreshing
-a change-set branch after the default branch moves, follow the governed
-refresh procedure (including `ears-manager change-set update`) and rerun
-`check` so the base, impact assessment, and store digests stay current. Then
-commit and push to the same branch. Do not edit a registered artifact or a
-structured record by hand as a workaround. For a transient runner or fetch
-failure, rerun the failed workflow after service is restored.
-
-The gate detects accidental or incomplete edits; digests are not signatures
-and are not an adversarial security boundary. A pull request can change its
-own validator or workflow, so human review and protected checks remain the
-trust boundary.
+The script selects the comparison base, builds the validator from
+`validator/` with module downloads disabled, and fails the run on any
+diagnostic. It is also the `spec-validator` pre-commit hook, and
+pull-request and default-branch CI run the same validator, so local and CI
+results match. A pull request can change its own validator or workflow, so
+human review and protected checks remain the trust boundary.
 
 ## Documentation
 
@@ -217,7 +169,6 @@ trust boundary.
 - [Vision](docs/vision.md)
 - [Architecture overview](docs/architecture/overview.md)
 - [Architecture interfaces and constraints](docs/architecture.md)
-- [`ears-manager` CLI integration contract](docs/architecture/ears-manager-cli.md)
 - [Source Control Manager](docs/architecture/source-control-manager.md)
 - [System components](docs/architecture/components.md)
 - [User interaction flow](docs/architecture/user-interaction-flow.md)

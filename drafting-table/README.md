@@ -4,6 +4,11 @@
 Table tool-call guard. This release implements the OpenCode v2 (2.0.28) tool
 vocabulary row; other harnesses are not accepted.
 
+Removal PR R1 (issue #406) deleted the `ears-manager` module and the
+`.protobot/` store, so this guard cannot inspect a ProtoBot working tree until
+the Drafting Table wiring for V2 lands (issue #428). The module still builds,
+and its tests use temporary fixtures.
+
 The OpenCode row recognizes `edit`, `write`, and `apply_patch` as file-writing
 tools (`apply_patch` receives its target paths in `patchText`), `bash` as the
 shell tool, and `read`, `glob`, `grep`, and `skill` for reads and skill loads.
@@ -21,8 +26,8 @@ printf '%s\n' '{"hook_event_name":"PreToolUse","session_id":"fixture","cwd":"/pr
 Allow decisions exit `0` with no output. Refusals and inspection failures exit
 `2` and write one actionable line to standard error. The process does not
 write files or open network connections. It reads the project configuration,
-adapter manifest, and `ears-manager` registry views for each project call;
-its Git subprocesses are read-only and bounded by a timeout.
+adapter manifest, and, while it existed, the `ears-manager` registry views for
+each project call; its Git subprocesses are read-only and bounded by a timeout.
 
 Tests use local temporary Git repositories and fake `ears-manager` responses:
 

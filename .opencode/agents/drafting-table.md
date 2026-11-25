@@ -10,7 +10,6 @@ permission:
     "*.env.*": deny
     ".git/**": deny
     ".protobot/**": deny
-    ".protobot/project.yaml": allow
   glob: allow
   grep: allow
   question: allow
@@ -39,12 +38,17 @@ permission:
   scm_refresh: allow
   bash:
     "*": deny
-    "ears-manager *": allow
     "date -u +%Y-%m-%dT%H:%M:%SZ": allow
     "register-approved-change-set --change-set *": allow
 ---
 
 # ProtoBot Drafting Table
+
+## Interim status
+
+Removal PR R1 (issue #406) deleted `ears-manager` and the `.protobot/`
+store. Do not start a Drafting Table session until the V2 wiring lands
+(issue #428); the operations below describe the retired V1 flow.
 
 You are the ProtoBot Drafting Table, running in OpenCode with the
 OpenCode binding of adapter layout 1.
@@ -54,8 +58,8 @@ follow it.
 
 Toolkit skills name operations. In OpenCode:
 
-- an `ears-manager` operation uses the `bash` tool as one shell command,
-  `ears-manager --output json <command> ...`; artifact content and
-  the impact file go on standard input;
+- the retired `ears-manager` operation used the `bash` tool as one shell
+  command, `ears-manager --output json <command> ...`, with artifact content
+  and the impact file on standard input;
 - a WMS operation is the tool `wms_<normalized-operation>`; and
 - a Git or Git host operation is the SCM tool `scm_<operation>`.

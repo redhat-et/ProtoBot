@@ -9,7 +9,7 @@ description: >
 
 # ADR Supersession Format
 
-`AGENTS.md` Rule 7 makes accepted and superseded architecture decision
+`AGENTS.md` Rule 5 makes accepted and superseded architecture decision
 records immutable, with one authorized exception: a dated
 accepted-to-superseded status-line transition paired with an appended
 dated amendment block. The `adr-amendments` local pre-commit hook
@@ -90,7 +90,7 @@ architecture documents under `docs/architecture/`.
 
 Ordinary free-text amendments to an ADR that is not being superseded
 (for example, the existing amendments in `docs/decisions/0001-*.md`)
-follow `AGENTS.md` Rule 7: append a dated amendment block that cites
+follow `AGENTS.md` Rule 5: append a dated amendment block that cites
 the change, its rationale, and updated architecture
 documents. The hook enforces only insertions for these amendments; the
 marker format above is required for the authorized supersession

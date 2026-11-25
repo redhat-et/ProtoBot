@@ -2,7 +2,6 @@ go 1.25.12
 
 use (
 	./drafting-table
-	./ears-manager
 	./source-control-manager
 	./validator
 	./wms

@@ -101,10 +101,9 @@ and `docs/` specification documents describing the module).
 Every `docs/` Markdown file is a governed hierarchy member; the prefix,
 not the list, defines membership.
 
-- `docs/vision.md` — registered Vision artifact (purpose, users,
-  outcomes).
-- `docs/architecture.md` — registered Architecture artifact (external
-  interfaces, persistent state, environmental constraints).
+- `docs/vision.md` — Vision artifact (purpose, users, outcomes).
+- `docs/architecture.md` — Architecture artifact (external interfaces,
+  persistent state, environmental constraints).
 - `docs/architecture/overview.md` — guiding principles, EARS
   format, workflow, and platform.
 - `docs/architecture/components.md` — component architecture,
@@ -183,48 +182,7 @@ must follow these rules:
    prose describing the same behavior and flag any
    not updated to match.
 
-5. **Update registered specification artifacts through
-   `ears-manager artifact put`.** Registered specification artifacts
-   (`docs/vision.md`, `docs/architecture.md`, and any other artifact
-   registered in `.protobot/project.yaml`) and
-   `.protobot/project.yaml` must never be edited by hand.
-   When a PR creates or modifies a registered specification artifact, or
-   when Rule 4 identifies staleness in such an artifact, apply the update
-   exclusively via
-   `ears-manager artifact put` within an active change set. Run
-   formatters and linters before `ears-manager artifact put`; verify
-   with `ears-manager check` before committing.
-
-6. **Review agents must check registered specification artifact and
-   project configuration updates.** When a PR creates or modifies a
-   registered specification artifact, when Rule 4 identifies staleness
-   in such an artifact, or when a PR modifies
-   [.protobot/project.yaml](.protobot/project.yaml), inspect the
-   affected registered specification artifact or project configuration for
-   hand edits under Rule 5.
-   On the PR head, run
-   `ears-manager check --base-ref` with the full SHA from
-   `git merge-base <default-branch-ref> HEAD`; a base-branch check is not
-   evidence. Require it to pass without
-   `artifact.digest_mismatch`, `artifact.operation_missing`, or
-   `artifact.unregistered`. The check matches each registered artifact
-   path or canonical-content delta to an `artifact_id` in an
-   `artifact_operations[]` entry in a proposed change set, and
-   rejects unregistering an artifact-registry entry present on the
-   comparison base (the default-branch tree, or the commit named by
-   `--base-ref`). It confirms manifest association only, not that
-   `ears-manager artifact put` was invoked; metadata-only changes to an
-   artifact-registry entry (`kind`, `owner`, `validator`) require no
-   artifact operation. Reviewers must flag identifiable hand edits, not
-   claim CLI provenance from an operation record. Findings should include
-   each listed diagnostic and any hand edit in the inspected
-   registered specification artifact or
-   [.protobot/project.yaml](.protobot/project.yaml);
-   when Rule 4 identifies staleness in a registered specification
-   artifact, a staleness finding must prescribe `ears-manager artifact put`,
-   not a hand edit.
-
-7. **Preserve accepted and superseded architecture decision records.**
+5. **Preserve accepted and superseded architecture decision records.**
    Accepted and superseded records under `docs/decisions/` are
    immutable: never rewritten or replaced in place, never deleted or
    renamed, even after supersession or component retirement. To amend a

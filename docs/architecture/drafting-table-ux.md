@@ -174,8 +174,9 @@ artifact path/canonical-content deltas against `artifact_operations[]` in
 proposed change sets, continued registration of artifacts registered on the
 artifact comparison base, and proposed `base_commit` freshness as a CI gate
 before merge. A passing check confirms manifest association, not that
-`ears-manager artifact put` was invoked; `.protobot/project.yaml` remains an
-exclusively governed file under Rule 5 in `AGENTS.md`.
+`ears-manager artifact put` was invoked; `.protobot/project.yaml` was an
+exclusively governed file under the `AGENTS.md` rule that removal PR R1
+(issue #406) retired.
 
 ### WMS lifecycle state
 

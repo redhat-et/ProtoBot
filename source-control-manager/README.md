@@ -64,21 +64,14 @@ The ordinary `go test ./...` run replays the golden fixture,
 [`source-control-manager-golden.jsonl`][fixture], against the built binary:
 it starts `serve`, calls the tools as an MCP client, and compares every
 result. Stubs stand in for `gh` ([`internal/testing/ghstub`][ghstub]) and
-`ears-manager` ([`internal/testing/earsstub`][earsstub]). CI keeps this
-stub-backed run and separately builds the workspace `ears-manager` binary
-before replaying the fixture against it. The hosted-face fixture rows remain
-skipped.
+`ears-manager` ([`internal/testing/earsstub`][earsstub]). The hosted-face
+fixture rows remain skipped.
 
-To run the real-binary replay locally:
-
-```sh
-(cd ../ears-manager && go build -o /tmp/ears-manager ./cmd/ears-manager)
-SCM_FIXTURE_EARS_MANAGER=/tmp/ears-manager go test -count=1 -v ./internal/golden
-```
-
-That mode skips the three stub-only checks: scm-22 (protected path), scm-35
-(directory path), and protected names in another letter case. The hosted-face
-fixture rows remain skipped in both modes.
+The real-binary replay is unavailable. Removal R1
+([#406](https://github.com/redhat-et/ProtoBot/issues/406)) deleted the
+`ears-manager` module, so there is no workspace binary to compare the stub
+against. That mode skipped the three stub-only checks: scm-22 (protected
+path), scm-35 (directory path), and protected names in another letter case.
 
 [design]: ../docs/architecture/source-control-manager.md
 [fixture]: ../docs/architecture/fixtures/source-control-manager-golden.jsonl

@@ -451,9 +451,9 @@ remote-tracking ref, and does not fetch; callers may pass `--base-ref FULL-SHA`
 to select an explicit artifact comparison base. Hand edits to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, can retarget the default-branch baseline.
-Rule 5 in `AGENTS.md` prohibits
-hand-editing `.protobot/project.yaml`; Rule 6 requires reviewers to inspect it
-and flag hand edits. These layers also do not enforce shell grammar, argument
+That hand-edit prohibition and its reviewer check were retired with
+`ears-manager` and `.protobot/` in removal PR R1 (issue #406). These layers
+also do not enforce shell grammar, argument
 values, variable expansion, or file-source provenance. In particular, they do
 not make an allowed shell command safe when the plugin is unavailable; see
 [What the harness layer stops][layer-stops].

@@ -66,174 +66,6 @@ jobs:
         # so this step still uses ~/.cache/pre-commit.
         run: pre-commit gc
 
-  go:
-    name: Go foundation checks
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        # https://github.com/actions/checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          submodules: recursive
-
-      - name: Set up Go
-        # https://github.com/actions/setup-go
-        # zizmor: ignore[cache-poisoning]
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: ears-manager/go.mod
-
-      - name: Check formatting
-        run: |
-          files="$(gofmt -l ears-manager)" || exit $?
-          test -z "$files"
-
-      - name: Run golangci-lint
-        # https://github.com/golangci/golangci-lint-action
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.15.0
-          args: --timeout=5m
-          skip-cache: true
-          working-directory: ears-manager
-
-      - name: Run vet
-        run: go vet ./...
-        working-directory: ears-manager
-
-      - name: Run tests
-        run: go test ./...
-        working-directory: ears-manager
-
-      - name: Build static binary
-        run: CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ears-manager ./cmd/ears-manager
-        working-directory: ears-manager
-
-      - name: Verify install target
-        run: go install ./cmd/ears-manager
-        working-directory: ears-manager
-
-  spec:
-    name: Specification store check
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        # https://github.com/actions/checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # On pull_request, the default checkout is the synthetic merge
-          # commit of the PR head into the default-branch tip; the merge
-          # base of that commit with the default branch is the tip itself,
-          # so the artifact delta must run on the PR head, whose merge base
-          # is the fork point. On push, merge_group, and workflow_dispatch,
-          # the expression falls back to github.sha.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Set up Go
-        # https://github.com/actions/setup-go
-        # zizmor: ignore[cache-poisoning]
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: ears-manager/go.mod
-
-      - name: Build ears-manager
-        run: CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ears-manager ./cmd/ears-manager
-        working-directory: ears-manager
-
-      # Create local refs/heads/main so check can tell approved from proposed
-      # change sets (docs/architecture/git-integration.md#gates-and-labels).
-      - name: Fetch default branch for change-set approval
-        run: |
-          # This remote and branch are pinned to the committed self-hosting
-          # configuration; the self-hosting test checks that coupling.
-          git fetch --no-tags https://github.com/redhat-et/ProtoBot.git refs/heads/main
-          git checkout --detach HEAD
-          git update-ref refs/heads/main FETCH_HEAD
-
-      # The artifact-operation delta must not blame this PR for registered
-      # artifact changes that the default branch made after this PR forked,
-      # so its baseline is the merge base of the default branch and HEAD.
-      # Change-set approval and proposed-base freshness still compare with
-      # the default-branch tip above; --base-ref narrows only the artifact
-      # delta.
-      - name: Compute artifact comparison base
-        id: artifact-base
-        run: |
-          if ! base=$(git merge-base refs/heads/main HEAD) || [ -z "$base" ]; then
-            echo "::error::Could not compute the merge base of refs/heads/main and HEAD for the artifact comparison"
-            exit 1
-          fi
-          printf 'commit=%s\n' "$base" >> "$GITHUB_OUTPUT"
-
-      - name: Verify change-set store location
-        id: change-set-store
-        run: |
-          store_path() {
-            awk '
-              /^stores:$/ { in_stores = 1; next }
-              in_stores && /^[^[:space:]]/ { exit }
-              in_stores && /^    change_sets: / {
-                sub(/^    change_sets: /, "")
-                print
-                found = 1
-                exit
-              }
-              END { if (!found) exit 1 }
-            '
-          }
-
-          if [ ! -f .protobot/project.yaml ]; then
-            echo "::error::The checked-out revision has no initialized .protobot project"
-            exit 1
-          fi
-          if git cat-file -e refs/heads/main:.protobot/project.yaml 2>/dev/null; then
-            if ! main_store=$(git show refs/heads/main:.protobot/project.yaml | store_path); then
-              echo "::error::Could not read stores.change_sets from the default branch project configuration"
-              exit 1
-            fi
-          else
-            # The initial self-hosting PR establishes this default.
-            main_store=.protobot/change-sets
-          fi
-          if ! current_store=$(store_path < .protobot/project.yaml); then
-            echo "::error::Could not read stores.change_sets from the checked-out project configuration"
-            exit 1
-          fi
-          if [ "$current_store" != "$main_store" ]; then
-            echo "::error::The change-set store path cannot change in the same check that enforces its integrity"
-            exit 1
-          fi
-          printf 'path=%s\n' "$current_store" >> "$GITHUB_OUTPUT"
-
-      # Approved manifests are immutable. New manifests are allowed; only
-      # modifications, deletions, or type changes to paths on main fail.
-      - name: Verify approved change-set manifests are unchanged
-        env:
-          CHANGE_SET_STORE: ${{ steps.change-set-store.outputs.path }}
-        run: |
-          if git diff --quiet --no-renames --diff-filter=MDT refs/heads/main...HEAD -- "$CHANGE_SET_STORE/"; then
-            exit 0
-          else
-            diff_status=$?
-          fi
-          if [ "$diff_status" -ne 1 ]; then
-            echo "::error::Could not compare approved change-set manifests (git diff exited $diff_status)"
-            exit "$diff_status"
-          fi
-          echo "::error::An approved change-set manifest was modified, deleted, or replaced"
-          git diff --name-status --no-renames --diff-filter=MDT refs/heads/main...HEAD -- "$CHANGE_SET_STORE/"
-          exit 1
-
-      - name: Run ears-manager check
-        env:
-          ARTIFACT_BASE: ${{ steps.artifact-base.outputs.commit }}
-        run: ./ears-manager/ears-manager --output json check --base-ref "$ARTIFACT_BASE"
-
   validator:
     name: V2 specification validator
     runs-on: ubuntu-latest
@@ -329,10 +161,6 @@ jobs:
         with:
           go-version-file: source-control-manager/go.mod
 
-      - name: Build ears-manager for the real-binary replay
-        run: CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ears-manager ./cmd/ears-manager
-        working-directory: ears-manager
-
       - name: Check formatting
         run: |
           files="$(gofmt -l source-control-manager)" || exit $?
@@ -354,12 +182,6 @@ jobs:
       - name: Run tests, the golden repository fixture included
         run: go test ./...
         working-directory: source-control-manager
-
-      - name: Replay the golden repository fixture against real ears-manager
-        run: go test -count=1 -v ./internal/golden
-        working-directory: source-control-manager
-        env:
-          SCM_FIXTURE_EARS_MANAGER: ${{ github.workspace }}/ears-manager/ears-manager
 
       - name: Build static binary
         run: CGO_ENABLED=0 go build -trimpath -buildvcs=false -o source-control-manager ./cmd/source-control-manager
@@ -420,8 +242,6 @@ jobs:
     if: always()
     needs:
       - pre-commit
-      - go
-      - spec
       - validator
       - scm
       - wms

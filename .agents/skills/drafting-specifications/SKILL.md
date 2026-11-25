@@ -9,6 +9,16 @@ description: >
 
 # Drafting Specifications
 
+## Interim status
+
+Removal R1
+([#406](https://github.com/redhat-et/ProtoBot/issues/406)) deleted
+`ears-manager` and the `.protobot/` store that the governed operations below
+name. The Drafting Table wiring for V2 is
+[#428](https://github.com/redhat-et/ProtoBot/issues/428). Do not start a
+Drafting Table session until it lands; the steps below describe the retired V1
+flow.
+
 This skill is the ProtoBot session protocol for the Drafting Table. It hosts
 the general-purpose `eliciting-requirements` capability without changing that
 skill's portable response or adding ProtoBot behavior to it. Name governed

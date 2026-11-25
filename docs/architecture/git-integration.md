@@ -185,9 +185,9 @@ remote-tracking fallback is used, can retarget the default-branch baseline. A
 caller-supplied `--base-ref` can also select an artifact comparison base
 commit that hides an artifact delta; CI computes the value itself from
 `git merge-base` to prevent this retargeting. These escape paths are outside
-the operation-record guarantee. Rule 5 in `AGENTS.md` prohibits hand-editing
-registered specification artifacts and `.protobot/project.yaml`; Rule 6 in
-`AGENTS.md` requires reviewers to inspect them and flag hand edits.
+the operation-record guarantee. Those hand-edit prohibitions and the reviewer
+check that enforced them were retired with `ears-manager` and `.protobot/` in
+removal PR R1 (issue #406).
 File-source provenance remains a separate fail-open gap
 ([File-source arguments][fail-open]).
 The registry cannot record a digest for `project.yaml` itself, so
@@ -656,28 +656,16 @@ report is a view of the Finding Ledger.
 
 ### Gates and labels
 
-- CI runs `ears-manager check` on every branch push and as the merge gate.
-  A bare `check` resolves and validates every proposed change-set manifest in
-  the branch, including artifact-operation consistency, impact assessment,
-  and default-branch freshness; interactive callers may pass
-  `--change-set CS-<NNNNN>` to narrow impact and freshness checks.
-  Before `check`, CI fetches `repository.default_branch` from a remote whose
-  configured URL equals `repository.canonical_remote`, or creates the local
-  default branch, so that `check` can tell approved from proposed change sets
-  ([approval rule](ears-manager-cli.md#approved-and-proposed-change-sets)) and
-  can compare each proposed `base_commit` with that fetched head
-  ([`check`](ears-manager-cli.md#check)).
-  On `pull_request` events, CI checks out the pull request head before the
-  artifact check, not the synthetic merge commit, because the merge commit's
-  merge base with the default branch is the default tip and would make
-  `--base-ref` a no-op. On `push` and `merge_group` events, the checked-out
-  commit is the pushed or merge-group commit.
-  For the artifact-operation delta only, CI computes the merge base of the
-  fetched default branch and the checked-out commit and passes it to
-  `check --base-ref FULL-SHA`. Computing the merge base fails closed when the
-  merge base cannot be resolved. Change-set approval classification and
-  proposed-base freshness always evaluate against the fetched default-branch
-  tip.
+- CI runs the V2 specification validator on pull requests that target
+  `main`, on merge groups, and on pushes except pushes to
+  `gh-readonly-queue/**`. The `V2 specification validator` job runs
+  `scripts/check_spec_validator.py`, which selects the comparison base with
+  `scripts/select_comparison_base.py` and fails closed when an event requires
+  a base that Git cannot resolve. The validator checks the requirement and
+  interface record schema, identifier format and uniqueness, relationship
+  types, `applies_to` and relationship reference resolution, `depends-on` and
+  `supersedes` acyclicity, EARS shape, `@req:<ID>` test tags, and parsed
+  requirement text immutability against the comparison base.
 - Path ownership in CI rejects a change that edits files outside
   the owning component's paths.
 - Branch protection on the default branch requires the pull
@@ -822,6 +810,10 @@ project; it does not change any rule in this document.
 
 ## Ungoverned-edit detection
 
+The layers and checks in this section describe V1 verification tooling that
+removal PR R1 (issue #406) retired with `ears-manager` and `.protobot/`. This
+document keeps them as design history until removal PR R6 retires it.
+
 No component is meant to write a registered specification file
 directly. For the Drafting Table, the guard refuses covered file-writing
 tools and shell calls it checks; a call without a guard decision may still
@@ -851,9 +843,9 @@ when that resolves, otherwise a resolved remote-tracking ref for
 `repository.canonical_remote`; `ears-manager` never fetches. Callers may pass
 `--base-ref FULL-SHA` to select an explicit artifact comparison base commit for
 the artifact-operation delta without altering approval or freshness checks.
-Rule 5 in `AGENTS.md` prohibits hand-editing registered specification
-artifacts and `.protobot/project.yaml`; Rule 6 in `AGENTS.md` requires
-reviewers to inspect them and flag hand edits. The optional harness layer and
+Those hand-edit prohibitions and the reviewer check that enforced them were
+retired with `ears-manager` and `.protobot/` in removal PR R1 (issue #406).
+The optional harness layer and
 later controls have different coverage; path ownership in CI separately
 rejects edits outside the owning component's paths. They do not cover an
 indirect `ears-manager` write that leaves a matching operation, or edits to
@@ -915,11 +907,11 @@ put` ran or prevent coordinated manual edits to artifact content, its registry
 digest, and the manifest. Nor does it prevent hand edits to
 `repository.default_branch`, or to `repository.canonical_remote` when the
 remote-tracking fallback is used, that retarget the baseline. These two escape
-paths are outside the operation-record guarantee. Rule 5 prohibits
-hand-editing registered specification artifacts and `.protobot/project.yaml`;
-Rule 6 requires reviewers to inspect them and flag hand edits. Path ownership in
-CI remains a separate layer. File-source provenance is still not established by
-these checks ([File-source arguments][fail-open]).
+paths are outside the operation-record guarantee. Those hand-edit
+prohibitions and the reviewer check that enforced them were retired with
+`ears-manager` and `.protobot/` in removal PR R1 (issue #406). Path ownership
+in CI remains a separate layer. File-source provenance is still not
+established by these checks ([File-source arguments][fail-open]).
 
 ---
 
@@ -1035,6 +1027,10 @@ For this contract, that means three things:
 
 ## Failure behavior
 
+Most diagnostics and safe retries below name V1 verification tooling that
+removal PR R1 (issue #406) retired. This document keeps them as design
+history until removal PR R6 retires it.
+
 Every failure leaves the working tree and the repository
 unchanged: no partial commit, no half-created branch, no pushed
 branch without its commit. Each row states the deterministic
@@ -1048,7 +1044,7 @@ detects with a stable code
 | `project.yaml` is not at the working-tree root | Project resolution | Names both the file location and the working-tree root | Move the session to the correct checkout; the Drafting Table never relocates the file |
 | Store schema version newer than the tool | `ears-manager` reads `schema_versions` | Names the store, the file version, and the supported version | Use the supported version; after v1 adoption, perform any upgrade through a reviewed migration change set |
 | Registered artifact or structured-store digest mismatch | Pre-stage comparison | Names the safe configuration field and mismatch class | Discard the direct edit, or re-apply it through `ears-manager` |
-| Registered artifact path or canonical content differs from the comparison base artifact (on the default branch, or at the commit named by `--base-ref`) without a matching proposed operation | `ears-manager check` | `artifact.operation_missing`, naming the artifact-registry entry | Rule 5 prohibits hand-editing `.protobot/project.yaml`; Rule 6 requires reviewers to inspect it and flag hand edits because its settings select the default-branch baseline. If the delta is already approved on the canonical remote but the local default branch is behind, reconcile it through SCM `repo_state` and rerun `check`; otherwise record the artifact delta through `ears-manager artifact put` in a proposed change set and rerun `check`. When checking against a fork point, pass `--base-ref FULL-SHA`. The check does not prove command provenance |
+| Registered artifact path or canonical content differs from the comparison base artifact (on the default branch, or at the commit named by `--base-ref`) without a matching proposed operation | `ears-manager check` | `artifact.operation_missing`, naming the artifact-registry entry | No recovery path: the hand-edit prohibition, the reviewer check, and the comparison-base artifact delta check were retired in removal PR R1 (issue #406) |
 | Artifact registered on the comparison base (the default branch, or the commit named by `--base-ref`) is absent from the current registry | `ears-manager check` | `artifact.unregistered`, naming the artifact-registry entry | Restore the registration through the governed `ears-manager` interface; registered artifacts cannot be unregistered |
 | Registered path or store directory not classified `shared` in the projection manifest | `ears-manager check`, and every `ears-manager` write that validates the full project, including `change-set create` | Names the path, the required class `shared`, and the current class when an entry covers the path | Through a reviewed policy edit of `projection.yaml`, restore the missing `shared` entry, or change the covering entry to `shared`. The Source Control Manager keeps that edit out of any change-set commit, so the person commits it apart and merges it through its own review; `ears-manager` commands then succeed. `ears-manager` does not restore or change another path's entry, because that entry would read as a policy edit mixed into the change set |
 | Branch `cs/<nnnnn>-<slug>` already exists | Branch creation | Names the branch and whether it is local, remote, or both | Resume that change set, or create the change set under a new ID |
