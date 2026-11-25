@@ -918,8 +918,8 @@ remote-tracking fallback is used, that retarget the baseline. These two escape
 paths are outside the operation-record guarantee. Those hand-edit
 prohibitions and the reviewer check that enforced them were retired with
 `ears-manager` and `.protobot/` in removal PR R1 (issue #406). Path ownership
-in CI remains a separate layer. File-source provenance is still not established by
-these checks ([File-source arguments][fail-open]).
+in CI remains a separate layer. File-source provenance is still not
+established by these checks ([File-source arguments][fail-open]).
 
 ---
 
