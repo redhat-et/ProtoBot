@@ -19,8 +19,8 @@ a silent skip.
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
 ``HEAD`` for local uncommitted checks when the file is not on the baseline.
-An explicit ref starting with ``-`` or containing ``:`` (smuggled
-path or option injection like ``-h`` or ``--upload-pack=...``),
+An explicit ref starting with ``-`` (option injection like ``-h``
+or ``--upload-pack=...``) or containing ``:`` (smuggled path),
 or an unsafe ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, or
 ``GITHUB_BASE_REF`` (validated via ``is_safe_git_ref`` from the shared
 ``scripts/git_base.py`` helper), is rejected before use.
@@ -41,9 +41,17 @@ from collections import Counter
 from pathlib import Path
 
 try:
-    from git_base import is_safe_git_ref
+    from git_base import (
+        is_safe_git_ref,
+        is_safe_revision_expression,
+        resolve_revision_commit,
+    )
 except ImportError:  # imported as ``scripts.<module>``
-    from scripts.git_base import is_safe_git_ref
+    from scripts.git_base import (
+        is_safe_git_ref,
+        is_safe_revision_expression,
+        resolve_revision_commit,
+    )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -749,10 +757,9 @@ def resolve_baseline_ref(
     """
 
     def _resolve_commit(target: str) -> str | None:
-        rev = _git(repo_root, "rev-parse", "--verify", f"{target}^{{commit}}")
-        if rev.returncode != 0 or not rev.stdout.strip():
+        target_sha = resolve_revision_commit(repo_root, target)
+        if target_sha is None:
             return None
-        target_sha = rev.stdout.strip()
         mb = _git(repo_root, "merge-base", "HEAD", target)
         if mb.returncode == 0 and mb.stdout.strip():
             return mb.stdout.strip()
@@ -820,7 +827,7 @@ def resolve_baseline_ref(
 
     if explicit_ref:
         ref = explicit_ref.strip()
-        if not ref or ref.startswith("-") or ":" in ref:
+        if not is_safe_revision_expression(ref):
             return None
         resolved = _resolve_commit(ref)
         if not resolved and _fetch_target(repo_root, ref):
@@ -1355,8 +1362,9 @@ def main(argv: list[str] | None = None) -> int:
         dest="from_ref",
         default=None,
         help=(
-            "Baseline git ref or commit SHA (default: merge-base with default branch, "
-            "or PRE_COMMIT_FROM_REF / GITHUB_BASE_SHA / GITHUB_BASE_REF env vars)"
+            "Baseline git ref, commit SHA, or revision expression (default: "
+            "merge-base with default branch, or PRE_COMMIT_FROM_REF / "
+            "GITHUB_BASE_SHA / GITHUB_BASE_REF env vars)"
         ),
     )
     parser.add_argument(

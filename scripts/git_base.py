@@ -20,6 +20,14 @@ Public surface:
     Reject a candidate ref/SHA that could be parsed as a git option
     (leading ``-``) or smuggle a path (``:``) instead of naming a
     revision.
+``is_safe_revision_expression``
+    Return True when a revision expression is non-empty, does not start
+    with ``-``, and contains no ``:``.
+``resolve_revision_commit``
+    Resolve an explicit revision expression to a commit SHA in a
+    repository, validating with ``is_safe_revision_expression`` and
+    running ``git rev-parse --verify --quiet --end-of-options
+    <ref>^{commit}``.
 ``git_ref_exists`` / ``git_commit_sha``
     Check whether a ref resolves to a commit, or resolve it to a SHA.
 ``git_merge_base``
@@ -89,6 +97,11 @@ def is_safe_git_ref(ref: str) -> bool:
     return bool(ref) and _SAFE_REF.fullmatch(ref) is not None
 
 
+def is_safe_revision_expression(ref: str) -> bool:
+    """Return True when *ref* is non-empty, does not start with '-', and contains no ':'."""
+    return bool(ref) and not ref.startswith("-") and ":" not in ref
+
+
 def _run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     """Run ``git`` in *repo_root*, or return None if git cannot be run at all."""
     try:
@@ -109,6 +122,28 @@ def git_commit_sha(repo_root: Path, ref: str) -> str | None:
         return None
     result = _run_git(
         repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"
+    )
+    if result is None or result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
+def resolve_revision_commit(repo_root: Path, ref: str) -> str | None:
+    """Resolve a revision expression to a commit SHA in *repo_root*, or None.
+
+    Validates *ref* with ``is_safe_revision_expression``, then runs
+    ``git rev-parse --verify --quiet --end-of-options <ref>^{commit}``.
+    """
+    if not is_safe_revision_expression(ref):
+        return None
+    result = _run_git(
+        repo_root,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        f"{ref}^{{commit}}",
     )
     if result is None or result.returncode != 0:
         return None

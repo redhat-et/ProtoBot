@@ -1541,6 +1541,8 @@ class GitRepoCheckTests(unittest.TestCase):
             encoding="utf-8",
         )
         _git(self.root, "commit", "--no-gpg-sign", "-am", "valid amendment")
+        parent_sha = _git(self.root, "rev-parse", "HEAD^").stdout.strip()
+        self.assertEqual(parent_sha, checker.resolve_baseline_ref(self.root, "HEAD^"))
         rc, output = self._check(baseline_ref="HEAD^")
         self.assertEqual(0, rc, output)
 

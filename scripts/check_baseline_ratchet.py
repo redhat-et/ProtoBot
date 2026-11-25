@@ -31,9 +31,10 @@ runs skip with a warning so the rest of ``pre-commit run -a`` can finish.
 Ref safety (rejecting option-like and path-smuggling candidates) and the
 core git primitives (``git_commit_sha``, ``git_merge_base``,
 ``is_shallow_repository``) are aliased from the shared
-``scripts/git_base.py`` helper, while a local ``git_ref_exists`` wrapper
-is kept for patch compatibility, also aligning with
-``scripts/check_adr_amendments.py`` and ``scripts/check_spec_validator.py``.
+``scripts/git_base.py`` helper, aligning with
+``scripts/check_adr_amendments.py`` and
+``scripts/check_spec_validator.py``. A local ``git_ref_exists`` wrapper
+is kept for patch compatibility.
 """
 
 from __future__ import annotations

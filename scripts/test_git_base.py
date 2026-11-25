@@ -44,6 +44,40 @@ class IsSafeGitRefTests(unittest.TestCase):
                 self.assertFalse(git_base.is_safe_git_ref(ref))
 
 
+class IsSafeRevisionExpressionTests(unittest.TestCase):
+    def test_revision_expressions_are_accepted(self) -> None:
+        """Accept ordinary refs, commit SHAs, and git revision expressions."""
+        for ref in (
+            "main",
+            "origin/main",
+            "upstream/main",
+            "refs/heads/main",
+            "HEAD^",
+            "HEAD~1",
+            "HEAD^{commit}",
+            "main^2",
+            "abc1234",
+            "HEAD~2^",
+        ):
+            with self.subTest(ref=ref):
+                self.assertTrue(git_base.is_safe_revision_expression(ref))
+
+    def test_option_like_and_path_smuggling_are_rejected(self) -> None:
+        """Reject revision expressions with leading '-' or smuggled ':'."""
+        for ref in (
+            "-h",
+            "--help",
+            "--upload-pack=touch /tmp/x",
+            "-main",
+            "main:.git/config",
+            "HEAD:path/to/file",
+            ":path",
+            "",
+        ):
+            with self.subTest(ref=ref):
+                self.assertFalse(git_base.is_safe_revision_expression(ref))
+
+
 @unittest.skipUnless(shutil.which("git"), "git required")
 class GitPrimitiveTests(unittest.TestCase):
     """Exercise the low-level primitives against a real throwaway repo."""
@@ -73,6 +107,42 @@ class GitPrimitiveTests(unittest.TestCase):
     def test_git_commit_sha_resolves_head(self) -> None:
         """Resolve HEAD to its commit SHA."""
         self.assertEqual(self.head, git_base.git_commit_sha(self.root, "HEAD"))
+
+    def test_resolve_revision_commit_resolves_revision_expressions(self) -> None:
+        """Resolve revision expressions like HEAD^ and HEAD^{commit} to commit SHAs."""
+        self.assertEqual(
+            self.head, git_base.resolve_revision_commit(self.root, "HEAD")
+        )
+        self.assertEqual(
+            self.head, git_base.resolve_revision_commit(self.root, "HEAD^{commit}")
+        )
+        (self.root / "b.txt").write_text("b")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "two")
+        new_head = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(
+            new_head, git_base.resolve_revision_commit(self.root, "HEAD")
+        )
+        self.assertEqual(
+            self.head, git_base.resolve_revision_commit(self.root, "HEAD^")
+        )
+        self.assertEqual(
+            self.head, git_base.resolve_revision_commit(self.root, "HEAD~1")
+        )
+
+    def test_resolve_revision_commit_rejects_unsafe_expressions(self) -> None:
+        """Refuse to resolve option-like or path-smuggling expressions."""
+        for unsafe in ("-h", "--help", "trunk:.git/config", ""):
+            with self.subTest(ref=unsafe):
+                self.assertIsNone(
+                    git_base.resolve_revision_commit(self.root, unsafe)
+                )
+
+    def test_resolve_revision_commit_returns_none_for_missing_ref(self) -> None:
+        """Return None when the revision expression cannot be resolved."""
+        self.assertIsNone(
+            git_base.resolve_revision_commit(self.root, "no-such-branch^")
+        )
 
     def test_git_commit_sha_rejects_unsafe_ref(self) -> None:
         """Refuse to resolve an option-like ref instead of passing it to git."""
@@ -289,13 +359,19 @@ class ResolveComparisonBaseTests(unittest.TestCase):
             "GITHUB_BASE_SHA": "-h",
             "GITHUB_BASE_REF": "--upload-pack=true",
         }
-        with patch.object(git_base, "_run_git", wraps=git_base._run_git) as run_git:
+        with patch.object(
+            git_base, "git_commit_sha", wraps=git_base.git_commit_sha
+        ) as commit_sha:
             base, is_head = git_base.resolve_comparison_base(self.root, env=env)
         self.assertIsNone(base)
         self.assertFalse(is_head)
-        for call in run_git.call_args_list:
-            self.assertNotIn("-h", call.args)
-            self.assertNotIn("--upload-pack=true", call.args)
+        for call in commit_sha.call_args_list:
+            for arg in call.args:
+                if isinstance(arg, str):
+                    self.assertFalse(
+                        arg.startswith("-") or arg.startswith("--"),
+                        f"git_commit_sha called with candidate argument starting with '-' or '--': {arg!r}",
+                    )
 
     def test_unsafe_env_base_skipped_when_later_candidate_resolves(self) -> None:
         """An unsafe env candidate is skipped, allowing a subsequent candidate to resolve."""

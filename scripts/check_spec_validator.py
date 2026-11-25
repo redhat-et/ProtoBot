@@ -56,24 +56,6 @@ FALLBACK_NOTE = (
 )
 
 
-def _resolve_override_commit(repo_root: Path, ref: str) -> str | None:
-    """Resolve an explicit override revision expression to a commit SHA."""
-    if not ref or ref.startswith("-") or ":" in ref:
-        return None
-    result = git_base._run_git(
-        repo_root,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        "--end-of-options",
-        f"{ref}^{{commit}}",
-    )
-    if result is None or result.returncode != 0:
-        return None
-    sha = result.stdout.strip()
-    return sha or None
-
-
 def resolve_base(
     repo_root: Path = REPO_ROOT,
     env: dict[str, str] | None = None,
@@ -97,7 +79,7 @@ def resolve_base(
     override = environ.get(BASE_ENV, "").strip()
     if override:
         head = git_base.git_commit_sha(repo_root, "HEAD")
-        resolved = _resolve_override_commit(repo_root, override)
+        resolved = git_base.resolve_revision_commit(repo_root, override)
         return override, resolved is not None and resolved == head
     base, is_head = git_base.resolve_comparison_base(
         repo_root,
@@ -150,7 +132,7 @@ def check(repo_root: Path = REPO_ROOT, env: dict[str, str] | None = None) -> int
     """Build the validator and run it on *repo_root*. Returns an exit code."""
     environ = os.environ if env is None else env
     override = environ.get(BASE_ENV, "").strip()
-    if override and (override.startswith("-") or ":" in override):
+    if override and not git_base.is_safe_revision_expression(override):
         print(
             f"{BASE_ENV} must not start with '-' or contain ':': {override!r}",
             file=sys.stderr,
