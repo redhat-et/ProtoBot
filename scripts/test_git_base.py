@@ -110,9 +110,7 @@ class GitPrimitiveTests(unittest.TestCase):
 
     def test_resolve_revision_commit_resolves_revision_expressions(self) -> None:
         """Resolve revision expressions like HEAD^ and HEAD^{commit} to commit SHAs."""
-        self.assertEqual(
-            self.head, git_base.resolve_revision_commit(self.root, "HEAD")
-        )
+        self.assertEqual(self.head, git_base.resolve_revision_commit(self.root, "HEAD"))
         self.assertEqual(
             self.head, git_base.resolve_revision_commit(self.root, "HEAD^{commit}")
         )
@@ -120,9 +118,7 @@ class GitPrimitiveTests(unittest.TestCase):
         self._git("add", "-A")
         self._git("commit", "-q", "-m", "two")
         new_head = self._git("rev-parse", "HEAD").stdout.strip()
-        self.assertEqual(
-            new_head, git_base.resolve_revision_commit(self.root, "HEAD")
-        )
+        self.assertEqual(new_head, git_base.resolve_revision_commit(self.root, "HEAD"))
         self.assertEqual(
             self.head, git_base.resolve_revision_commit(self.root, "HEAD^")
         )
@@ -134,9 +130,7 @@ class GitPrimitiveTests(unittest.TestCase):
         """Refuse to resolve option-like or path-smuggling expressions."""
         for unsafe in ("-h", "--help", "trunk:.git/config", ""):
             with self.subTest(ref=unsafe):
-                self.assertIsNone(
-                    git_base.resolve_revision_commit(self.root, unsafe)
-                )
+                self.assertIsNone(git_base.resolve_revision_commit(self.root, unsafe))
 
     def test_resolve_revision_commit_returns_none_for_missing_ref(self) -> None:
         """Return None when the revision expression cannot be resolved."""
@@ -369,7 +363,7 @@ class ResolveComparisonBaseTests(unittest.TestCase):
             for arg in call.args:
                 if isinstance(arg, str):
                     self.assertFalse(
-                        arg.startswith("-") or arg.startswith("--"),
+                        arg.startswith(("-", "--")),
                         f"git_commit_sha called with candidate argument starting with '-' or '--': {arg!r}",
                     )
 
