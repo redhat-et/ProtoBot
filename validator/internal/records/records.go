@@ -66,7 +66,7 @@ type InterfaceRecord struct {
 
 // requirementIDPattern is REQ-<SCOPE>-<NNNNN>: a scope tag whose
 // first segment begins with an uppercase letter and whose segments
-// are alphanumeric, separated by single hyphens, followed by a
+// are uppercase alphanumeric, separated by single hyphens, followed by a
 // five-digit sequence. Consecutive, leading, or trailing hyphens in
 // the scope are rejected. ADR-0002 and the V2 requirement record
 // define the REQ-<SCOPE>-<NNNNN> format; this pattern additionally
