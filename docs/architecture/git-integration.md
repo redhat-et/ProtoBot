@@ -656,8 +656,9 @@ report is a view of the Finding Ledger.
 
 ### Gates and labels
 
-- CI runs the V2 specification validator on every pull request, merge group,
-  and push. The `V2 specification validator` job runs
+- CI runs the V2 specification validator on pull requests that target
+  `main`, on merge groups, and on pushes except pushes to
+  `gh-readonly-queue/**`. The `V2 specification validator` job runs
   `scripts/check_spec_validator.py`, which selects the comparison base with
   `scripts/select_comparison_base.py` and fails closed when an event requires
   a base that Git cannot resolve. The validator checks the requirement and
