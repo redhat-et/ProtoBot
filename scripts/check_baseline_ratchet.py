@@ -27,6 +27,14 @@ file from GitHub (``GITHUB_REPOSITORY`` or the ``origin`` remote) so shallow
 CI checkouts still enforce the ratchet. In CI environments, unresolved refs or
 failed HTTP fetches cause the check to fail closed (exit 1). Offline local
 runs skip with a warning so the rest of ``pre-commit run -a`` can finish.
+
+Ref safety (rejecting option-like and path-smuggling candidates) and the
+core git primitives (``git_commit_sha``, ``git_merge_base``,
+``is_shallow_repository``) are aliased from the shared
+``scripts/git_base.py`` helper, aligning with
+``scripts/check_adr_amendments.py`` and
+``scripts/check_spec_validator.py``. A local ``git_ref_exists`` wrapper
+is kept for patch compatibility.
 """
 
 from __future__ import annotations
@@ -43,22 +51,20 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+try:
+    import git_base
+except ImportError:  # imported as ``scripts.<module>``
+    from scripts import git_base
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_RELATIVE_PATH = ".skillsaw-baseline.json"
 SKILLSAW_CONFIG_RELATIVE_PATH = ".skillsaw.yaml"
 AGENTS_MD_RELATIVE_PATH = "AGENTS.md"
 AGENTS_MD_LIMIT_KEY = "agents-md"
 CONTEXT_BUDGET_RULE_ID = "context-budget"
-DEFAULT_BASE_REF_CANDIDATES = (
-    "upstream/main",
-    "origin/main",
-    "main",
-)
+DEFAULT_BASE_REF_CANDIDATES = git_base.DEFAULT_BASE_REF_CANDIDATES
 NETWORK_TIMEOUT_SECONDS = 10
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
-# Git refs used as ``git show <ref>:<path>``. Disallow ``:`` so a ref cannot
-# smuggle a path, and reject option-like values that would be parsed as flags.
-_SAFE_REF = re.compile(r"^(?!-)[A-Za-z0-9._/@+~-]+$")
 _GITHUB_REPOSITORY = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 _ORIGIN_GITHUB = re.compile(r"(?:github\.com[:/])(?P<repo>[^/]+/[^/]+?)(?:\.git)?$")
 _CONTROL_BYTES = re.compile(r"[\x00-\x1f\x7f]")
@@ -96,9 +102,23 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise _UnexpectedRedirectError("redirect rejected while fetching baseline URL")
 
 
-def is_safe_ref(ref: str) -> bool:
-    """Return True when *ref* is safe to pass to ``git show`` / ``rev-parse``."""
-    return bool(ref) and _SAFE_REF.fullmatch(ref) is not None
+# Shared with scripts/check_adr_amendments.py and
+# scripts/check_spec_validator.py via scripts/git_base.py, so the three
+# checks reject option-injecting and path-smuggling refs the same way.
+is_safe_ref = git_base.is_safe_git_ref
+git_commit_sha = git_base.git_commit_sha
+git_merge_base = git_base.git_merge_base
+is_shallow_repository = git_base.is_shallow_repository
+
+
+def git_ref_exists(repo_root: Path, ref: str) -> bool:
+    """Return True when *ref* names a commit in *repo_root*.
+
+    Calls the module-level ``git_commit_sha`` (not ``git_base`` directly)
+    so a test that patches ``git_commit_sha`` on this module also changes
+    what this function sees.
+    """
+    return git_commit_sha(repo_root, ref) is not None
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -112,21 +132,6 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def git_commit_sha(repo_root: Path, ref: str) -> str | None:
-    """Return the commit SHA for *ref*, or ``None`` if it cannot be resolved."""
-    if not is_safe_ref(ref):
-        return None
-    result = _git(repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
-
-
-def git_ref_exists(repo_root: Path, ref: str) -> bool:
-    """Return True when *ref* names a commit in *repo_root*."""
-    return git_commit_sha(repo_root, ref) is not None
-
-
 def git_show_file(repo_root: Path, ref: str, path: str) -> str | None:
     """Return the contents of *path* at *ref*, or ``None`` if it is missing.
 
@@ -138,29 +143,12 @@ def git_show_file(repo_root: Path, ref: str, path: str) -> str | None:
     return result.stdout
 
 
-def git_merge_base(repo_root: Path, ref: str, head_ref: str = "HEAD") -> str | None:
-    """Return the merge base commit between *ref* and *head_ref*, or ``None``."""
-    if not is_safe_ref(ref) or not is_safe_ref(head_ref):
-        return None
-    result = _git(repo_root, "merge-base", ref, head_ref)
-    if result.returncode != 0:
-        return None
-    sha = result.stdout.strip()
-    return sha if sha else None
-
-
 def is_ci_environment() -> bool:
     """Return True when running in a CI or automation environment."""
     return any(
         os.environ.get(var, "").strip()
         for var in ("CI", "GITHUB_ACTIONS", "GITHUB_BASE_REF", "GITHUB_REPOSITORY")
     )
-
-
-def is_shallow_repository(repo_root: Path) -> bool:
-    """Return True when *repo_root* is a shallow git repository."""
-    result = _git(repo_root, "rev-parse", "--is-shallow-repository")
-    return result.returncode == 0 and result.stdout.strip() == "true"
 
 
 def is_shallow_push_checkout(repo_root: Path) -> bool:

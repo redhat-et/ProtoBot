@@ -19,6 +19,13 @@ a silent skip.
 The baseline is resolved from the merge-base with the default branch
 (or ``PRE_COMMIT_FROM_REF`` when pre-commit sets it), falling back to
 ``HEAD`` for local uncommitted checks when the file is not on the baseline.
+An explicit ref starting with ``-`` (option injection like ``-h``
+or ``--upload-pack=...``) or containing ``:`` (smuggled path),
+or an unsafe ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, or
+``GITHUB_BASE_REF`` (validated via ``is_safe_git_ref`` from the shared
+``scripts/git_base.py`` helper), is rejected before use.
+Unsafe environment variables are skipped in favor of subsequent fallback
+tiers, while an unsafe explicit ref fails closed immediately.
 """
 
 from __future__ import annotations
@@ -32,6 +39,19 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
+
+try:
+    from git_base import (
+        is_safe_git_ref,
+        is_safe_revision_expression,
+        resolve_revision_commit,
+    )
+except ImportError:  # imported as ``scripts.<module>``
+    from scripts.git_base import (
+        is_safe_git_ref,
+        is_safe_revision_expression,
+        resolve_revision_commit,
+    )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -725,14 +745,21 @@ def resolve_baseline_ref(
     When a ref or commit SHA is not present locally, an attempt is made
     to fetch it from ``origin`` with ``--depth=1``.
 
+    Candidate refs from ``PRE_COMMIT_FROM_REF``, ``GITHUB_BASE_SHA``, and
+    ``GITHUB_BASE_REF`` are validated with ``is_safe_git_ref`` before use.
+    An unsafe candidate is skipped so resolution falls through to
+    subsequent tiers or default-branch candidates, matching
+    ``scripts/git_base.py``. An explicit ref starting with ``-`` or
+    containing ``:`` fails closed immediately, while valid git revision
+    expressions like ``HEAD^`` are accepted.
+
     Returns ``None`` when no baseline ref can be resolved (fail closed).
     """
 
     def _resolve_commit(target: str) -> str | None:
-        rev = _git(repo_root, "rev-parse", "--verify", f"{target}^{{commit}}")
-        if rev.returncode != 0 or not rev.stdout.strip():
+        target_sha = resolve_revision_commit(repo_root, target)
+        if target_sha is None:
             return None
-        target_sha = rev.stdout.strip()
         mb = _git(repo_root, "merge-base", "HEAD", target)
         if mb.returncode == 0 and mb.stdout.strip():
             return mb.stdout.strip()
@@ -799,15 +826,18 @@ def resolve_baseline_ref(
         return None
 
     if explicit_ref:
-        resolved = _resolve_commit(explicit_ref)
-        if not resolved and _fetch_target(repo_root, explicit_ref):
-            clean_ref = explicit_ref
+        ref = explicit_ref.strip()
+        if not is_safe_revision_expression(ref):
+            return None
+        resolved = _resolve_commit(ref)
+        if not resolved and _fetch_target(repo_root, ref):
+            clean_ref = ref
             for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
                 if clean_ref.startswith(prefix):
                     clean_ref = clean_ref[len(prefix) :]
                     break
             for candidate in [
-                explicit_ref,
+                ref,
                 f"origin/{clean_ref}",
                 f"refs/remotes/origin/{clean_ref}",
             ]:
@@ -817,7 +847,7 @@ def resolve_baseline_ref(
         return resolved
 
     from_ref = os.environ.get("PRE_COMMIT_FROM_REF")
-    if from_ref:
+    if from_ref and is_safe_git_ref(from_ref):
         resolved = _resolve_commit(from_ref)
         if not resolved and _fetch_target(repo_root, from_ref):
             clean_ref = from_ref
@@ -837,7 +867,7 @@ def resolve_baseline_ref(
             return resolved
 
     base_sha = os.environ.get("GITHUB_BASE_SHA")
-    if base_sha:
+    if base_sha and is_safe_git_ref(base_sha):
         resolved = _resolve_commit(base_sha)
         if not resolved and _fetch_target(repo_root, base_sha):
             resolved = _resolve_commit(base_sha)
@@ -846,7 +876,7 @@ def resolve_baseline_ref(
         return None
 
     base_ref = os.environ.get("GITHUB_BASE_REF")
-    if base_ref:
+    if base_ref and is_safe_git_ref(base_ref):
         clean_base = base_ref
         for prefix in ("refs/remotes/origin/", "refs/heads/", "origin/"):
             if clean_base.startswith(prefix):
@@ -1167,10 +1197,16 @@ def check(
     failed = False
     resolved_baseline = resolve_baseline_ref(repo_root, baseline_ref)
     if resolved_baseline is None:
-        print(
-            "ERROR: cannot resolve default-branch baseline ref to check against",
-            file=sys.stderr,
-        )
+        if baseline_ref:
+            print(
+                f"ERROR: cannot resolve explicit baseline ref {baseline_ref!r} to check against",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "ERROR: cannot resolve default-branch baseline ref to check against",
+                file=sys.stderr,
+            )
         return 1
 
     renames, renames_error = get_renames(repo_root, resolved_baseline)
@@ -1326,8 +1362,9 @@ def main(argv: list[str] | None = None) -> int:
         dest="from_ref",
         default=None,
         help=(
-            "Baseline git ref or commit SHA (default: merge-base with default branch, "
-            "or PRE_COMMIT_FROM_REF / GITHUB_BASE_SHA / GITHUB_BASE_REF env vars)"
+            "Baseline git ref, commit SHA, or revision expression (default: "
+            "merge-base with default branch, or PRE_COMMIT_FROM_REF / "
+            "GITHUB_BASE_SHA / GITHUB_BASE_REF env vars)"
         ),
     )
     parser.add_argument(
