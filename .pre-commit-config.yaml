@@ -47,7 +47,7 @@ repos:
       - id: hadolint
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 6f9f6fb27042eeb2c12163c94cf22289e9710eda  # frozen: 44.239.1
+    rev: ee4b9e2b0439f3be734543b5144c2724e9b479ac  # frozen: 44.240.0
     hooks:
       - id: renovate-config-validator
 
@@ -244,7 +244,7 @@ repos:
         description: checks json files for syntax parsable as json5 (with comments).
         entry: check-json5
         language: python
-        additional_dependencies: ["json5==0.17.3", "check-json5==3.5.0"]
+        additional_dependencies: ["json5==0.17.3", "check-json5==3.5.1"]
         types_or: [json, json5]
       - id: zizmor
         name: zizmor
